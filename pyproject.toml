@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gitcad"
+version = "0.0.1"
+description = "Agent-first, headless, git-native CAD"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "gitcad" }]
+keywords = ["cad", "brep", "occt", "mcp", "agent", "headless", "git"]
+dependencies = []
+
+[project.optional-dependencies]
+# The real geometry kernel: OCCT via prebuilt binary wheels. Large (~hundreds of MB).
+occt = ["cadquery-ocp>=7.7"]
+# The MCP server surface (the primary interface).
+mcp = ["mcp>=1.0"]
+# Dev + test. Note: the base test suite needs NONE of the above.
+dev = ["pytest>=8", "pytest-cov"]
+
+[project.urls]
+Homepage = "https://gitcad.xyz"
+
+[project.scripts]
+gitcad-mcp = "gitcad.mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gitcad"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "occt: requires the OCCT kernel (cadquery-ocp); skipped if unavailable",
+  "invariant: architecture-independent property that must always hold",
+]

@@ -1,0 +1,31 @@
+# CODEOWNERS — the human-sign-off boundary for the agent loop (ADR-0006).
+#
+# Paths listed here are NEVER auto-merged, regardless of green CI. These are the
+# load-bearing decisions: kernel semantics, stable identity, the document format,
+# the seam interfaces, and the durable spec itself. Everything else may flow
+# through the tiered autonomy process.
+#
+# Replace @gitcad-maintainers with real reviewers before enabling branch protection.
+
+# The durable spec — changing intent requires a human.
+/docs/adr/                     @gitcad-maintainers
+/CLAUDE.md                     @gitcad-maintainers
+
+# The seam interfaces — widening or adding a seam is a human decision.
+/src/gitcad/seams.py           @gitcad-maintainers
+
+# Stable identity — foundational; changes need a migration story.
+/src/gitcad/identity.py        @gitcad-maintainers
+
+# The document/text format — geometric-semver surface.
+/src/gitcad/document.py        @gitcad-maintainers
+
+# Kernel semantics — geometry output changes are breaking by definition.
+/src/gitcad/kernel/            @gitcad-maintainers
+
+# The permanent test tiers are the real specification.
+/tests/invariants/             @gitcad-maintainers
+/tests/golden/                 @gitcad-maintainers
+
+# The autonomy/security machinery of the loop itself.
+/src/gitcad/report/            @gitcad-maintainers

@@ -1,0 +1,26 @@
+gitcad
+Copyright 2026 gitcad contributors
+
+This product is licensed under the Apache License, Version 2.0.
+
+--------------------------------------------------------------------------------
+Third-party components
+--------------------------------------------------------------------------------
+
+When installed with the optional [occt] extra, gitcad depends on OpenCASCADE
+Technology (OCCT) via the cadquery-ocp binding.
+
+  OpenCASCADE Technology (OCCT)
+    License: GNU Lesser General Public License v2.1, with the Open CASCADE
+             exception (LGPL-2.1 + exception).
+    Website: https://dev.opencascade.org/
+
+OCCT is a separately-licensed dependency. gitcad's own source is Apache-2.0 and
+calls OCCT through dynamically-loaded bindings; it does not statically fuse OCCT
+into a proprietary binary. Redistributors of a bundle that includes the OCCT
+binaries must comply with the LGPL, including providing the OCCT license text and
+preserving the ability to relink against a modified OCCT. See ADR-0002.
+
+  cadquery-ocp
+    License: Apache License 2.0
+    Website: https://github.com/CadQuery/OCP

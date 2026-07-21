@@ -1,0 +1,38 @@
+# Generated geometry is a build artifact, NOT source (ADR-0004). Never commit it.
+*.brep
+*.step
+*.stp
+*.stl
+*.gltf
+*.glb
+*.iges
+*.igs
+# Drawings are generated from the model too.
+/build-artifacts/
+*.dxf
+# PDFs generated from drawings (keep hand-authored docs elsewhere if needed).
+/out/*.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
