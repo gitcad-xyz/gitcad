@@ -1,0 +1,18 @@
+# Text is source (ADR-0004). Normalize line endings to LF in the repo so diffs
+# stay clean and byte-canonical serialization hashes match across machines.
+* text=auto eol=lf
+
+# Model files are the source of truth — always LF, never CRLF.
+*.json text eol=lf
+*.py   text eol=lf
+*.toml text eol=lf
+*.md   text eol=lf
+
+# Generated geometry artifacts (should be gitignored, but mark binary as a
+# backstop so git never tries to "fix" their line endings).
+*.brep binary
+*.step binary
+*.stp  binary
+*.stl  binary
+*.glb  binary
+*.gltf binary
