@@ -23,6 +23,7 @@ gitcad-mcp = "gitcad.mcp.server:main"
 gitcad-view = "gitcad.viewer.server:main"
 gitcad-review = "gitcad.review:main"
 gitcad-merge = "gitcad.merge3:main"
+gitcad-verify = "gitcad.requirements:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gitcad"]

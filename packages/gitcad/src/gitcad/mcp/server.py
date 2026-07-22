@@ -412,6 +412,22 @@ def schematic_sim(schematic: str, checks: list[dict] | None = None) -> dict[str,
     return out
 
 
+@tool("requirements_verify")
+def requirements_verify(requirements: str, root: str) -> dict[str, Any]:
+    """Requirements as code: run a canonical requirements document (named
+    limits bound to machine checks — mass_max_g, volume_max_mm3,
+    bbox_max_mm, erc_clean, envelope_clean, rail_utilization_max,
+    drc_clean) against the design tree at root. Every requirement reports
+    measured-vs-limit; one without a check shows as 'unchecked' — visible
+    debt, never silent green. markdown field = the executing traceability
+    matrix."""
+    from gitcad.requirements import to_markdown, verify
+
+    report = verify(requirements, root)
+    report["markdown"] = to_markdown(report)
+    return report
+
+
 @tool("design_merge")
 def design_merge(base: str, ours: str, theirs: str) -> dict[str, Any]:
     """Semantic 3-way merge of a design document (ADR-0016): features by
