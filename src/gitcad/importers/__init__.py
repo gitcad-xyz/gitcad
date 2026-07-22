@@ -15,6 +15,7 @@ than one that refuses.
 from gitcad.importers.report import ImportReport
 from gitcad.importers.step import import_step_file
 from gitcad.importers.fcstd import import_fcstd
+from gitcad.importers.fcstd_tree import import_fcstd_tree
 from gitcad.importers.kicad import import_kicad_pcb
 
-__all__ = ["ImportReport", "import_step_file", "import_fcstd", "import_kicad_pcb"]
+__all__ = ["ImportReport", "import_step_file", "import_fcstd", "import_fcstd_tree", "import_kicad_pcb"]

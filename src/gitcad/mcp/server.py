@@ -196,9 +196,11 @@ def model_import(path: str, fmt: str = "auto", assets_dir: str = ".") -> dict[st
 
         doc, report = import_step_file(path, kernel)
     elif fmt == "fcstd":
-        from gitcad.importers import import_fcstd
+        # Parametric-first: recover the FreeCAD feature tree when it maps and
+        # proves out; fall back to geometry-only with the reason reported.
+        from gitcad.importers import import_fcstd_tree
 
-        doc, report = import_fcstd(path, kernel, assets_dir)
+        doc, report = import_fcstd_tree(path, kernel, assets_dir)
     else:
         raise ValueError(f"unknown import format {fmt!r} (want step|fcstd)")
     return {"model": doc.dumps(), "report": report.to_dict(), "kernel": kernel.name}

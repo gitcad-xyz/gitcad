@@ -61,7 +61,10 @@ def import_fcstd(path: str, kernel: Kernel, assets_dir: str) -> tuple[Document, 
     kernel.export_brep(combined, str(out_path))
     digest = hashlib.sha256(out_path.read_bytes()).hexdigest()
     final_path = assets / f"{stem}-{digest[:12]}.brep"
-    out_path.rename(final_path)
+    if final_path.exists():
+        out_path.unlink()   # content-addressed: same name == same bytes
+    else:
+        out_path.rename(final_path)
     digest = hashlib.sha256(final_path.read_bytes()).hexdigest()
 
     doc = Document()
