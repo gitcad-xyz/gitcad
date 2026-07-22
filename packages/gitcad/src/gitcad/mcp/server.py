@@ -80,6 +80,38 @@ def model_measure(model: str) -> dict[str, Any]:
     }
 
 
+@tool("sketch_solve")
+def sketch_solve(points: dict[str, list[float]],
+                 constraints: list[list],
+                 profile: list[str] | None = None) -> dict[str, Any]:
+    """Solve a 2D constraint sketch (ADR-0013) and return exact coordinates
+    — authoring-time only; the solved profile is what goes in the document.
+    points: {name: [x, y]} rough positions (they pin the solution branch).
+    constraints: [[kind, ...args]] with kinds fix(p,x,y), coincident(p,q),
+    horizontal(p,q), vertical(p,q), distance(p,q,d), angle(p,q,deg),
+    parallel(p,q,r,s), perpendicular(p,q,r,s), equal_length(p,q,r,s).
+    profile: optional point order to emit a closed Profile params dict."""
+    from gitcad.sketch_solver import ConstraintSketch
+
+    s = ConstraintSketch()
+    for name, (x, y) in points.items():
+        s.point(name, x, y)
+    two_line = {"parallel", "perpendicular", "equal_length"}
+    for c in constraints:
+        kind, args = c[0], c[1:]
+        if kind in two_line:
+            getattr(s, kind)((args[0], args[1]), (args[2], args[3]))
+        else:
+            getattr(s, kind)(*args)
+    result = s.solve()
+    out: dict[str, Any] = {"points": {k: list(v) for k, v in result.points.items()},
+                           "dof": result.dof, "iterations": result.iterations,
+                           "converged": result.converged}
+    if profile:
+        out["profile"] = s.profile(*profile).to_params()
+    return out
+
+
 @tool("model_mass")
 def model_mass(model: str, density_g_cm3: float = 1.0) -> dict[str, Any]:
     """Physical mass properties of the model's final body: volume (mm^3),
