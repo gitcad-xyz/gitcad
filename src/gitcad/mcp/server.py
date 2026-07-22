@@ -209,6 +209,28 @@ def board_import(path: str) -> dict[str, Any]:
             "valid": validation.ok, "violations": validation.violations}
 
 
+@tool("schematic_erc")
+def schematic_erc(schematic: str) -> dict[str, Any]:
+    """Electrical rule check on a schematic document: pin-type conflicts,
+    undriven inputs, unpowered power pins, unconnected pins, degenerate nets.
+    'The schematic compiles' as a machine-decidable statement."""
+    from gitcad.ecad import Schematic
+
+    s = Schematic.loads(schematic)
+    r = s.erc()
+    return {"ok": r.ok, "checks": r.checks, "violations": r.violations}
+
+
+@tool("schematic_board_parity")
+def schematic_board_parity(schematic: str, board: str) -> dict[str, Any]:
+    """Schematic <-> board consistency (the ECO check): missing components,
+    missing/extra connections, net mismatches — in both directions."""
+    from gitcad.ecad import Board, Schematic, board_parity
+
+    r = board_parity(Schematic.loads(schematic), Board.loads(board))
+    return {"ok": r.ok, "checks": r.checks, "violations": r.violations}
+
+
 @tool("part_check_release")
 def part_check_release(old_part: str, new_part: str) -> dict[str, Any]:
     """Interface-semver release gate (ADR-0009): given old and new part.json

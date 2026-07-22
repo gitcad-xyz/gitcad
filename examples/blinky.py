@@ -1,4 +1,5 @@
-"""Demo: a 2-layer LED board, end to end — board → verify → full fab package.
+"""Demo: a 2-layer LED board, end to end — schematic → ERC → board → parity →
+verify → full fab package.
 
 Run:  python examples/blinky.py [outdir]
 Pure Python — no geometry kernel needed.
@@ -7,7 +8,28 @@ Pure Python — no geometry kernel needed.
 import sys
 from pathlib import Path
 
-from gitcad.ecad import Board, Component, Footprint, MountingHole, Pad, Track, Via, export_fab
+from gitcad.ecad import (
+    Board, Component, Footprint, MountingHole, Pad, Pin, SchComponent,
+    Schematic, Track, Via, board_parity, export_fab,
+)
+
+# -- capture: the schematic IS the electrical source of truth -----------------
+sch = Schematic(name="blinky")
+sch.components += [
+    SchComponent("J1", value="PWR", footprint="HDR-2P-2.54", pins=[
+        Pin("VCC", "1", "power_out"), Pin("GND", "2", "power_out")]),
+    SchComponent("R1", value="330R", footprint="R0603", pins=[
+        Pin("A", "1", "passive"), Pin("B", "2", "passive")]),
+    SchComponent("D1", value="RED", footprint="LED0603", pins=[
+        Pin("A", "A", "passive"), Pin("K", "K", "passive")]),
+]
+sch.connect("VCC", "J1.1", "R1.1")
+sch.connect("LED_A", "R1.2", "D1.A")
+sch.connect("GND", "J1.2", "D1.K")
+
+erc = sch.erc()
+assert erc.ok, erc.violations
+print("ERC clean:", erc.checks)
 
 out = Path(sys.argv[1] if len(sys.argv) > 1 else "out") / "blinky-fab"
 
@@ -41,6 +63,14 @@ board.mounting_holes += [MountingHole("mnt_1", 3, 3, 3.2, thread="M3"),
 report = board.validate()
 assert report.ok, report.violations
 print("board valid:", report.checks)
+
+# -- parity: the board must implement exactly the schematic -------------------
+parity = board_parity(sch, board)
+assert parity.ok, parity.violations
+print("schematic-board parity:", parity.checks)
+(Path(sys.argv[1] if len(sys.argv) > 1 else "out")).mkdir(exist_ok=True)
+(Path(sys.argv[1] if len(sys.argv) > 1 else "out") / "blinky.sch.json").write_text(
+    sch.dumps(), newline="\n")
 
 files = export_fab(board, str(out))
 for kind, path in files.items():
