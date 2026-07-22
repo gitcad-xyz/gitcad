@@ -80,6 +80,24 @@ def model_measure(model: str) -> dict[str, Any]:
     }
 
 
+@tool("model_mass")
+def model_mass(model: str, density_g_cm3: float = 1.0) -> dict[str, Any]:
+    """Physical mass properties of the model's final body: volume (mm^3),
+    mass (g) at the given density (g/cm^3), center of mass, and the
+    unit-density inertia tensor about the COM. The engineering numbers a
+    drawing title block or a motion study starts from."""
+    doc = Document.loads(model)
+    kernel = get_kernel()
+    result = doc.build(kernel)
+    props = kernel.mass_props(result.final(doc))
+    out: dict[str, Any] = {"kernel": kernel.name,
+                           "geometry_verified": not kernel.name.startswith("null"),
+                           "density_g_cm3": density_g_cm3, **props}
+    if "volume" in props:
+        out["mass_g"] = props["volume"] * density_g_cm3 / 1000.0  # mm^3 -> cm^3
+    return out
+
+
 @tool("model_validate")
 def model_validate(model: str) -> dict[str, Any]:
     """Build and run geometric validity checks per feature (watertight,

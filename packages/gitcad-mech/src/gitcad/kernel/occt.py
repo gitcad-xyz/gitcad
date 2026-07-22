@@ -30,7 +30,9 @@ try:
     from OCP.GC import GC_MakeArcOfCircle
     from OCP.BRepCheck import BRepCheck_Analyzer
     from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer, BRepFilletAPI_MakeFillet
-    from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeThickSolid
+    from OCP.BRepOffsetAPI import (BRepOffsetAPI_MakePipe,
+                                   BRepOffsetAPI_MakeThickSolid,
+                                   BRepOffsetAPI_ThruSections)
     from OCP.BRepOffset import BRepOffset_Skin
     from OCP.GeomAbs import GeomAbs_Arc
     from OCP.TopTools import TopTools_ListOfShape
@@ -229,18 +231,18 @@ class OcctKernel:
 
     # -- sketch-based features (the 2D -> 3D workflow) ------------------------
 
-    def _profile_face(self, profile: dict) -> "TopoDS_Shape":
-        """Build a planar face (XY plane) from a validated profile dict."""
+    def _profile_wire(self, profile: dict, z: float = 0.0) -> "TopoDS_Shape":
+        """Closed wire from a validated profile dict, on the plane at height z."""
         wire = BRepBuilderAPI_MakeWire()
         prev = tuple(profile["start"])
         for seg in profile["segments"]:
             to = tuple(seg["to"])
-            p1, p2 = gp_Pnt(prev[0], prev[1], 0), gp_Pnt(to[0], to[1], 0)
+            p1, p2 = gp_Pnt(prev[0], prev[1], z), gp_Pnt(to[0], to[1], z)
             if seg["kind"] == "line":
                 edge = BRepBuilderAPI_MakeEdge(p1, p2).Edge()
             else:  # arc via three points
                 via = seg["via"]
-                arc = GC_MakeArcOfCircle(p1, gp_Pnt(via[0], via[1], 0), p2).Value()
+                arc = GC_MakeArcOfCircle(p1, gp_Pnt(via[0], via[1], z), p2).Value()
                 edge = BRepBuilderAPI_MakeEdge(arc).Edge()
             wire.Add(edge)
             prev = to
@@ -249,7 +251,11 @@ class OcctKernel:
                 "profile wire construction failed (self-intersecting or disconnected?)",
                 FailureSignature(op="sketch", diagnostic="MakeWire:NotDone", kernel=self.name),
             )
-        face = BRepBuilderAPI_MakeFace(wire.Wire())
+        return wire.Wire()
+
+    def _profile_face(self, profile: dict) -> "TopoDS_Shape":
+        """Build a planar face (XY plane) from a validated profile dict."""
+        face = BRepBuilderAPI_MakeFace(self._profile_wire(profile))
         if not face.IsDone():
             raise KernelError(
                 "profile does not bound a valid planar face",
@@ -271,6 +277,94 @@ class OcctKernel:
         shape = BRepPrimAPI_MakeRevol(face, axis, math.radians(angle_deg)).Shape()
         self.validate(shape).raise_if_invalid("revolve", self.name)
         return shape
+
+    def loft(self, sections: list[tuple[dict, float]], *, ruled: bool = False) -> Shape:
+        """Solid through closed XY profiles stacked at their z heights — the
+        head-to-grip taper class of feature (SW-manual FR1; the real Altair
+        case's one op gitcad lacked)."""
+        if len(sections) < 2:
+            raise KernelError(
+                "loft needs at least 2 sections",
+                FailureSignature(op="loft", diagnostic="TooFewSections", kernel=self.name))
+        builder = BRepOffsetAPI_ThruSections(True, ruled)  # solid
+        for profile, z in sections:
+            builder.AddWire(self._profile_wire(profile, z))
+        builder.Build()
+        if not builder.IsDone():
+            raise KernelError(
+                "loft failed (incompatible sections? crossing wires?)",
+                FailureSignature(op="loft", diagnostic="ThruSections:NotDone", kernel=self.name))
+        shape = builder.Shape()
+        self.validate(shape).raise_if_invalid("loft", self.name)
+        return shape
+
+    def sweep(self, profile: dict, path: list[tuple[float, float, float]]) -> Shape:
+        """Sweep a closed XY profile along a 3D polyline path.
+
+        Contract: the path starts at (0,0,0) and its first segment sets the
+        initial sweep direction; the profile lies in the XY plane around the
+        origin (perpendicular to a +Z start). This mirrors how every sketch-
+        based CAD sweep places the profile on the path start.
+        """
+        if len(path) < 2:
+            raise KernelError(
+                "sweep path needs at least 2 points",
+                FailureSignature(op="sweep", diagnostic="TooFewPoints", kernel=self.name))
+        if tuple(path[0]) != (0.0, 0.0, 0.0):
+            raise KernelError(
+                f"sweep path must start at (0,0,0), got {tuple(path[0])} — "
+                "position the result with a move feature instead",
+                FailureSignature(op="sweep", diagnostic="PathNotAtOrigin", kernel=self.name))
+        spine = BRepBuilderAPI_MakeWire()
+        for a, b in zip(path, path[1:]):
+            spine.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(*a), gp_Pnt(*b)).Edge())
+        if not spine.IsDone():
+            raise KernelError(
+                "sweep path wire construction failed (disconnected points?)",
+                FailureSignature(op="sweep", diagnostic="MakeWire:NotDone", kernel=self.name))
+        face = self._profile_face(profile)
+        try:
+            shape = BRepOffsetAPI_MakePipe(spine.Wire(), face).Shape()
+        except Exception as exc:
+            raise KernelError(
+                "sweep failed (path corner too sharp for the profile size?)",
+                FailureSignature(op="sweep", diagnostic=type(exc).__name__, kernel=self.name),
+            ) from exc
+        self.validate(shape).raise_if_invalid("sweep", self.name)
+        return shape
+
+    def mirror(self, shape: Shape, plane: str) -> Shape:
+        """Mirrored copy across a principal plane through the origin."""
+        normals = {"xy": (0, 0, 1), "yz": (1, 0, 0), "zx": (0, 1, 0)}
+        if plane not in normals:
+            raise KernelError(
+                f"mirror plane must be xy|yz|zx, got {plane!r}",
+                FailureSignature(op="mirror", diagnostic="BadPlane", kernel=self.name))
+        trsf = gp_Trsf()
+        trsf.SetMirror(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(*normals[plane])))
+        out = BRepBuilderAPI_Transform(shape, trsf, True).Shape()
+        self.validate(out).raise_if_invalid("mirror", self.name)
+        return out
+
+    def mass_props(self, shape: Shape) -> dict[str, float]:
+        """Unit-density mass properties: volume (mm^3), center of mass, and
+        the inertia tensor about the center of mass (mm^5 — multiply by
+        density for physical units). Density scaling belongs to the caller so
+        the kernel stays a pure geometry service."""
+        props = GProp_GProps()
+        try:
+            BRepGProp.VolumeProperties_s(shape, props)
+        except Exception as exc:
+            raise KernelError(
+                "mass properties failed",
+                FailureSignature(op="mass_props", diagnostic=type(exc).__name__, kernel=self.name),
+            ) from exc
+        c = props.CentreOfMass()
+        m = props.MatrixOfInertia()
+        return {"volume": props.Mass(),
+                "cx": c.X(), "cy": c.Y(), "cz": c.Z(),
+                "ixx": m.Value(1, 1), "iyy": m.Value(2, 2), "izz": m.Value(3, 3),
+                "ixy": m.Value(1, 2), "ixz": m.Value(1, 3), "iyz": m.Value(2, 3)}
 
     # -- inspection (the agent verification loop) -----------------------------
 

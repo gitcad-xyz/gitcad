@@ -37,8 +37,8 @@ class NullShape:
             return math.pi * self.params["radius"] ** 2 * self.params["height"]
         if self.kind == "sphere":
             return 4.0 / 3.0 * math.pi * self.params["radius"] ** 3
-        if self.kind in ("fillet", "transform"):
-            return self.children[0].volume()  # rigid / small perturbation
+        if self.kind in ("fillet", "transform", "mirror"):
+            return self.children[0].volume()  # rigid / volume-preserving
         return None  # boolean/cone: unknown analytically here
 
 
@@ -120,6 +120,35 @@ class NullKernel:
 
         Profile.from_params(profile)
         return NullShape("revolve", {"profile": profile, "angle_deg": angle_deg})
+
+    def loft(self, sections: list[tuple[dict, float]], *, ruled: bool = False) -> Shape:
+        from gitcad.sketch import Profile
+
+        if len(sections) < 2:
+            raise ValueError("loft needs at least 2 sections")
+        for profile, _z in sections:
+            Profile.from_params(profile)
+        return NullShape("loft", {"sections": [[p, z] for p, z in sections],
+                                  "ruled": ruled})
+
+    def sweep(self, profile: dict, path: list[tuple[float, float, float]]) -> Shape:
+        from gitcad.sketch import Profile
+
+        Profile.from_params(profile)
+        if len(path) < 2:
+            raise ValueError("sweep path needs at least 2 points")
+        return NullShape("sweep", {"profile": profile, "path": [list(p) for p in path]})
+
+    def mirror(self, shape: Shape, plane: str) -> Shape:
+        if plane not in {"xy", "yz", "zx"}:
+            raise ValueError(f"mirror plane must be xy|yz|zx, got {plane!r}")
+        # Mirroring preserves volume; track symbolically like transform.
+        return NullShape("mirror", {"plane": plane}, (shape,))
+
+    def mass_props(self, shape: Shape) -> dict[str, float]:
+        # Honest subset: analytic volume when known; no fake inertia.
+        vol = shape.volume() if isinstance(shape, NullShape) else None
+        return {"volume": vol} if vol is not None else {}
 
     def fillet(self, shape: Shape, edges: list[int] | None, radius: float) -> Shape:
         _require_positive(radius=radius)

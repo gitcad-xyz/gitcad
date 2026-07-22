@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -211,7 +212,7 @@ def _resolve_entity_indices(entity_ids: list[str], input_feature: str,
 # Ops that act on prior geometry MUST name it — a subtractive op with no
 # inputs silently building a disconnected feature was a dogfood finding.
 _REQUIRED_INPUTS = {"boolean": 2, "fillet": 1, "chamfer": 1, "shell": 1,
-                    "move": 1, "hole": 1, "boss": 1,
+                    "move": 1, "hole": 1, "boss": 1, "mirror": 1,
                     "pattern_linear": 1, "pattern_circular": 1}
 
 _AXIS_ROTATION = {"z": None, "y": ((1, 0, 0), -90.0), "x": ((0, 1, 0), 90.0)}
@@ -268,6 +269,17 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
         return kernel.extrude(p["profile"], p["height"])
     if f.op == "revolve":
         return kernel.revolve(p["profile"], p.get("angle_deg", 360.0))
+    if f.op == "loft":
+        # Sections: [{"profile": <sketch profile>, "z": height}, ...] bottom-up.
+        sections = [(s["profile"], s["z"]) for s in p["sections"]]
+        return kernel.loft(sections, ruled=bool(p.get("ruled", False)))
+    if f.op == "sweep":
+        return kernel.sweep(p["profile"], [tuple(pt) for pt in p["path"]])
+    if f.op == "mirror":
+        mirrored = kernel.mirror(ins[0], p["plane"])
+        if p.get("fuse", False):
+            return kernel.boolean("union", ins[0], mirrored)
+        return mirrored
     if f.op == "boolean":
         return kernel.boolean(p["kind"], ins[0], ins[1])
     if f.op == "fillet":
@@ -325,5 +337,15 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
                 kernel.cylinder(p["cbore_diameter"] / 2, p["cbore_depth"]),
                 translate=(x, y, top_z - p["cbore_depth"]))
             tool = kernel.boolean("union", tool, cb)
+        if p.get("csink_diameter"):
+            # Countersink: cone from hole diameter up to csink diameter at the
+            # surface; included angle defaults to the 90-deg standard.
+            angle = p.get("csink_angle_deg", 90.0)
+            csink_depth = ((p["csink_diameter"] - dia) / 2
+                           / math.tan(math.radians(angle / 2)))
+            cs = kernel.transform(
+                kernel.cone(dia / 2, p["csink_diameter"] / 2, csink_depth),
+                translate=(x, y, top_z - csink_depth))
+            tool = kernel.boolean("union", tool, cs)
         return kernel.boolean("cut", ins[0], tool)
     raise GitcadError(f"unknown operation {f.op!r} (feature {f.id})")

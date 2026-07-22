@@ -54,6 +54,22 @@ class Kernel(Protocol):
         """Revolve a closed XY profile about the Y axis."""
         ...
 
+    def loft(self, sections: list[tuple[dict, float]], *, ruled: bool = False) -> Shape:
+        """Solid through closed XY profiles stacked at their z heights."""
+        ...
+
+    def sweep(self, profile: dict, path: list[tuple[float, float, float]]) -> Shape:
+        """Sweep a closed XY profile along a 3D polyline path from (0,0,0)."""
+        ...
+
+    def mirror(self, shape: Shape, plane: str) -> Shape:
+        """Mirrored copy across a principal plane ("xy"|"yz"|"zx") at origin."""
+        ...
+
+    def mass_props(self, shape: Shape) -> dict[str, float]:
+        """Unit-density volume, center of mass, inertia tensor about the COM."""
+        ...
+
     def chamfer(self, shape: Shape, edges: list[int] | None, distance: float) -> Shape:
         """Chamfer by edge enumeration index (same contract as fillet)."""
         ...
