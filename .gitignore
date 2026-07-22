@@ -11,7 +11,7 @@
 /build-artifacts/
 *.dxf
 # PDFs generated from drawings (keep hand-authored docs elsewhere if needed).
-/out/*.pdf
+/out/
 
 # Python
 __pycache__/
