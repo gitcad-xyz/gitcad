@@ -174,11 +174,20 @@ class OcctKernel:
                 props = GProp_GProps()
                 BRepGProp.SurfaceProperties_s(face, props)
                 c = props.CentreOfMass()
-                out.append({
+                desc: dict[str, Any] = {
                     "surface": GeomAbs_SurfaceType(surf.GetType()).name.replace("GeomAbs_", "").lower(),
                     "area": props.Mass(),
                     "centroid": [c.X(), c.Y(), c.Z()],
-                })
+                }
+                # Analytic parameters where the surface has them — the raw
+                # material of feature recognition (dead geometry -> dimensions).
+                if desc["surface"] == "cylinder":
+                    cyl = surf.Cylinder()
+                    loc, direction = cyl.Axis().Location(), cyl.Axis().Direction()
+                    desc["radius"] = cyl.Radius()
+                    desc["axis_origin"] = [loc.X(), loc.Y(), loc.Z()]
+                    desc["axis_dir"] = [direction.X(), direction.Y(), direction.Z()]
+                out.append(desc)
         elif kind == "edge":
             for raw in _unique_shapes(shape, TopAbs_EDGE):
                 edge = TopoDS.Edge_s(raw)

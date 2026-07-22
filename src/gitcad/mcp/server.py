@@ -204,6 +204,26 @@ def model_import(path: str, fmt: str = "auto", assets_dir: str = ".") -> dict[st
     return {"model": doc.dumps(), "report": report.to_dict(), "kernel": kernel.name}
 
 
+@tool("model_recognize")
+def model_recognize(model: str) -> dict[str, Any]:
+    """Convert dead imported geometry back into a parameterized model — WITH
+    PROOF. Recognizes plate-with-holes shapes; the returned model rebuilds to
+    exactly the input geometry (symmetric-difference residual ~0) with real,
+    editable dimensions. Unrecognizable shapes are reported honestly."""
+    from gitcad.importers.recognize import recognize
+
+    doc = Document.loads(model)
+    kernel = get_kernel(require="occt")
+    r = recognize(doc, kernel)
+    out: dict[str, Any] = {"recognized": r.recognized, "proof": r.proof,
+                           "holes": [{"x": h.x, "y": h.y, "radius": h.radius} for h in r.holes]}
+    if r.recognized:
+        out["model"] = r.document.dumps()
+    else:
+        out["reason"] = r.reason
+    return out
+
+
 @tool("board_import")
 def board_import(path: str) -> dict[str, Any]:
     """Import an existing KiCad board (.kicad_pcb) into a gitcad board.
