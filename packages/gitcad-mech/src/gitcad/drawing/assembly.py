@@ -19,16 +19,20 @@ Point = tuple[float, float]
 
 
 def assembly_drawing(asm: Assembly, kernel=None, *,
-                     models: dict | None = None,
+                     models: dict | None = None, exploded=None,
                      title: str | None = None, sheet: str = "A3") -> Drawing:
     """``models`` maps instance name -> built Document for instances with
     geometry (part.json's body.model is a file reference — the caller owns
     resolution, same split as the viewer). Instances without a document fall
-    back to their interface envelope, drawn hidden-style."""
+    back to their interface envelope, drawn hidden-style. ``exploded`` takes
+    an ExplodedView spec (ADR-0014): the drawing shows the exploded state,
+    balloons follow, and the assembly text is untouched."""
     if kernel is None:
         from gitcad.kernel import get_kernel
 
         kernel = get_kernel(require="occt")
+    if exploded is not None:
+        asm = exploded.apply(asm)
 
     shapes = []
     env_rects: list[list[Point]] = []          # world-mm envelope outlines

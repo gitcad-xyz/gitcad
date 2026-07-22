@@ -10,6 +10,7 @@ most change-resistant surface gitcad owns.
 
 from gitcad.part.assembly import Assembly, Instance, Mate
 from gitcad.part.bought import assembly_bom, bought_part, is_bought
+from gitcad.part.exploded import ExplodedView, auto_explode
 from gitcad.part.interference import check_interference
 from gitcad.part.interface import Frame, Interface, Port, check_release, classify_change
 from gitcad.part.lockfile import Lockfile, Workspace, resolve
@@ -21,6 +22,7 @@ __all__ = [
     "Interface", "Frame", "Port", "classify_change", "check_release",
     "Assembly", "Instance", "Mate", "check_interference",
     "bought_part", "is_bought", "assembly_bom",
+    "ExplodedView", "auto_explode",
     "Lockfile", "Workspace", "resolve",
     "Version", "satisfies",
 ]
