@@ -57,6 +57,7 @@ class SchComponent:
     value: str = ""
     footprint: str = ""       # footprint name for board sync
     pins: list[Pin] = field(default_factory=list)
+    attrs: dict = field(default_factory=dict)   # mpn, manufacturer, facts
 
     def pin(self, number: str) -> Pin:
         for p in self.pins:
@@ -95,7 +96,8 @@ class Schematic:
             name=s["name"],
             components=[SchComponent(ref=c["ref"], value=c.get("value", ""),
                                      footprint=c.get("footprint", ""),
-                                     pins=[Pin(**p) for p in c.get("pins", [])])
+                                     pins=[Pin(**p) for p in c.get("pins", [])],
+                                     attrs=dict(c.get("attrs", {})))
                         for c in s.get("components", [])],
             nets={k: list(v) for k, v in s.get("nets", {}).items()},
         )
