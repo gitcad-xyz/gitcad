@@ -409,6 +409,28 @@ def schematic_system_erc(schematics: list[str]) -> dict[str, Any]:
             "erc_violations": erc.violations}
 
 
+@tool("board_annotate")
+def board_annotate(board: str, schematic: str,
+                   overwrite_conflicts: bool = False) -> dict[str, Any]:
+    """Forward annotation (the ECO write path): push the schematic's netlist
+    onto board pads, matched by ref + pin number. Mismatches are reported,
+    never guessed; existing conflicting nets are kept unless
+    overwrite_conflicts. Returns the annotated board text + sync report +
+    board_parity result. For multi-board systems pass the merged system
+    schematic — refs_missing_on_board then just means 'lives on another
+    board'."""
+    from gitcad.ecad.board import Board
+    from gitcad.ecad.schematic import Schematic, board_parity
+    from gitcad.ecad.sync import annotate_board
+
+    b = Board.loads(board)
+    sch = Schematic.loads(schematic)
+    report = annotate_board(b, sch, overwrite_conflicts=overwrite_conflicts)
+    parity = board_parity(sch, b)
+    return {"board": b.dumps(), "report": report.to_dict(),
+            "parity_ok": parity.ok, "parity_violations": parity.violations}
+
+
 @tool("board_drc")
 def board_drc(board: str, rulepack: str | None = None) -> dict[str, Any]:
     """Design-rule check: clearance, track width, annular ring, drill sizes,
