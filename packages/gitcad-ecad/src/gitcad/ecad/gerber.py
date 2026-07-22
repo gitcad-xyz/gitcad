@@ -104,7 +104,7 @@ def copper(board: Board, side: str) -> str:
     for v in board.vias:
         g.flash(f"C,{v.diameter:.6f}", v.x, v.y)
     for z in board.zones:
-        if z.layer == side:
+        if z.layer == side and z.kind == "copper":   # keepouts never emit
             g.region(z.polygon)
     return g.render()
 

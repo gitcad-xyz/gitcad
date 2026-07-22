@@ -86,12 +86,17 @@ class Via:
 
 @dataclass
 class Zone:
-    """A copper pour: closed polygon on one layer, tied to a net. The real
-    Altair board is routed almost entirely with zones — first-class, not an
-    import drop (learned from the real design, 2026-07-22)."""
+    """A zone: closed polygon on one layer. ``kind`` (KiCad-map P2):
+
+    - ``copper`` (default): a pour tied to a net — the real Altair board is
+      routed almost entirely with these.
+    - ``keepout``: a rule area FORBIDDING copper — tracks, vias, and copper
+      zones intersecting it are DRC violations; it never emits to Gerber
+      and never conducts. ``net`` is meaningless for keepouts ("")."""
     net: str
     layer: str                          # top | bottom
     polygon: list[tuple[float, float]]  # closed (first != last is fine)
+    kind: str = "copper"                # copper | keepout
 
 
 @dataclass
@@ -159,7 +164,8 @@ class Board:
             tracks=[Track(**t) for t in b["tracks"]],
             vias=[Via(**v) for v in b["vias"]],
             zones=[Zone(net=z["net"], layer=z["layer"],
-                        polygon=[tuple(p) for p in z["polygon"]])
+                        polygon=[tuple(p) for p in z["polygon"]],
+                        kind=z.get("kind", "copper"))
                    for z in b.get("zones", [])],
             mounting_holes=[MountingHole(**m) for m in b.get("mounting_holes", [])],
             thickness=b.get("thickness", 1.6),
@@ -215,6 +221,10 @@ class Board:
                 violations.append(f"zone-degenerate:{i}")
             if z.layer not in ("top", "bottom"):
                 violations.append(f"zone-bad-layer:{i}")
+            if z.kind not in ("copper", "keepout"):
+                violations.append(f"zone-bad-kind:{i}")
+            if z.kind == "keepout" and z.net:
+                violations.append(f"keepout-with-net:{i}")
         for cname, spec in sorted(self.net_classes.items()):
             nets = spec.get("nets")
             if not nets or not all(isinstance(n, str) and n for n in nets):

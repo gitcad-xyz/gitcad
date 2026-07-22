@@ -172,6 +172,8 @@ def _items(board: Board) -> list[_Item]:
         out.append(_Item("via", v.net, "both", f"via[{i}]",
                          box=(v.x - r, v.y - r, v.x + r, v.y + r)))
     for i, z in enumerate(board.zones):
+        if z.kind != "copper":
+            continue                     # keepouts are rules, not copper
         pts = list(z.polygon)
         if pts[0] != pts[-1]:
             pts.append(pts[0])
@@ -188,8 +190,15 @@ def _pt_in_poly(x: float, y: float, poly) -> bool:
 
 
 def _poly_dist(item: "_Item", poly) -> float:
-    """Copper distance from a seg/box item to a zone polygon (0 = touch/in)."""
+    """Copper distance from a seg/box/poly item to a zone polygon (0 = touch/in)."""
     edges = list(zip(poly, poly[1:]))
+    if item.poly is not None:
+        a = item.poly
+        if (any(_pt_in_poly(x, y, poly) for x, y in a)
+                or any(_pt_in_poly(x, y, a) for x, y in poly)):
+            return 0.0
+        return min(_seg_seg_dist(p1, p2, e1, e2)
+                   for p1, p2 in zip(a, a[1:]) for e1, e2 in edges)
     if item.seg:
         (a, b, hw) = item.seg
         if _pt_in_poly(a[0], a[1], poly) or _pt_in_poly(b[0], b[1], poly):
@@ -349,6 +358,35 @@ def run_drc(board: Board, pack: RulePack | None = None) -> ValidationReport:
                 d = min(bx1 - minx, maxx - bx2, by1 - miny, maxy - by2)
             if d < elo:
                 violations.append(f"edge-clearance:{it.label}:d={max(d, 0):.3f}mm<{elo}mm")
+
+    # keepout rule areas (KiCad-map P2): copper intersecting a keepout is a
+    # violation — tracks, vias, and copper zones; keepouts never conduct
+    keepouts = [(i, z) for i, z in enumerate(board.zones) if z.kind == "keepout"]
+    for ki, kz in keepouts:
+        pts = list(kz.polygon)
+        if pts[0] != pts[-1]:
+            pts.append(pts[0])
+        for it in items:
+            if not it.on(kz.layer):
+                continue
+            if _poly_dist(it, pts) <= 0.0:
+                violations.append(f"keepout:{it.kind}:{it.label}:zone[{ki}]")
+
+    # courtyard overlap (KiCad-map P2): same-side courtyards must not collide
+    with_cy = [c for c in board.components if c.footprint.courtyard]
+    for i, a in enumerate(with_cy):
+        aw, ah = a.footprint.courtyard
+        if round(a.rot) % 180 == 90:
+            aw, ah = ah, aw
+        for b in with_cy[i + 1:]:
+            if a.side != b.side:
+                continue
+            bw, bh = b.footprint.courtyard
+            if round(b.rot) % 180 == 90:
+                bw, bh = bh, bw
+            if (abs(a.x - b.x) < (aw + bw) / 2
+                    and abs(a.y - b.y) < (ah + bh) / 2):
+                violations.append(f"courtyard-overlap:{a.ref}<->{b.ref}")
 
     return ValidationReport(
         ok=not violations,

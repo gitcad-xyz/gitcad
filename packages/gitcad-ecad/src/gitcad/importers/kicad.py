@@ -179,10 +179,12 @@ def import_kicad_pcb(path: str) -> tuple[Board, ImportReport]:
             report.dropped.append("zone without polygon")
             continue
         polygon = [(cx(float(p[1])), cy(float(p[2]))) for p in find_all(pts_node, "xy")]
-        net = net_names.get(value_of(zn, "net", default=-1.0), "")
+        keepout = find_one(zn, "keepout") is not None
+        net = "" if keepout else net_names.get(value_of(zn, "net", default=-1.0), "")
         board.zones.append(Zone(net=net, layer="top" if layer == "F.Cu" else "bottom",
-                                polygon=polygon))
-        report.count("zones", 1)
+                                polygon=polygon,
+                                kind="keepout" if keepout else "copper"))
+        report.count("keepouts" if keepout else "zones", 1)
     arcs = find_all(root, "arc")
     if arcs:
         report.dropped.append(f"{len(arcs)} track arc(s) — v0.1 tracks are straight segments")
