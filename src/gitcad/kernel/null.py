@@ -70,6 +70,15 @@ class NullKernel:
                                        "rotate_axis": list(rotate_axis),
                                        "rotate_deg": rotate_deg}, (shape,))
 
+    def bbox(self, shape: Shape) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+        """Analytic bounds for primitives; unions/first-child for symbolic ops.
+        Approximate by design — good enough to test envelope derivation without
+        a kernel; exact bounds come from the OCCT backend."""
+        b = _bounds(shape)
+        if b is None:
+            raise NotImplementedError(f"null kernel cannot bound {getattr(shape, 'kind', shape)!r}")
+        return b
+
     def export_step(self, shape: Shape, path: str) -> None:
         raise NotImplementedError("STEP export requires the OCCT backend (pip install 'gitcad[occt]')")
 
@@ -108,6 +117,42 @@ class NullKernel:
         if vol is not None:
             out["volume"] = vol
         return out
+
+
+def _bounds(shape) -> tuple[tuple[float, float, float], tuple[float, float, float]] | None:
+    if not isinstance(shape, NullShape):
+        return None
+    if shape.kind == "box":
+        p = shape.params
+        return ((0.0, 0.0, 0.0), (p["dx"], p["dy"], p["dz"]))
+    if shape.kind == "cylinder":
+        p = shape.params
+        r = p["radius"]
+        return ((-r, -r, 0.0), (r, r, p["height"]))
+    if shape.kind == "sphere":
+        r = shape.params["radius"]
+        return ((-r, -r, -r), (r, r, r))
+    if shape.kind == "transform":
+        inner = _bounds(shape.children[0])
+        if inner is None:
+            return None
+        tx, ty, tz = shape.params["translate"]
+        if shape.params.get("rotate_deg"):
+            return None  # rotation of an AABB needs real geometry — punt to OCCT
+        (ax, ay, az), (bx, by, bz) = inner
+        return ((ax + tx, ay + ty, az + tz), (bx + tx, by + ty, bz + tz))
+    if shape.kind == "boolean":
+        bounds = [b for c in shape.children if (b := _bounds(c))]
+        if not bounds:
+            return None
+        if shape.params["op"] in ("cut", "intersect"):
+            return _bounds(shape.children[0])  # conservative: first operand
+        los, his = [b[0] for b in bounds], [b[1] for b in bounds]
+        return (tuple(min(p[i] for p in los) for i in range(3)),
+                tuple(max(p[i] for p in his) for i in range(3)))
+    if shape.kind == "fillet":
+        return _bounds(shape.children[0])
+    return None
 
 
 def _require_positive(**kw: float) -> None:

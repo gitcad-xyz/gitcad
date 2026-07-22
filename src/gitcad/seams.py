@@ -66,6 +66,11 @@ class Kernel(Protocol):
         by golden tests and by geometric-diff in PRs."""
         ...
 
+    def bbox(self, shape: Shape) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+        """Axis-aligned bounding box ((minx,miny,minz),(maxx,maxy,maxz)) —
+        the source of a derived part envelope (ADR-0008)."""
+        ...
+
     def export_step(self, shape: Shape, path: str) -> None:
         """Write ISO 10303-21 STEP — the mechanical interchange deliverable."""
         ...

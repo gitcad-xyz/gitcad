@@ -16,7 +16,9 @@ from gitcad.errors import FailureSignature, KernelError, ValidationReport
 from gitcad.seams import Shape
 
 try:
+    from OCP.Bnd import Bnd_Box
     from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
+    from OCP.BRepBndLib import BRepBndLib
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Common, BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
     from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
     from OCP.BRepCheck import BRepCheck_Analyzer
@@ -196,6 +198,13 @@ class OcctKernel:
             ) from exc
         c = props.CentreOfMass()
         return {"volume": props.Mass(), "cx": c.X(), "cy": c.Y(), "cz": c.Z()}
+
+    def bbox(self, shape: Shape) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+        box = Bnd_Box()
+        BRepBndLib.Add_s(shape, box, True)  # useTriangulation for tight bounds
+        box.SetGap(0.0)  # Bnd_Box pads by a default gap; envelopes must be exact
+        xmin, ymin, zmin, xmax, ymax, zmax = box.Get()
+        return ((xmin, ymin, zmin), (xmax, ymax, zmax))
 
     # -- exports (the manufacturing deliverables) -----------------------------
 

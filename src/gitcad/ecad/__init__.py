@@ -10,7 +10,7 @@ model diffs and merges in git, and every generated output is deterministic —
 the same board text produces byte-identical Gerbers on any machine.
 """
 
-from gitcad.ecad.board import Board, Component, Footprint, Pad, Track, Via
+from gitcad.ecad.board import Board, Component, Footprint, MountingHole, Pad, Track, Via
 from gitcad.ecad.fab import export_fab
 
-__all__ = ["Board", "Component", "Footprint", "Pad", "Track", "Via", "export_fab"]
+__all__ = ["Board", "Component", "Footprint", "MountingHole", "Pad", "Track", "Via", "export_fab"]

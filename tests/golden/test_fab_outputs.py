@@ -80,6 +80,7 @@ def test_export_fab_refuses_invalid_board(tmp_path) -> None:
 def test_export_fab_writes_complete_package(tmp_path) -> None:
     files = export_fab(_board(), str(tmp_path))
     assert set(files) == {"copper_top", "copper_bottom", "mask_top", "mask_bottom",
-                          "silk_top", "profile", "drill", "pick_and_place", "manifest"}
+                          "silk_top", "profile", "drill", "drill_npth",
+                          "pick_and_place", "manifest"}
     for path in files.values():
         assert (tmp_path / path.split("\\")[-1].split("/")[-1]).exists()

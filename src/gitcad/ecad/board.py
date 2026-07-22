@@ -83,6 +83,18 @@ class Via:
 
 
 @dataclass
+class MountingHole:
+    """A non-plated mounting hole — and, equally, a published mech interface:
+    every mounting hole becomes a `mech.bolt` port in the board's part.json
+    (ADR-0008), which is what the enclosure mates against."""
+    name: str            # port name, e.g. "mnt_1"
+    x: float
+    y: float
+    drill: float         # NPTH diameter
+    thread: str | None = None   # clearance for e.g. "M3" — informational spec
+
+
+@dataclass
 class Board:
     """A complete 2-layer board (v0.1: exactly two copper layers)."""
 
@@ -91,6 +103,8 @@ class Board:
     components: list[Component] = field(default_factory=list)
     tracks: list[Track] = field(default_factory=list)
     vias: list[Via] = field(default_factory=list)
+    mounting_holes: list[MountingHole] = field(default_factory=list)
+    thickness: float = 1.6               # mm — board stack height
     mask_expansion: float = 0.05         # mm per side
 
     SCHEMA = "gitcad/board@1"
@@ -125,6 +139,8 @@ class Board:
             ],
             tracks=[Track(**t) for t in b["tracks"]],
             vias=[Via(**v) for v in b["vias"]],
+            mounting_holes=[MountingHole(**m) for m in b.get("mounting_holes", [])],
+            thickness=b.get("thickness", 1.6),
             mask_expansion=b.get("mask_expansion", 0.05),
         )
 
@@ -159,8 +175,46 @@ class Board:
                 violations.append(f"track-zero-width:{i}")
             if t.layer not in ("top", "bottom"):
                 violations.append(f"track-bad-layer:{i}")
+        hole_names = [m.name for m in self.mounting_holes]
+        if len(hole_names) != len(set(hole_names)):
+            violations.append("mounting-holes:duplicate-names")
+        for m in self.mounting_holes:
+            if not (minx <= m.x <= maxx and miny <= m.y <= maxy):
+                violations.append(f"mounting-hole-outside-outline:{m.name}")
+            if m.drill <= 0:
+                violations.append(f"mounting-hole-zero-drill:{m.name}")
         return ValidationReport(
             ok=not violations,
-            checks={"components": len(self.components), "tracks": len(self.tracks), "vias": len(self.vias)},
+            checks={"components": len(self.components), "tracks": len(self.tracks),
+                    "vias": len(self.vias), "mounting_holes": len(self.mounting_holes)},
             violations=violations,
+        )
+
+    # -- the derived part interface (ADR-0008: domain wiring) -----------------
+
+    def to_part(self, part_id: str, version: str = "0.1.0"):
+        """Derive this board's ``part.json`` from its actual geometry:
+        envelope from the outline bbox × thickness, one frame + `mech.bolt`
+        port per mounting hole. Nothing hand-authored — change the board, and
+        the interface (and therefore interface-semver, ADR-0009) follows."""
+        from gitcad.part import Frame, Interface, PartManifest, Port
+
+        minx, miny, maxx, maxy = self.bbox()
+        frames = {"origin": Frame()}
+        ports = {}
+        for m in self.mounting_holes:
+            frames[m.name] = Frame(origin=(m.x, m.y, 0.0))
+            spec: dict = {"drill": m.drill}
+            if m.thread:
+                spec["thread"] = m.thread
+            ports[m.name] = Port(m.name, "mech.bolt", m.name, spec)
+        return PartManifest(
+            id=part_id, name=self.name, domain="ecad", version=version,
+            interface=Interface(
+                envelope={"origin": [minx, miny, 0.0],
+                          "dx": maxx - minx, "dy": maxy - miny, "dz": self.thickness},
+                frames=frames, ports=ports,
+                properties={"layers": 2, "components": len(self.components)},
+            ),
+            body={"board": f"{self.name}.gitcad.json"},
         )

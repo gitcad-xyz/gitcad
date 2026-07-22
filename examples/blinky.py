@@ -7,7 +7,7 @@ Pure Python — no geometry kernel needed.
 import sys
 from pathlib import Path
 
-from gitcad.ecad import Board, Component, Footprint, Pad, Track, Via, export_fab
+from gitcad.ecad import Board, Component, Footprint, MountingHole, Pad, Track, Via, export_fab
 
 out = Path(sys.argv[1] if len(sys.argv) > 1 else "out") / "blinky-fab"
 
@@ -35,6 +35,8 @@ board.tracks += [
     Track(26, 6, 4, 6, 0.6, "bottom", "GND"),
 ]
 board.vias += [Via(26, 12, net="GND"), Via(26, 6, net="GND")]
+board.mounting_holes += [MountingHole("mnt_1", 3, 3, 3.2, thread="M3"),
+                         MountingHole("mnt_2", 27, 17, 3.2, thread="M3")]
 
 report = board.validate()
 assert report.ok, report.violations

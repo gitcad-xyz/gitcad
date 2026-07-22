@@ -46,6 +46,7 @@ def export_fab(board: Board, outdir: str) -> dict[str, str]:
         "silk_top": (f"{n}.gto", gerber.silkscreen(board, "top")),
         "profile": (f"{n}.gko", gerber.profile(board)),
         "drill": (f"{n}.drl", excellon.drills(board)),
+        "drill_npth": (f"{n}-npth.drl", excellon.npth_drills(board)),
         "pick_and_place": (f"{n}-pnp.csv", pick_and_place(board)),
     }
     written: dict[str, str] = {}

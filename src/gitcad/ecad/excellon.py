@@ -9,16 +9,7 @@ from __future__ import annotations
 from gitcad.ecad.board import Board
 
 
-def drills(board: Board) -> str:
-    """All plated holes (through-hole pads + vias), one METRIC Excellon file."""
-    holes: list[tuple[float, float, float]] = []  # (diameter, x, y)
-    for comp in board.components:
-        for pad, bx, by, _ in comp.placed_pads():
-            if pad.drill is not None:
-                holes.append((pad.drill, bx, by))
-    for v in board.vias:
-        holes.append((v.drill, v.x, v.y))
-
+def _render(holes: list[tuple[float, float, float]]) -> str:
     diameters = sorted({d for d, _, _ in holes})
     tool_of = {d: i + 1 for i, d in enumerate(diameters)}
 
@@ -35,3 +26,21 @@ def drills(board: Board) -> str:
                 lines.append(f"X{x:.3f}Y{y:.3f}")
     lines.append("M30")
     return "\n".join(lines) + "\n"
+
+
+def drills(board: Board) -> str:
+    """Plated holes (through-hole pads + vias), one METRIC Excellon file."""
+    holes: list[tuple[float, float, float]] = []  # (diameter, x, y)
+    for comp in board.components:
+        for pad, bx, by, _ in comp.placed_pads():
+            if pad.drill is not None:
+                holes.append((pad.drill, bx, by))
+    for v in board.vias:
+        holes.append((v.drill, v.x, v.y))
+    return _render(holes)
+
+
+def npth_drills(board: Board) -> str:
+    """Non-plated holes (mounting holes) — fabs require these in a separate
+    file from plated holes."""
+    return _render([(m.drill, m.x, m.y) for m in board.mounting_holes])
