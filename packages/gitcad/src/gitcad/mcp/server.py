@@ -461,6 +461,35 @@ def design_review(repo: str, base: str, head: str = "HEAD") -> dict[str, Any]:
     return slim
 
 
+@tool("schematic_annotate")
+def schematic_annotate_tool(schematic: str) -> dict[str, Any]:
+    """Deterministic reference numbering (KiCad-map P4): placeholder refs
+    (R?, U?) get the lowest free number per prefix in reading order
+    (top-to-bottom, left-to-right); existing numbers never move; nets
+    referencing placeholders refuse (ambiguous — annotate before
+    connecting). Returns the annotated schematic + the rename map."""
+    from gitcad.ecad.annotate import annotate
+    from gitcad.ecad.schematic import Schematic
+
+    sch = Schematic.loads(schematic)
+    renames = annotate(sch)
+    return {"schematic": sch.dumps(), "renames": renames}
+
+
+@tool("footprint_generate")
+def footprint_generate(kind: str, params: dict | None = None) -> dict[str, Any]:
+    """Parametric footprint generators (KiCad-map P5) — wizards, agent-first:
+    chip(size='0603'), soic(n=8, pitch=1.27), qfn(n=16, pitch=0.5, ep=2.1),
+    header(n=6, rows=2). Returns the footprint (pads + courtyard) ready for
+    a Board component or footprint_to_part registry publishing."""
+    from dataclasses import asdict
+
+    from gitcad.ecad.fpgen import generate
+
+    fp = generate(kind, **(params or {}))
+    return {"footprint": asdict(fp)}
+
+
 @tool("pcba_verify")
 def pcba_verify_tool(part: str, root: str) -> dict[str, Any]:
     """Enter a PCBA's electrical workflow as one gate: ERC + electrical
