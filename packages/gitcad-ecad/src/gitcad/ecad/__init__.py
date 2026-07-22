@@ -21,6 +21,7 @@ from gitcad.ecad.schematic import (Pin, SchComponent, Schematic, board_parity,
                                    merge_schematics)
 from gitcad.ecad.envelope import check_envelopes, net_voltage, power_budget
 from gitcad.ecad.netderive import derive_nets, sheet_parity
+from gitcad.ecad.spice import sim_check, to_spice
 from gitcad.ecad.schsvg import schematic_to_svg
 
 __all__ = ["Board", "Component", "Footprint", "MountingHole", "Pad", "Track", "Via", "Zone",
@@ -29,4 +30,5 @@ __all__ = ["Board", "Component", "Footprint", "MountingHole", "Pad", "Track", "V
            "pad_position", "route", "footprint_to_part", "footprint_from_part",
            "mpn_component", "bom", "bom_csv", "schematic_to_svg",
            "merge_schematics", "derive_nets", "sheet_parity",
-           "check_envelopes", "net_voltage", "power_budget"]
+           "check_envelopes", "net_voltage", "power_budget",
+           "to_spice", "sim_check"]

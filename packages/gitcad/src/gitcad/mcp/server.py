@@ -392,6 +392,26 @@ def schematic_author(name: str, ops: list[list]) -> dict[str, Any]:
             "parity_ok": parity.ok, "sheet_svg": sheet_to_svg(sch)}
 
 
+@tool("schematic_sim")
+def schematic_sim(schematic: str, checks: list[dict] | None = None) -> dict[str, Any]:
+    """Simulation as tests: export the schematic to SPICE (rails become
+    ideal sources by the same name contract the envelope checker uses;
+    unmodeled parts reported, never dropped) and — when ngspice is
+    installed and checks given — run an operating-point analysis asserting
+    node voltages: checks=[{"node": "OUT", "min": 3.2, "max": 3.4}]."""
+    from gitcad.ecad.schematic import Schematic
+    from gitcad.ecad.spice import _find_ngspice, sim_check, to_spice
+
+    sch = Schematic.loads(schematic)
+    netlist, report = to_spice(sch)
+    out: dict[str, Any] = {"netlist": netlist, "export": report,
+                           "simulator": "ngspice" if _find_ngspice() else "unavailable"}
+    if checks and _find_ngspice():
+        r = sim_check(sch, checks)
+        out.update({"ok": r.ok, "checks": r.checks, "violations": r.violations})
+    return out
+
+
 @tool("design_review")
 def design_review(repo: str, base: str, head: str = "HEAD") -> dict[str, Any]:
     """Review the design changes between two git refs: per-file semantic
