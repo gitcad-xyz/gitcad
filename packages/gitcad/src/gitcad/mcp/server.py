@@ -100,18 +100,25 @@ def model_validate(model: str) -> dict[str, Any]:
 
 
 @tool("model_entities")
-def model_entities(model: str, feature_id: str, kind: str = "edge") -> dict[str, Any]:
+def model_entities(model: str, feature_id: str, kind: str = "edge",
+                   select: str | None = None) -> dict[str, Any]:
     """Stable entity ids + descriptors for a feature's topology (ADR-0003).
-    Use the returned ids in entity-referencing params (e.g. fillet ``edges``) —
-    they survive upstream edits because identity re-binds by fingerprint."""
+    ``select`` filters with the query DSL (e.g. "plane,zmax" = the back face;
+    "cylinder"; "line,zmin") instead of manual centroid filtering."""
     doc = Document.loads(model)
     kernel = get_kernel()
     result = doc.build(kernel)
     if feature_id not in result.entities:
         raise ValueError(f"unknown feature {feature_id!r}")
+    indexed = result.entities[feature_id].get(kind, [])
+    picks = range(len(indexed))
+    if select:
+        from gitcad.select import select_entities
+
+        picks = select_entities([d for _, d in indexed], select)
     return {
         "kernel": kernel.name,
-        "entities": [{"id": eid, **desc} for eid, desc in result.entities[feature_id].get(kind, [])],
+        "entities": [{"id": indexed[i][0], **indexed[i][1]} for i in picks],
     }
 
 
@@ -151,6 +158,38 @@ def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3")
         with open(path, "w", newline="\n") as f:
             f.write(d.to_svg())
     return {"path": path, "scale": d.scale, "sheet": d.sheet, "views": [v.name for v in d.views]}
+
+
+@tool("board_pad_position")
+def board_pad_position(board: str, pad: str) -> dict[str, Any]:
+    """Resolve "REF.pad_name" to absolute board coordinates + side/through/net
+    — no more mental pad arithmetic (dogfood friction #1)."""
+    from gitcad.ecad import Board, pad_position
+
+    return pad_position(Board.loads(board), pad)
+
+
+@tool("board_route")
+def board_route(board: str, net: str, points: list[dict[str, Any]],
+                width: float = 0.4) -> dict[str, Any]:
+    """Route a net through waypoints ({"pad": "REF.name"} or {"x","y"},
+    optional "layer") — auto-vias on layer changes, wrong-net pads refused,
+    SMD side enforced. Returns the updated board text."""
+    from gitcad.ecad import Board, route
+
+    b = Board.loads(board)
+    r = route(b, net, points, width=width)
+    return {"board": b.dumps(), "added": r}
+
+
+@tool("board_to_model")
+def board_to_model_tool(board: str) -> dict[str, Any]:
+    """The board as a 3D mech model (outline x thickness, mounting holes cut)
+    — ready for assemblies, interference, STEP, and the viewer."""
+    from gitcad.bridge import board_to_model
+    from gitcad.ecad import Board
+
+    return {"model": board_to_model(Board.loads(board)).dumps()}
 
 
 @tool("board_validate")

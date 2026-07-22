@@ -14,8 +14,10 @@ from gitcad.ecad.board import Board, Component, Footprint, MountingHole, Pad, Tr
 from gitcad.ecad.fab import export_fab
 from gitcad.ecad.connectivity import check_connectivity
 from gitcad.ecad.drc import Rule, RulePack, default_rules, run_drc
+from gitcad.ecad.route import pad_position, route
 from gitcad.ecad.schematic import Pin, SchComponent, Schematic, board_parity
 
 __all__ = ["Board", "Component", "Footprint", "MountingHole", "Pad", "Track", "Via",
            "export_fab", "Schematic", "SchComponent", "Pin", "board_parity",
-           "Rule", "RulePack", "default_rules", "run_drc", "check_connectivity"]
+           "Rule", "RulePack", "default_rules", "run_drc", "check_connectivity",
+           "pad_position", "route"]

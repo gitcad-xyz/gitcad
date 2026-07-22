@@ -184,6 +184,9 @@ class Board:
         for i, t in enumerate(self.tracks):
             if t.width <= 0:
                 violations.append(f"track-zero-width:{i}")
+            if (t.x1, t.y1) == (t.x2, t.y2):
+                # a zero-length track slipped through in the dogfood build
+                violations.append(f"track-degenerate:{i}")
             if t.layer not in ("top", "bottom"):
                 violations.append(f"track-bad-layer:{i}")
         hole_names = [m.name for m in self.mounting_holes]

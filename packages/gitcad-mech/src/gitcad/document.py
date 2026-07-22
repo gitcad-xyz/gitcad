@@ -208,14 +208,34 @@ def _resolve_entity_indices(entity_ids: list[str], input_feature: str,
     return indices
 
 
+# Ops that act on prior geometry MUST name it — a subtractive op with no
+# inputs silently building a disconnected feature was a dogfood finding.
+_REQUIRED_INPUTS = {"boolean": 2, "fillet": 1, "chamfer": 1, "shell": 1,
+                    "move": 1, "hole": 1, "boss": 1,
+                    "pattern_linear": 1, "pattern_circular": 1}
+
+_AXIS_ROTATION = {"z": None, "y": ((1, 0, 0), -90.0), "x": ((0, 1, 0), 90.0)}
+
+
 def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult) -> Shape:
     """Map an intent op to a kernel call. Unknown ops fail loud so an agent
     gets an actionable error, not silence."""
     p = f.params
+    need = _REQUIRED_INPUTS.get(f.op, 0)
+    if len(ins) < need:
+        raise GitcadError(
+            f"op {f.op!r} requires inputs=[{need} feature id(s)] naming the "
+            f"geometry it acts on — got {len(ins)} (feature {f.id})")
     if f.op == "box":
         return kernel.box(p["dx"], p["dy"], p["dz"])
     if f.op == "cylinder":
-        return kernel.cylinder(p["radius"], p["height"])
+        shape = kernel.cylinder(p["radius"], p["height"])
+        rot = _AXIS_ROTATION.get(p.get("axis", "z"), "bad")
+        if rot == "bad":
+            raise GitcadError(f"cylinder axis must be x|y|z, got {p.get('axis')!r}")
+        if rot is not None:
+            shape = kernel.transform(shape, rotate_axis=rot[0], rotate_deg=rot[1])
+        return shape
     if f.op == "sphere":
         return kernel.sphere(p["radius"])
     if f.op == "cone":
@@ -276,6 +296,22 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
             copy = kernel.transform(ins[0], rotate_axis=(0, 0, 1),
                                     rotate_deg=360.0 * i / count)
             out = kernel.boolean("union", out, copy)
+        return out
+    if f.op == "boss":
+        # Mounting boss: cylinder unioned onto a body from base_z upward, with
+        # an optional pilot hole from its top — the standoff the dogfood's
+        # housing had ports for but no geometry under (friction finding).
+        x, y, base_z = p["x"], p["y"], p["base_z"]
+        height, dia = p["height"], p["diameter"]
+        post = kernel.transform(kernel.cylinder(dia / 2, height),
+                                translate=(x, y, base_z))
+        out = kernel.boolean("union", ins[0], post)
+        if p.get("pilot_diameter"):
+            pilot_depth = p.get("pilot_depth", height)
+            pilot = kernel.transform(
+                kernel.cylinder(p["pilot_diameter"] / 2, pilot_depth),
+                translate=(x, y, base_z + height - pilot_depth))
+            out = kernel.boolean("cut", out, pilot)
         return out
     if f.op == "hole":
         # Drilled from top_z downward; optional counterbore. A composed cut —
