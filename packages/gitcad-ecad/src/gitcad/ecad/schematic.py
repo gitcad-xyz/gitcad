@@ -165,6 +165,35 @@ class Schematic:
         )
 
 
+def merge_schematics(name: str, sheets: list[Schematic]) -> Schematic:
+    """Merge sheets into one system schematic — nets union by NAME.
+
+    This is how multi-board systems connect: each board's schematic names its
+    interface signals (I2C_SDA, +3V3, GND ...) and the names ARE the contract
+    across connectors. Per-sheet ERC flags those as single-pin nets; system
+    ERC on the merged schematic checks the real circuit.
+
+    Auto-generated net names (``N$k``) are sheet-local by construction and get
+    prefixed with the sheet name so they never falsely merge. Component refs
+    must be unique across the system (duplicates are a hard error — same rule
+    as ERC, but cross-sheet).
+    """
+    merged = Schematic(name=name)
+    seen_refs: dict[str, str] = {}
+    for sheet in sheets:
+        for c in sheet.components:
+            if c.ref in seen_refs:
+                raise GitcadError(
+                    f"duplicate ref {c.ref!r} across sheets "
+                    f"{seen_refs[c.ref]!r} and {sheet.name!r}")
+            seen_refs[c.ref] = sheet.name
+            merged.components.append(c)
+        for net, pin_refs in sheet.nets.items():
+            key = f"{sheet.name}.{net}" if net.startswith("N$") else net
+            merged.connect(key, *pin_refs)
+    return merged
+
+
 def board_parity(schematic: Schematic, board) -> ValidationReport:
     """Schematic <-> board consistency — the ECO check (feature-map B1).
 

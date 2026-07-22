@@ -109,6 +109,12 @@ def import_kicad_sch(path: str) -> tuple[Schematic, ImportReport]:
     net_names: dict[tuple, str] = {}               # point -> label/power name
     sch = Schematic(name=path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].replace(".kicad_sch", ""))
 
+    # no_connect X markers are design intent: the pin under one becomes
+    # type no_connect, so ERC honors the designer's "yes, deliberately open".
+    nc_points = {_key(float((find_one(n, "at") or ["at", 0, 0])[1]),
+                      float((find_one(n, "at") or ["at", 0, 0])[2]))
+                 for n in find_all(root, "no_connect")}
+
     # -- placed symbols --------------------------------------------------------
     power_count = 0
     for sym in find_all(root, "symbol"):
@@ -131,18 +137,20 @@ def import_kicad_sch(path: str) -> tuple[Schematic, ImportReport]:
             power_count += 1
             continue
 
-        comp_pins = [Pin(p["name"] if p["name"] != "~" else p["number"],
-                         p["number"], p["type"]) for p in pins]
+        comp_pins: list[Pin] = []
+        for p in pins:
+            pt = _pin_abs(p["x"], p["y"], sx, sy, rot, mirror)
+            k = _key(*pt)
+            ptype = "no_connect" if k in nc_points else p["type"]
+            comp_pins.append(Pin(p["name"] if p["name"] != "~" else p["number"],
+                                 p["number"], ptype))
+            pin_nodes.append((k, f"{ref}.{p['number']}", ptype))
+            dsu.union(("pt", k), ("pin", ref, p["number"]))
         sch.components.append(SchComponent(
             ref=ref, value=props.get("Value", ""),
             footprint=props.get("Footprint", "").split(":")[-1],
             pins=comp_pins, attrs={"at": [sx, sy], "lib_id": lib_id}))
         report.count("symbols", 1)
-        for p in pins:
-            pt = _pin_abs(p["x"], p["y"], sx, sy, rot, mirror)
-            k = _key(*pt)
-            pin_nodes.append((k, f"{ref}.{p['number']}", p["type"]))
-            dsu.union(("pt", k), ("pin", ref, p["number"]))
 
     # -- wires / junctions / labels / no-connects ------------------------------
     wires: list[tuple[tuple, tuple]] = []
@@ -182,10 +190,6 @@ def import_kicad_sch(path: str) -> tuple[Schematic, ImportReport]:
             net_names[k] = name
             dsu.find(("pt", k))
             report.count("labels", 1)
-
-    nc_points = {_key(float((find_one(n, "at") or ["at", 0, 0])[1]),
-                      float((find_one(n, "at") or ["at", 0, 0])[2]))
-                 for n in find_all(root, "no_connect")}
 
     # -- transform self-check: wire endpoints should land somewhere known -----
     pin_keys = {k for k, _, _ in pin_nodes} | set(net_names)

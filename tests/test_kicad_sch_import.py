@@ -98,6 +98,15 @@ def test_no_connect_excludes_pin_from_nets(sch_and_report):
     assert "R1.2" not in all_pins
 
 
+def test_no_connect_marker_types_the_pin(sch_and_report):
+    # The X marker is design intent: the pin becomes type no_connect so ERC
+    # does not flag the designer's deliberate "open" as pin-unconnected.
+    sch, _ = sch_and_report
+    r1 = next(c for c in sch.components if c.ref == "R1")
+    assert r1.pin("2").type == "no_connect"
+    assert not any(v.startswith("pin-unconnected:R1.2") for v in sch.erc().violations)
+
+
 def test_stacked_pins_join_one_net(sch_and_report):
     sch, _ = sch_and_report
     # U1 pins 1+2 sit at the same library coordinate (stacked) -> one net.
@@ -115,3 +124,36 @@ def test_pin_types_map_into_gitcad_vocabulary(sch_and_report):
     sch, _ = sch_and_report
     u1 = next(c for c in sch.components if c.ref == "U1")
     assert {p.type for p in u1.pins} == {"power_in", "passive"}
+
+
+# -- multi-board system merge (nets union by name across sheets) --------------
+
+def test_merge_schematics_unions_named_nets():
+    from gitcad.ecad.schematic import Pin, SchComponent, Schematic, merge_schematics
+
+    a = Schematic(name="board_a", components=[
+        SchComponent(ref="U1", pins=[Pin("SDA", "1", "bidirectional")])])
+    a.connect("I2C_SDA", "U1.1")
+    a.connect("N$1", "U1.1")
+    b = Schematic(name="board_b", components=[
+        SchComponent(ref="U2", pins=[Pin("SDA", "3", "bidirectional")])])
+    b.connect("I2C_SDA", "U2.3")
+    b.connect("N$1", "U2.3")
+
+    sys_sch = merge_schematics("system", [a, b])
+    assert sorted(sys_sch.nets["I2C_SDA"]) == ["U1.1", "U2.3"]
+    # auto-named nets are sheet-local: never falsely merged
+    assert sys_sch.nets["board_a.N$1"] == ["U1.1"]
+    assert sys_sch.nets["board_b.N$1"] == ["U2.3"]
+
+
+def test_merge_schematics_rejects_duplicate_refs():
+    import pytest as _pytest
+
+    from gitcad.ecad.schematic import SchComponent, Schematic, merge_schematics
+    from gitcad.errors import GitcadError
+
+    a = Schematic(name="a", components=[SchComponent(ref="U1")])
+    b = Schematic(name="b", components=[SchComponent(ref="U1")])
+    with _pytest.raises(GitcadError, match="duplicate ref"):
+        merge_schematics("system", [a, b])

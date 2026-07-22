@@ -17,11 +17,13 @@ from gitcad.ecad.component import footprint_from_part, footprint_to_part
 from gitcad.ecad.connectivity import check_connectivity
 from gitcad.ecad.drc import Rule, RulePack, default_rules, run_drc
 from gitcad.ecad.route import pad_position, route
-from gitcad.ecad.schematic import Pin, SchComponent, Schematic, board_parity
+from gitcad.ecad.schematic import (Pin, SchComponent, Schematic, board_parity,
+                                   merge_schematics)
 from gitcad.ecad.schsvg import schematic_to_svg
 
 __all__ = ["Board", "Component", "Footprint", "MountingHole", "Pad", "Track", "Via", "Zone",
            "export_fab", "Schematic", "SchComponent", "Pin", "board_parity",
            "Rule", "RulePack", "default_rules", "run_drc", "check_connectivity",
            "pad_position", "route", "footprint_to_part", "footprint_from_part",
-           "mpn_component", "bom", "bom_csv", "schematic_to_svg"]
+           "mpn_component", "bom", "bom_csv", "schematic_to_svg",
+           "merge_schematics"]

@@ -293,6 +293,23 @@ def schematic_import(path: str) -> dict[str, Any]:
             "erc_ok": erc.ok, "erc_violations": erc.violations}
 
 
+@tool("schematic_system_erc")
+def schematic_system_erc(schematics: list[str]) -> dict[str, Any]:
+    """Merge multiple board schematics (canonical gitcad text) into one
+    system schematic — nets union by NAME (the cross-connector contract) —
+    and run ERC on the whole circuit. This is how multi-board designs are
+    checked: per-sheet ERC flags interface signals as single-pin; system
+    ERC sees the real nets."""
+    from gitcad.ecad.schematic import Schematic, merge_schematics
+
+    sheets = [Schematic.loads(s) for s in schematics]
+    sys_sch = merge_schematics("system", sheets)
+    erc = sys_sch.erc()
+    return {"schematic": sys_sch.dumps(), "components": len(sys_sch.components),
+            "nets": len(sys_sch.nets), "erc_ok": erc.ok,
+            "erc_violations": erc.violations}
+
+
 @tool("board_drc")
 def board_drc(board: str, rulepack: str | None = None) -> dict[str, Any]:
     """Design-rule check: clearance, track width, annular ring, drill sizes,
