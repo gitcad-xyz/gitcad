@@ -244,6 +244,10 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
         if fmt == "brep":
             return kernel.import_brep(path)
         raise GitcadError(f"unknown import format {fmt!r} (want step|brep)")
+    if f.op == "extrude":
+        return kernel.extrude(p["profile"], p["height"])
+    if f.op == "revolve":
+        return kernel.revolve(p["profile"], p.get("angle_deg", 360.0))
     if f.op == "boolean":
         return kernel.boolean(p["kind"], ins[0], ins[1])
     if f.op == "fillet":

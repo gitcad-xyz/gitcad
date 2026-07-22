@@ -20,7 +20,14 @@ try:
     from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
     from OCP.BRepBndLib import BRepBndLib
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Common, BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
-    from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+    from OCP.BRepBuilderAPI import (
+        BRepBuilderAPI_MakeEdge,
+        BRepBuilderAPI_MakeFace,
+        BRepBuilderAPI_MakeWire,
+        BRepBuilderAPI_Transform,
+    )
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism, BRepPrimAPI_MakeRevol
+    from OCP.GC import GC_MakeArcOfCircle
     from OCP.BRepCheck import BRepCheck_Analyzer
     from OCP.BRepFilletAPI import BRepFilletAPI_MakeFillet
     from OCP.BRepGProp import BRepGProp
@@ -161,6 +168,51 @@ class OcctKernel:
         t.SetTranslation(gp_Vec(*translate))
         t.Multiply(trsf)  # rotate first, then translate
         return BRepBuilderAPI_Transform(shape, t, True).Shape()
+
+    # -- sketch-based features (the 2D -> 3D workflow) ------------------------
+
+    def _profile_face(self, profile: dict) -> "TopoDS_Shape":
+        """Build a planar face (XY plane) from a validated profile dict."""
+        wire = BRepBuilderAPI_MakeWire()
+        prev = tuple(profile["start"])
+        for seg in profile["segments"]:
+            to = tuple(seg["to"])
+            p1, p2 = gp_Pnt(prev[0], prev[1], 0), gp_Pnt(to[0], to[1], 0)
+            if seg["kind"] == "line":
+                edge = BRepBuilderAPI_MakeEdge(p1, p2).Edge()
+            else:  # arc via three points
+                via = seg["via"]
+                arc = GC_MakeArcOfCircle(p1, gp_Pnt(via[0], via[1], 0), p2).Value()
+                edge = BRepBuilderAPI_MakeEdge(arc).Edge()
+            wire.Add(edge)
+            prev = to
+        if not wire.IsDone():
+            raise KernelError(
+                "profile wire construction failed (self-intersecting or disconnected?)",
+                FailureSignature(op="sketch", diagnostic="MakeWire:NotDone", kernel=self.name),
+            )
+        face = BRepBuilderAPI_MakeFace(wire.Wire())
+        if not face.IsDone():
+            raise KernelError(
+                "profile does not bound a valid planar face",
+                FailureSignature(op="sketch", diagnostic="MakeFace:NotDone", kernel=self.name),
+            )
+        return face.Face()
+
+    def extrude(self, profile: dict, height: float) -> Shape:
+        """Linear sweep of a closed XY profile along +Z."""
+        face = self._profile_face(profile)
+        shape = BRepPrimAPI_MakePrism(face, gp_Vec(0, 0, height)).Shape()
+        self.validate(shape).raise_if_invalid("extrude", self.name)
+        return shape
+
+    def revolve(self, profile: dict, angle_deg: float = 360.0) -> Shape:
+        """Revolve a closed XY profile about the Y axis (profile x >= 0)."""
+        face = self._profile_face(profile)
+        axis = gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0))
+        shape = BRepPrimAPI_MakeRevol(face, axis, math.radians(angle_deg)).Shape()
+        self.validate(shape).raise_if_invalid("revolve", self.name)
+        return shape
 
     # -- inspection (the agent verification loop) -----------------------------
 

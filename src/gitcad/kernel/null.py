@@ -108,6 +108,19 @@ class NullKernel:
             raise ValueError(f"unknown boolean op {op!r}")
         return NullShape("boolean", {"op": op}, (a, b))
 
+    def extrude(self, profile: dict, height: float) -> Shape:
+        from gitcad.sketch import Profile
+
+        Profile.from_params(profile)  # validates closure/segment forms
+        _require_positive(height=height)
+        return NullShape("extrude", {"profile": profile, "height": height})
+
+    def revolve(self, profile: dict, angle_deg: float = 360.0) -> Shape:
+        from gitcad.sketch import Profile
+
+        Profile.from_params(profile)
+        return NullShape("revolve", {"profile": profile, "angle_deg": angle_deg})
+
     def fillet(self, shape: Shape, edges: list[int] | None, radius: float) -> Shape:
         _require_positive(radius=radius)
         return NullShape("fillet", {"edges": list(edges) if edges is not None else None,

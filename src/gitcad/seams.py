@@ -46,6 +46,14 @@ class Kernel(Protocol):
         """``op`` in {"union", "cut", "intersect"}."""
         ...
 
+    def extrude(self, profile: dict, height: float) -> Shape:
+        """Linear sweep of a closed XY profile (gitcad.sketch form) along +Z."""
+        ...
+
+    def revolve(self, profile: dict, angle_deg: float = 360.0) -> Shape:
+        """Revolve a closed XY profile about the Y axis."""
+        ...
+
     def fillet(self, shape: Shape, edges: list[int] | None, radius: float) -> Shape:
         """Fillet by enumeration index into ``entities(shape, "edge")`` order
         (``None`` = all edges). Index resolution from stable entity ids happens
