@@ -412,6 +412,20 @@ def schematic_sim(schematic: str, checks: list[dict] | None = None) -> dict[str,
     return out
 
 
+@tool("design_merge")
+def design_merge(base: str, ours: str, theirs: str) -> dict[str, Any]:
+    """Semantic 3-way merge of a design document (ADR-0016): features by
+    stable id for models, components by ref + connectivity by PIN for
+    schematics. Parallel edits to different units merge cleanly (a net
+    rename merges — pins move together); the same unit changed differently
+    returns structured conflicts with both candidates, never text markers.
+    Also the git merge driver: gitcad-merge %O %A %B with
+    .gitattributes '*.gitcad.json merge=gitcad'."""
+    from gitcad.merge3 import merge_documents
+
+    return merge_documents(base, ours, theirs)
+
+
 @tool("design_review")
 def design_review(repo: str, base: str, head: str = "HEAD") -> dict[str, Any]:
     """Review the design changes between two git refs: per-file semantic
