@@ -179,9 +179,17 @@ def model_import(path: str, fmt: str = "auto", assets_dir: str = ".") -> dict[st
     """Import existing mechanical work (STEP or FreeCAD .FCStd) into a gitcad
     model. Returns the model text plus an honest report of what was imported,
     approximated, and dropped. Requires the OCCT kernel."""
+    lower = path.lower()
+    if lower.endswith((".sldprt", ".sldasm", ".slddrw")):
+        raise ValueError(
+            "SolidWorks files are a proprietary Parasolid-based format no "
+            "open-source library can read. Full-fidelity path: export STEP "
+            "from SolidWorks (File > Save As > .step), or bulk-convert a whole "
+            "library with scripts/sw-batch-export.ps1 (drives your installed "
+            "SolidWorks via COM), then import the STEP files."
+        )
     kernel = get_kernel(require="occt")
     if fmt == "auto":
-        lower = path.lower()
         fmt = "fcstd" if lower.endswith(".fcstd") else "step"
     if fmt == "step":
         from gitcad.importers import import_step_file

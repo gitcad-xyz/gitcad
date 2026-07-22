@@ -159,3 +159,14 @@ def test_fcstd_import_reads_embedded_breps(tmp_path) -> None:
     from pathlib import Path
     assert Path(import_feature.params["file"]).exists()
     assert len(import_feature.params["sha256"]) == 64
+
+
+def test_solidworks_files_get_actionable_guidance() -> None:
+    """SolidWorks can't be parsed natively — the import must return the
+    migration path, not a parse error."""
+    from gitcad.mcp.server import REGISTRY
+
+    result = REGISTRY["model_import"](path="widget.sldprt")
+    assert result["ok"] is False
+    assert "sw-batch-export" in result["error"]["message"]
+    assert "STEP" in result["error"]["message"]
