@@ -37,6 +37,32 @@ class Workspace:
             ws.add(PartManifest.loads(path.read_text()))
         return ws
 
+    @classmethod
+    def from_git(cls, url: str, *, ref: str = "main", cache_dir: str | None = None) -> "Workspace":
+        """A workspace backed by a git registry (e.g. gitcad-xyz/registry).
+
+        Shallow-clones (or updates) into a local cache and scans it — the
+        registry IS a git repo (ADR-0010), so the client is just git + scan.
+        Resolution then pins content hashes (ADR-0009) exactly as with any
+        local workspace.
+        """
+        import hashlib
+        import subprocess
+        import tempfile
+
+        key = hashlib.blake2b(f"{url}#{ref}".encode(), digest_size=8).hexdigest()
+        dest = Path(cache_dir) if cache_dir else Path(tempfile.gettempdir()) / "gitcad-registry" / key
+        if (dest / ".git").exists():
+            subprocess.run(["git", "-C", str(dest), "fetch", "--depth", "1", "origin", ref],
+                           check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(dest), "checkout", "-q", "FETCH_HEAD"],
+                           check=True, capture_output=True)
+        else:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["git", "clone", "--depth", "1", "--branch", ref, url, str(dest)],
+                           check=True, capture_output=True)
+        return cls.scan(str(dest))
+
     def versions_of(self, part_id: str) -> list[str]:
         return sorted(self._versions.get(part_id, {}), key=Version.parse)
 
