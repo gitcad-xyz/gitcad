@@ -392,6 +392,28 @@ def schematic_author(name: str, ops: list[list]) -> dict[str, Any]:
             "parity_ok": parity.ok, "sheet_svg": sheet_to_svg(sch)}
 
 
+@tool("schematic_envelope")
+def schematic_envelope(schematic: str) -> dict[str, Any]:
+    """The hardware type system, electrical v1 (ADR-0015): net voltages
+    derived from rail names + net_specs, checked against each pin's
+    v_abs_max/v_op_min, and rail current draw vs. source capacity —
+    overvoltage caught at design time, not bring-up. Coverage is reported
+    (pins_with_specs) so green never masquerades as verified. Includes the
+    per-rail power budget."""
+    from gitcad.ecad.envelope import check_envelopes, power_budget
+    from gitcad.ecad.schematic import Schematic
+
+    sch = Schematic.loads(schematic)
+    r = check_envelopes(sch)
+    out: dict[str, Any] = {"ok": r.ok, "checks": r.checks,
+                           "violations": r.violations}
+    try:
+        out["power_budget"] = power_budget(sch)
+    except GitcadError:
+        out["power_budget"] = {}   # zero spec coverage — already visible above
+    return out
+
+
 @tool("schematic_system_erc")
 def schematic_system_erc(schematics: list[str]) -> dict[str, Any]:
     """Merge multiple board schematics (canonical gitcad text) into one

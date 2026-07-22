@@ -73,17 +73,23 @@ class Schematic:
     name: str
     components: list[SchComponent] = field(default_factory=list)
     nets: dict[str, list[str]] = field(default_factory=dict)
+    # Optional electrical declarations per net (ADR-0015), e.g.
+    # {"VBAT": {"v": 3.7}}. Additive: absent -> canonical text unchanged.
+    net_specs: dict[str, dict] = field(default_factory=dict)
 
     SCHEMA = "gitcad/schematic@1"
 
     # -- canonical text -------------------------------------------------------
 
     def dumps(self) -> str:
-        doc = {"schema": self.SCHEMA, "schematic": {
+        sch: dict = {
             "name": self.name,
             "components": [asdict(c) for c in self.components],
             "nets": {k: sorted(v) for k, v in self.nets.items()},
-        }}
+        }
+        if self.net_specs:
+            sch["net_specs"] = {k: dict(v) for k, v in sorted(self.net_specs.items())}
+        doc = {"schema": self.SCHEMA, "schematic": sch}
         return canonical_json(doc, indent=2) + "\n"
 
     @classmethod
@@ -100,6 +106,7 @@ class Schematic:
                                      attrs=dict(c.get("attrs", {})))
                         for c in s.get("components", [])],
             nets={k: list(v) for k, v in s.get("nets", {}).items()},
+            net_specs={k: dict(v) for k, v in s.get("net_specs", {}).items()},
         )
 
     # -- helpers --------------------------------------------------------------
