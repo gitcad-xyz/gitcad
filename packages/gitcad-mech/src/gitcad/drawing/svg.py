@@ -51,6 +51,10 @@ def render_svg(d: Drawing) -> str:
         out.append(f'<text class="t" x="{c.label[0] + 0.8:.2f}" y="{y(c.label[1]):.2f}">'
                    f'{escape(c.text)}</text>')
 
+    for nx, ny, text in d.notes:
+        out.append(f'<text class="t" x="{nx:.2f}" y="{y(ny):.2f}" '
+                   f'style="font-family:monospace" xml:space="preserve">{escape(text)}</text>')
+
     out.append(_title_block(d, y))
     out.append("</svg>")
     return "".join(out) + "\n"

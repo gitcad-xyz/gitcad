@@ -52,6 +52,7 @@ class Drawing:
     views: list[PlacedView] = field(default_factory=list)
     dims: list[Dimension] = field(default_factory=list)
     callouts: list[Callout] = field(default_factory=list)
+    notes: list[tuple[float, float, str]] = field(default_factory=list)
 
     def to_svg(self) -> str:
         from gitcad.drawing.svg import render_svg

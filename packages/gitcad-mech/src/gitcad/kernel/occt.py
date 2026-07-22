@@ -19,7 +19,9 @@ try:
     from OCP.Bnd import Bnd_Box
     from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
     from OCP.BRepBndLib import BRepBndLib
-    from OCP.BRepAlgoAPI import BRepAlgoAPI_Common, BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
+    from OCP.BRepAlgoAPI import (BRepAlgoAPI_Common, BRepAlgoAPI_Cut,
+                                 BRepAlgoAPI_Fuse, BRepAlgoAPI_Section)
+    from OCP.gp import gp_Pln
     from OCP.BRepBuilderAPI import (
         BRepBuilderAPI_MakeEdge,
         BRepBuilderAPI_MakeFace,
@@ -344,6 +346,38 @@ class OcctKernel:
         trsf.SetMirror(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(*normals[plane])))
         out = BRepBuilderAPI_Transform(shape, trsf, True).Shape()
         self.validate(out).raise_if_invalid("mirror", self.name)
+        return out
+
+    def section_polys(self, shape: Shape, normal: tuple[float, float, float],
+                      xdir: tuple[float, float, float], offset: float, *,
+                      deflection: float = 0.05) -> list[list[tuple[float, float]]]:
+        """Exact plane∩solid intersection curves, projected to 2D in the same
+        frame hlr_project uses for direction=normal — so section outlines
+        overlay an HLR view of the cut body coordinate-for-coordinate."""
+        n = gp_Dir(*normal)
+        origin = gp_Pnt(normal[0] * offset, normal[1] * offset, normal[2] * offset)
+        algo = BRepAlgoAPI_Section(shape, gp_Pln(origin, n))
+        algo.Build()
+        if not algo.IsDone():
+            raise KernelError(
+                "section computation failed",
+                FailureSignature(op="section", diagnostic="Section:NotDone", kernel=self.name))
+        # Orthonormal frame identical to gp_Ax2(origin0, normal, xdir).
+        ax = gp_Ax2(gp_Pnt(0, 0, 0), n, gp_Dir(*xdir))
+        xd, yd = ax.XDirection(), ax.YDirection()
+        out: list[list[tuple[float, float]]] = []
+        for raw in _unique_shapes(algo.Shape(), TopAbs_EDGE):
+            curve = BRepAdaptor_Curve(TopoDS.Edge_s(raw))
+            sampler = GCPnts_QuasiUniformDeflection(curve, deflection)
+            if not sampler.IsDone():
+                continue
+            poly = []
+            for i in range(1, sampler.NbPoints() + 1):
+                p = sampler.Value(i)
+                poly.append((p.X() * xd.X() + p.Y() * xd.Y() + p.Z() * xd.Z(),
+                             p.X() * yd.X() + p.Y() * yd.Y() + p.Z() * yd.Z()))
+            if len(poly) >= 2:
+                out.append(poly)
         return out
 
     def mass_props(self, shape: Shape) -> dict[str, float]:
