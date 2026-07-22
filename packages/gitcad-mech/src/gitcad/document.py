@@ -266,7 +266,34 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
             return kernel.import_brep(path)
         raise GitcadError(f"unknown import format {fmt!r} (want step|brep)")
     if f.op == "extrude":
-        return kernel.extrude(p["profile"], p["height"])
+        # SW-FR2: sketch planes + sketch-on-face. `plane` places the sketch on
+        # a principal plane at an offset (normal x: sketch x->Y, y->Z, extrude
+        # +X; normal y: sketch x->Z, y->X, extrude +Y — one cyclic rotation of
+        # the frame, so right-handedness is preserved). With an input body and
+        # `mode`, the extrusion combines as a boss ("add") or a cut — sketch on
+        # a face found via the select DSL, then extrude into or out of it.
+        shape = kernel.extrude(p["profile"], p["height"])
+        plane = p.get("plane")
+        if plane:
+            normal = plane.get("normal", "z")
+            offset = plane.get("offset", 0.0)
+            if normal == "x":
+                shape = kernel.transform(shape, rotate_axis=(1, 1, 1),
+                                         rotate_deg=120.0, translate=(offset, 0, 0))
+            elif normal == "y":
+                shape = kernel.transform(shape, rotate_axis=(1, 1, 1),
+                                         rotate_deg=240.0, translate=(0, offset, 0))
+            elif normal == "z":
+                if offset:
+                    shape = kernel.transform(shape, translate=(0, 0, offset))
+            else:
+                raise GitcadError(f"extrude plane normal must be x|y|z, got {normal!r}")
+        if ins:
+            mode = p.get("mode", "add")
+            if mode not in ("add", "cut"):
+                raise GitcadError(f"extrude mode must be add|cut, got {mode!r}")
+            return kernel.boolean("union" if mode == "add" else "cut", ins[0], shape)
+        return shape
     if f.op == "revolve":
         return kernel.revolve(p["profile"], p.get("angle_deg", 360.0))
     if f.op == "loft":
