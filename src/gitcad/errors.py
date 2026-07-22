@@ -74,5 +74,11 @@ class ValidationReport:
 
     def raise_if_invalid(self, op: str, kernel: str = "unknown") -> None:
         if not self.ok:
-            sig = FailureSignature(op=op, diagnostic=";".join(self.violations), kernel=kernel)
-            raise GeometryInvalidError(f"{op} produced invalid geometry", sig)
+            # Fingerprints must carry only the closed-vocabulary violation
+            # CODES, never the per-instance detail after the first colon —
+            # detail embeds designators/dimensions (unsafe to transmit, per
+            # the FailureSignature contract) and varies per model (destroying
+            # dedup). Reviewed 2026-07-22. Violation format: "code:detail".
+            codes = sorted({v.split(":", 1)[0] for v in self.violations})
+            sig = FailureSignature(op=op, diagnostic=";".join(codes), kernel=kernel)
+            raise GeometryInvalidError(f"{op} produced invalid geometry: {self.violations}", sig)

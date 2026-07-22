@@ -31,8 +31,11 @@ try:
         BRepPrimAPI_MakeCylinder,
         BRepPrimAPI_MakeSphere,
     )
+    from OCP.GCPnts import GCPnts_QuasiUniformDeflection
     from OCP.GeomAbs import GeomAbs_CurveType, GeomAbs_SurfaceType
-    from OCP.gp import gp_Ax1, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
+    from OCP.gp import gp_Ax1, gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
+    from OCP.HLRAlgo import HLRAlgo_Projector
+    from OCP.HLRBRep import HLRBRep_Algo, HLRBRep_HLRToShape
     from OCP.GProp import GProp_GProps
     from OCP.BRep import BRep_Builder
     from OCP.BRepTools import BRepTools
@@ -199,7 +202,7 @@ class OcctKernel:
         ok = bool(analyzer.IsValid())
         report = ValidationReport(ok=ok, checks={"backend": self.name, "brepcheck": ok})
         if not ok:
-            report.violations.append("BRepCheck:invalid")
+            report.violations.append("brepcheck-invalid")
         return report
 
     def measure(self, shape: Shape) -> dict[str, float]:
@@ -233,6 +236,38 @@ class OcctKernel:
                 f"STEP write failed (status {int(status)})",
                 FailureSignature(op="export.step", diagnostic=f"IFSelect:{int(status)}", kernel=self.name),
             )
+
+    # -- projection (the drawing engine's geometry backend) -------------------
+
+    def hlr_project(self, shape: Shape, direction: tuple[float, float, float],
+                    xdir: tuple[float, float, float], *,
+                    deflection: float = 0.05) -> dict[str, list[list[tuple[float, float]]]]:
+        """Hidden-line-removal projection: 2D polylines (sheet coords, mm)
+        classified visible/hidden. The DrawingEngine consumes this through the
+        Kernel seam — no OCP outside this module (ADR-0002, enforced by an
+        invariant test)."""
+        algo = HLRBRep_Algo()
+        algo.Add(shape)
+        ax = gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(*direction), gp_Dir(*xdir))
+        algo.Projector(HLRAlgo_Projector(ax))
+        algo.Update()
+        algo.Hide()
+        hlr = HLRBRep_HLRToShape(algo)
+
+        out: dict[str, list[list[tuple[float, float]]]] = {"visible": [], "hidden": []}
+        for key, compound in (("visible", hlr.VCompound()), ("hidden", hlr.HCompound())):
+            if compound.IsNull():
+                continue
+            for raw in _unique_shapes(compound, TopAbs_EDGE):
+                curve = BRepAdaptor_Curve(TopoDS.Edge_s(raw))
+                sampler = GCPnts_QuasiUniformDeflection(curve, deflection)
+                if not sampler.IsDone():
+                    continue
+                poly = [(sampler.Value(i).X(), sampler.Value(i).Y())
+                        for i in range(1, sampler.NbPoints() + 1)]
+                if len(poly) >= 2:
+                    out[key].append(poly)
+        return out
 
     # -- imports (onboarding existing work) -----------------------------------
 

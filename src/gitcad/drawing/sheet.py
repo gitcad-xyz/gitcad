@@ -61,12 +61,16 @@ def _transform(polys, scale: float, ox: float, oy: float, bmin: Point):
     return [[(ox + (x - bmin[0]) * scale, oy + (y - bmin[1]) * scale) for x, y in poly] for poly in polys]
 
 
-def make_drawing(shape, *, title: str = "part", sheet: str = "A3") -> Drawing:
-    """Project ``shape`` into front/top/right/iso, lay out third-angle on the
-    sheet, add overall dimensions, return a :class:`Drawing`."""
+def make_drawing(shape, kernel=None, *, title: str = "part", sheet: str = "A3") -> Drawing:
+    """Project ``shape`` into front/top/right/iso via the kernel's HLR engine,
+    lay out third-angle on the sheet, add overall dimensions."""
+    if kernel is None:
+        from gitcad.kernel import get_kernel
+
+        kernel = get_kernel(require="occt")
     w, h = SHEETS[sheet]
 
-    proj = {v: hlr.project(shape, v) for v in ("front", "top", "right", "iso")}
+    proj = {v: hlr.project(kernel, shape, v) for v in ("front", "top", "right", "iso")}
     bb = {v: hlr.bounds(p["visible"] + p["hidden"]) for v, p in proj.items()}
     size = {v: (bb[v][2] - bb[v][0], bb[v][3] - bb[v][1]) for v in bb}
 

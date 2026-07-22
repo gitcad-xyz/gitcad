@@ -50,7 +50,7 @@ STYLE = """
 
 FOOTER = ('<footer>generated from '
           '<a href="https://github.com/gitcad-xyz/gitcad">gitcad-xyz/gitcad</a>'
-          ' — this page rebuilds on every push to main</footer>')
+          ' — this page regenerates automatically from the repo</footer>')
 
 
 def page(title: str, body: str, crumb: str = "") -> str:

@@ -10,10 +10,10 @@ try removing subsets of features; keep any removal that *preserves the same
 failure fingerprint*. Terminate at a 1-minimal document (no single further
 feature can be removed without changing the failure).
 
-Scrubbing (rounding dimensions, canonicalizing coordinates, stripping names) and
-the similarity check that proves the result no longer resembles the original are
-separate passes; this module handles the structural reduction and leaves clean
-hooks for them.
+IMPORTANT: ``ReductionResult.minimal`` is a subset of the user's actual
+features with the user's actual dimensions — NOT yet safe to transmit. The
+transmit-safety gate is :func:`gitcad.report.scrub.prepare_submission`
+(scrub + verify-twice, ADR-0007 steps 3-4).
 
 Nothing here transmits anything. The output is a candidate payload for the user
 to inspect and approve (ADR-0007).

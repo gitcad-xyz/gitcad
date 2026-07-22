@@ -104,6 +104,13 @@ class Kernel(Protocol):
         """Combine shapes into one compound (multi-body import container)."""
         ...
 
+    def hlr_project(self, shape: Shape, direction: tuple[float, float, float],
+                    xdir: tuple[float, float, float], *,
+                    deflection: float = 0.05) -> dict[str, list[list[tuple[float, float]]]]:
+        """Hidden-line-removal projection to 2D polylines (visible/hidden) —
+        the geometry backend of the DrawingEngine (ADR-0002)."""
+        ...
+
 
 @runtime_checkable
 class IdentityService(Protocol):

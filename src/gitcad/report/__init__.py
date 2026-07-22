@@ -12,5 +12,7 @@ exact payload before anything leaves the machine.
 
 from gitcad.report.fingerprint import fingerprint
 from gitcad.report.reduce import ReductionResult, reduce_document
+from gitcad.report.scrub import Submission, prepare_submission, scrub, similarity
 
-__all__ = ["fingerprint", "reduce_document", "ReductionResult"]
+__all__ = ["fingerprint", "reduce_document", "ReductionResult",
+           "scrub", "similarity", "prepare_submission", "Submission"]

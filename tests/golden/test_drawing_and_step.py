@@ -47,9 +47,9 @@ def test_stl_export_writes_mesh(part, tmp_path) -> None:
 def test_hlr_projections_are_dimensionally_correct(part) -> None:
     from gitcad.drawing.hlr import bounds, project
 
-    _, shape = part
+    k, shape = part
     for view, (w, h) in {"front": (60, 8), "top": (60, 40), "right": (40, 8)}.items():
-        b = bounds(project(shape, view)["visible"])
+        b = bounds(project(k, shape, view)["visible"])
         assert b[2] - b[0] == pytest.approx(w, abs=1e-3), view
         assert b[3] - b[1] == pytest.approx(h, abs=1e-3), view
 

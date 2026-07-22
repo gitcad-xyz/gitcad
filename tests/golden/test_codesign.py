@@ -61,7 +61,7 @@ def test_moved_hole_fails_the_mate_check() -> None:
     physical mismatch — this is co-design as machine verification."""
     report = _product(_board(hole2=(28.5, 17.0))).validate()
     assert not report.ok
-    assert any(v.startswith("mate:position-mismatch:board.mnt_2") for v in report.violations)
+    assert any(v.startswith("mate-position-mismatch:board.mnt_2") for v in report.violations)
 
 
 def test_moved_hole_also_fails_the_release_gate() -> None:
@@ -77,7 +77,7 @@ def test_incompatible_port_types_rejected() -> None:
     board = _board()
     board.interface.ports["mnt_1"] = Port("mnt_1", "elec.pin", "mnt_1")
     report = _product(board).validate()
-    assert any(v.startswith("mate:incompatible-types") for v in report.violations)
+    assert any(v.startswith("mate-incompatible-types") for v in report.violations)
 
 
 def test_assembly_envelope_unions_instances() -> None:

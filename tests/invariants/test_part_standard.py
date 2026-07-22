@@ -202,5 +202,5 @@ def test_mate_failures_do_not_swallow_later_mates() -> None:
     asm.mate("ghost.mnt_1", "b.mnt_1")          # unknown instance
     asm.mate("b.mnt_1", "b.mnt_2")              # real mate, 30mm apart
     report = asm.validate()
-    assert any(v.startswith("mate:unknown-instance") for v in report.violations)
-    assert any(v.startswith("mate:position-mismatch") for v in report.violations)
+    assert any(v.startswith("mate-unknown-instance") for v in report.violations)
+    assert any(v.startswith("mate-position-mismatch") for v in report.violations)

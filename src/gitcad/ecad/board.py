@@ -163,11 +163,11 @@ class Board:
         if not re.fullmatch(r"[A-Za-z0-9._-]+", self.name) or ".." in self.name:
             violations.append("board-name-not-filesystem-safe")
         if len(self.outline) < 3:
-            violations.append("outline:degenerate")
+            violations.append("outline-degenerate")
         minx, miny, maxx, maxy = self.bbox()
         refs = [c.ref for c in self.components]
         if len(refs) != len(set(refs)):
-            violations.append("components:duplicate-refs")
+            violations.append("components-duplicate-refs")
         for comp in self.components:
             # v0.1 writers can only render right-angle rotations; anything else
             # would emit wrong copper silently — reject at the fab gate.
@@ -188,7 +188,7 @@ class Board:
                 violations.append(f"track-bad-layer:{i}")
         hole_names = [m.name for m in self.mounting_holes]
         if len(hole_names) != len(set(hole_names)):
-            violations.append("mounting-holes:duplicate-names")
+            violations.append("mounting-holes-duplicate-names")
         for m in self.mounting_holes:
             if not (minx <= m.x <= maxx and miny <= m.y <= maxy):
                 violations.append(f"mounting-hole-outside-outline:{m.name}")

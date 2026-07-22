@@ -21,9 +21,31 @@ REGISTRY: dict[str, Handler] = {}
 
 
 def tool(name: str) -> Callable[[Handler], Handler]:
+    """Register a handler, wrapped in the structured-error contract: an agent
+    NEVER sees a raw traceback — failures return machine-actionable
+    ``{"ok": false, "error": {...}}``, with the dedup fingerprint attached
+    when the failure is a kernel/geometry error (feeds the report pipeline)."""
+
     def deco(fn: Handler) -> Handler:
-        REGISTRY[name] = fn
-        return fn
+        import functools
+        import json as _json
+
+        from gitcad.errors import GitcadError, KernelError
+        from gitcad.report import fingerprint
+
+        @functools.wraps(fn)
+        def wrapped(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            try:
+                return fn(*args, **kwargs)
+            except KernelError as exc:
+                return {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)},
+                        "fingerprint": fingerprint(exc.signature)}
+            except (GitcadError, ValueError, KeyError, FileNotFoundError,
+                    _json.JSONDecodeError, NotImplementedError) as exc:
+                return {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}}
+
+        REGISTRY[name] = wrapped
+        return wrapped
 
     return deco
 

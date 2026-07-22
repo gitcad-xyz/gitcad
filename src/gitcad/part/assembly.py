@@ -107,21 +107,21 @@ class Assembly:
             # this mate's checks (reviewed 2026-07-22).
             missing = [i for i in (ia, ib) if i not in self.instances]
             if missing:
-                violations.extend(f"mate:unknown-instance:{i}" for i in missing)
+                violations.extend(f"mate-unknown-instance:{i}" for i in missing)
                 continue
             inst_a, inst_b = self.instances[ia], self.instances[ib]
             try:
                 port_a = inst_a.part.interface.ports[pa]
                 port_b = inst_b.part.interface.ports[pb]
             except KeyError as exc:
-                violations.append(f"mate:unknown-port:{exc.args[0]}")
+                violations.append(f"mate-unknown-port:{exc.args[0]}")
                 continue
             if frozenset({port_a.type, port_b.type}) not in COMPATIBLE_TYPES:
-                violations.append(f"mate:incompatible-types:{m.a}({port_a.type})<->{m.b}({port_b.type})")
+                violations.append(f"mate-incompatible-types:{m.a}({port_a.type})<->{m.b}({port_b.type})")
             pos_a, pos_b = inst_a.port_position(pa), inst_b.port_position(pb)
             dist = math.dist(pos_a, pos_b)   # full 3D coincidence
             if dist > _TOL:
-                violations.append(f"mate:position-mismatch:{m.a}<->{m.b}:d={dist:.3f}mm")
+                violations.append(f"mate-position-mismatch:{m.a}<->{m.b}:d={dist:.3f}mm")
         # checks states METHOD and coverage so ok=True can never overstate what
         # was verified (frame orientation is not yet checked, only position).
         return ValidationReport(
