@@ -54,6 +54,14 @@ class Kernel(Protocol):
         """Revolve a closed XY profile about the Y axis."""
         ...
 
+    def chamfer(self, shape: Shape, edges: list[int] | None, distance: float) -> Shape:
+        """Chamfer by edge enumeration index (same contract as fillet)."""
+        ...
+
+    def shell(self, shape: Shape, remove_faces: list[int], thickness: float) -> Shape:
+        """Hollow to a wall thickness, removing listed faces as openings."""
+        ...
+
     def fillet(self, shape: Shape, edges: list[int] | None, radius: float) -> Shape:
         """Fillet by enumeration index into ``entities(shape, "edge")`` order
         (``None`` = all edges). Index resolution from stable entity ids happens

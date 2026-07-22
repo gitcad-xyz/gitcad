@@ -183,25 +183,25 @@ def _index_entities(kernel: Kernel, shape: Shape, feature_id: str,
     return out
 
 
-def _resolve_edge_indices(edge_ids: list[str], input_feature: str,
-                          result: BuildResult) -> list[int]:
-    """Map stored entity ids to the input shape's current edge enumeration
-    indices — the moment ADR-0003 pays off: the reference survives upstream
-    edits because identity re-binds by fingerprint, not position."""
+def _resolve_entity_indices(entity_ids: list[str], input_feature: str,
+                            result: BuildResult, kind: str = "edge") -> list[int]:
+    """Map stored entity ids to the input shape's current enumeration indices
+    — the moment ADR-0003 pays off: the reference survives upstream edits
+    because identity re-binds by fingerprint, not position."""
     identity = result.identity
     assert identity is not None
-    indexed = result.entities.get(input_feature, {}).get("edge", [])
+    indexed = result.entities.get(input_feature, {}).get(kind, [])
     descriptors = [d for _, d in indexed]
     by_current_id = {eid: i for i, (eid, _) in enumerate(indexed)}
     indices: list[int] = []
-    for eid in edge_ids:
+    for eid in entity_ids:
         if eid in by_current_id:            # exact id still present
             indices.append(by_current_id[eid])
             continue
         resolved = identity.resolve(eid, descriptors)   # re-bind by fingerprint
         if resolved is None:
             raise IdentityError(
-                f"edge {eid!r} no longer exists on feature {input_feature!r}",
+                f"{kind} {eid!r} no longer exists on feature {input_feature!r}",
                 entity=eid,
             )
         indices.append(descriptors.index(resolved))
@@ -252,6 +252,42 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
         return kernel.boolean(p["kind"], ins[0], ins[1])
     if f.op == "fillet":
         edge_ids = p.get("edges", [])
-        indices = _resolve_edge_indices(edge_ids, f.inputs[0], result) if edge_ids else None
+        indices = _resolve_entity_indices(edge_ids, f.inputs[0], result) if edge_ids else None
         return kernel.fillet(ins[0], indices, p["radius"])
+    if f.op == "chamfer":
+        edge_ids = p.get("edges", [])
+        indices = _resolve_entity_indices(edge_ids, f.inputs[0], result) if edge_ids else None
+        return kernel.chamfer(ins[0], indices, p["distance"])
+    if f.op == "shell":
+        face_indices = _resolve_entity_indices(p.get("faces", []), f.inputs[0], result, kind="face")
+        return kernel.shell(ins[0], face_indices, p["thickness"])
+    if f.op == "pattern_linear":
+        # Composition, not a kernel primitive: union of translated copies.
+        out = ins[0]
+        step = p.get("step", [0.0, 0.0, 0.0])
+        for i in range(1, int(p["count"])):
+            copy = kernel.transform(ins[0], translate=(step[0] * i, step[1] * i, step[2] * i))
+            out = kernel.boolean("union", out, copy)
+        return out
+    if f.op == "pattern_circular":
+        out = ins[0]
+        count = int(p["count"])
+        for i in range(1, count):
+            copy = kernel.transform(ins[0], rotate_axis=(0, 0, 1),
+                                    rotate_deg=360.0 * i / count)
+            out = kernel.boolean("union", out, copy)
+        return out
+    if f.op == "hole":
+        # Drilled from top_z downward; optional counterbore. A composed cut —
+        # the workhorse mech feature as one intent-level op.
+        x, y, top_z = p["x"], p["y"], p["top_z"]
+        depth, dia = p["depth"], p["diameter"]
+        tool = kernel.transform(kernel.cylinder(dia / 2, depth),
+                                translate=(x, y, top_z - depth))
+        if p.get("cbore_diameter"):
+            cb = kernel.transform(
+                kernel.cylinder(p["cbore_diameter"] / 2, p["cbore_depth"]),
+                translate=(x, y, top_z - p["cbore_depth"]))
+            tool = kernel.boolean("union", tool, cb)
+        return kernel.boolean("cut", ins[0], tool)
     raise GitcadError(f"unknown operation {f.op!r} (feature {f.id})")

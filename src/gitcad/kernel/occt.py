@@ -29,7 +29,11 @@ try:
     from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism, BRepPrimAPI_MakeRevol
     from OCP.GC import GC_MakeArcOfCircle
     from OCP.BRepCheck import BRepCheck_Analyzer
-    from OCP.BRepFilletAPI import BRepFilletAPI_MakeFillet
+    from OCP.BRepFilletAPI import BRepFilletAPI_MakeChamfer, BRepFilletAPI_MakeFillet
+    from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeThickSolid
+    from OCP.BRepOffset import BRepOffset_Skin
+    from OCP.GeomAbs import GeomAbs_Arc
+    from OCP.TopTools import TopTools_ListOfShape
     from OCP.BRepGProp import BRepGProp
     from OCP.BRepMesh import BRepMesh_IncrementalMesh
     from OCP.BRepPrimAPI import (
@@ -156,6 +160,60 @@ class OcctKernel:
             )
         out = mk.Shape()
         self.validate(out).raise_if_invalid("fillet", self.name)
+        return out
+
+    def chamfer(self, shape: Shape, edges: list[int] | None, distance: float) -> Shape:
+        """Chamfer by edge enumeration index (same contract as fillet)."""
+        mk = BRepFilletAPI_MakeChamfer(shape)
+        wanted = set(edges) if edges is not None else None
+        count = 0
+        for index, raw in enumerate(_unique_shapes(shape, TopAbs_EDGE)):
+            if wanted is None or index in wanted:
+                mk.Add(distance, TopoDS.Edge_s(raw))
+                count += 1
+        if wanted is not None and count != len(wanted):
+            raise KernelError(
+                f"chamfer: {len(wanted)} edge indices given, only {count} exist",
+                FailureSignature(op="chamfer", diagnostic="EdgeIndexOutOfRange", kernel=self.name),
+            )
+        try:
+            mk.Build()
+        except Exception as exc:
+            raise KernelError(
+                f"chamfer d={distance} failed",
+                FailureSignature(op="chamfer", diagnostic=type(exc).__name__, kernel=self.name),
+            ) from exc
+        if not mk.IsDone():
+            raise KernelError(
+                f"chamfer d={distance} did not converge",
+                FailureSignature(op="chamfer", diagnostic="MakeChamfer:NotDone", kernel=self.name),
+            )
+        out = mk.Shape()
+        self.validate(out).raise_if_invalid("chamfer", self.name)
+        return out
+
+    def shell(self, shape: Shape, remove_faces: list[int], thickness: float) -> Shape:
+        """Hollow to a wall thickness, removing the listed faces (by face
+        enumeration index) to leave openings."""
+        faces = TopTools_ListOfShape()
+        all_faces = _unique_shapes(shape, TopAbs_FACE)
+        for idx in remove_faces:
+            if idx >= len(all_faces):
+                raise KernelError(
+                    f"shell: face index {idx} out of range ({len(all_faces)} faces)",
+                    FailureSignature(op="shell", diagnostic="FaceIndexOutOfRange", kernel=self.name),
+                )
+            faces.Append(all_faces[idx])
+        mk = BRepOffsetAPI_MakeThickSolid()
+        mk.MakeThickSolidByJoin(shape, faces, -abs(thickness), 1e-3,
+                                BRepOffset_Skin, False, False, GeomAbs_Arc)
+        if not mk.IsDone():
+            raise KernelError(
+                f"shell t={thickness} failed",
+                FailureSignature(op="shell", diagnostic="MakeThickSolid:NotDone", kernel=self.name),
+            )
+        out = mk.Shape()
+        self.validate(out).raise_if_invalid("shell", self.name)
         return out
 
     def transform(self, shape: Shape, *, translate: tuple[float, float, float] = (0, 0, 0),

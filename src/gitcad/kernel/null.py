@@ -126,6 +126,15 @@ class NullKernel:
         return NullShape("fillet", {"edges": list(edges) if edges is not None else None,
                                     "radius": radius}, (shape,))
 
+    def chamfer(self, shape: Shape, edges: list[int] | None, distance: float) -> Shape:
+        _require_positive(distance=distance)
+        return NullShape("chamfer", {"edges": list(edges) if edges is not None else None,
+                                     "distance": distance}, (shape,))
+
+    def shell(self, shape: Shape, remove_faces: list[int], thickness: float) -> Shape:
+        _require_positive(thickness=thickness)
+        return NullShape("shell", {"faces": list(remove_faces), "thickness": thickness}, (shape,))
+
     def entities(self, shape: Shape, kind: str) -> list[dict[str, Any]]:
         """Deterministic synthetic topology so identity assignment is testable.
         A box gets 6 faces / 12 edges / 8 vertices with stable descriptors that
