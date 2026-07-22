@@ -100,11 +100,27 @@ def assembly_mesh_payload(manifest_path: Path, kernel: Kernel) -> dict:
             raise ValueError(f"instance {name!r}: part {inst['part']!r} not found "
                              f"next to the assembly (need its part.json + model)")
         part, pj_path = entry
-        model_file = pj_path.parent / part.body.get("model", "")
-        if not model_file.exists():
-            raise ValueError(f"instance {name!r}: model file {model_file.name!r} "
-                             f"missing next to {pj_path.name}")
-        doc = Document.loads(model_file.read_text(encoding="utf-8"))
+        model_name = part.body.get("model")
+        board_name = part.body.get("board")
+        if model_name:
+            model_file = pj_path.parent / model_name
+            if not model_file.is_file():
+                raise ValueError(f"instance {name!r}: model file {model_file.name!r} "
+                                 f"missing next to {pj_path.name}")
+            doc = Document.loads(model_file.read_text(encoding="utf-8"))
+        elif board_name:
+            # board-backed part: extrude the board through the bridge
+            from gitcad.bridge import board_to_model
+            from gitcad.ecad.board import Board
+
+            board_file = pj_path.parent / board_name
+            if not board_file.is_file():
+                raise ValueError(f"instance {name!r}: board file {board_file.name!r} "
+                                 f"missing next to {pj_path.name}")
+            doc = board_to_model(Board.loads(board_file.read_text(encoding="utf-8")))
+        else:
+            raise ValueError(f"instance {name!r}: part {part.name!r} has neither "
+                             f"body.model nor body.board — nothing to render")
         shape = kernel.transform(
             doc.build(kernel).final(doc),
             translate=tuple(inst.get("translate", (0, 0, 0))),
@@ -131,6 +147,38 @@ def assembly_mesh_payload(manifest_path: Path, kernel: Kernel) -> dict:
                   "instances": len(groups), "kernel": kernel.name,
                   "volume_mm3": 0, "features": len(groups)},
     }
+
+
+def discover_schematics(root: Path, limit: int = 12) -> list[dict]:
+    """The schematics that make up a design, rendered for review.
+
+    Scans the design's directory tree for schematic sources: ``*.kicad_sch``
+    (rendered exactly as drawn via the importer + fidelity renderer) and
+    ``*.schematic.json`` (canonical gitcad schematics, auto-layout). This is
+    the electrical view under a 3D assembly — same sibling-scan rule the
+    assembly mesh resolver uses."""
+    out: list[dict] = []
+    sources = (sorted(root.rglob("*.kicad_sch"))
+               + sorted(root.rglob("*.schematic.json"))
+               + sorted(root.rglob("*.sch.json")))
+    for src in sources[:limit]:
+        try:
+            if src.suffix == ".kicad_sch":
+                from gitcad.ecad.schsvg import sheet_to_svg
+                from gitcad.importers.kicad_sch import import_kicad_sch
+
+                sch, _report = import_kicad_sch(str(src))
+                svg = sheet_to_svg(sch)
+            else:
+                from gitcad.ecad import Schematic, schematic_to_svg
+
+                sch = Schematic.loads(src.read_text(encoding="utf-8"))
+                svg = schematic_to_svg(sch)
+            out.append({"name": sch.name, "file": src.name, "svg": svg})
+        except Exception as exc:   # a broken sheet must not sink the review
+            out.append({"name": src.stem, "file": src.name,
+                        "error": f"{type(exc).__name__}: {exc}"})
+    return out
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -166,6 +214,10 @@ class _Handler(BaseHTTPRequestHandler):
                 else:
                     payload = mesh_payload(Document.loads(text), self.kernel)
                 self._send(200, json.dumps(payload).encode(), "application/json")
+            elif self.path == "/api/schematics":
+                sheets = discover_schematics(self.path_watched.parent)
+                self._send(200, json.dumps({"sheets": sheets}).encode(),
+                           "application/json")
             elif self.path == "/api/board.svg":
                 kind = detect_kind(text)
                 if kind == "schematic":
