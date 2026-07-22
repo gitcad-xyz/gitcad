@@ -21,13 +21,17 @@ def _sch() -> Schematic:
     return s
 
 
-def test_diagram_renders_symbols_nets_and_labels() -> None:
+def test_diagram_renders_kicad_style() -> None:
     svg = schematic_to_svg(_sch())
     assert svg.startswith("<svg")
-    assert ">R1<" in svg and ">330R<" in svg          # ref + value
+    assert ">R1<" in svg and ">330R<" in svg          # ref + value (dark cyan)
     assert ">U1<" in svg and ">SCLK<" in svg          # IC box with pin names
-    assert ">VCC<" in svg and ">GND<" in svg          # net lane labels
-    assert svg.count("<circle") >= 3                  # junction dots on VCC (3 pins)
+    assert 'stroke="#840000"' in svg                  # maroon symbol outlines
+    assert 'fill="#FFFFC2"' in svg                    # cream symbol fill
+    assert 'stroke="#008400"' in svg                  # green wires
+    assert ">VCC<" in svg                             # power symbol label (not a lane)
+    assert svg.count('stroke-width="0.6"') >= 4       # GND flags + power stubs
+    assert 'style="background:#FFFFFF"' in svg        # white canvas
     assert schematic_to_svg(_sch()) == svg            # deterministic
 
 
