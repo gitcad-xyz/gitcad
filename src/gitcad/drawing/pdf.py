@@ -93,6 +93,10 @@ def _content_stream(d: Drawing) -> bytes:
             polyline([(x2 - a, y2 - a / 2), (x2, y2), (x2 - a, y2 + a / 2)], 0.13)
             text((x1 + x2) / 2 - 3, y1 + 1.2, 3.0, dim.text)
 
+    for c in d.callouts:
+        polyline([c.anchor, c.label], 0.13)
+        text(c.label[0] + 0.8, c.label[1], 3.0, c.text)
+
     # Title block (bottom right)
     w, h = 92.0, 20.0
     x0, y0 = d.width - 5 - w, 5.0

@@ -35,6 +35,14 @@ class Dimension:
 
 
 @dataclass
+class Callout:
+    """A leader annotation: anchor point on geometry, label offset away."""
+    anchor: Point
+    label: Point
+    text: str
+
+
+@dataclass
 class Drawing:
     sheet: str
     width: float
@@ -43,6 +51,7 @@ class Drawing:
     title: str
     views: list[PlacedView] = field(default_factory=list)
     dims: list[Dimension] = field(default_factory=list)
+    callouts: list[Callout] = field(default_factory=list)
 
     def to_svg(self) -> str:
         from gitcad.drawing.svg import render_svg
@@ -113,4 +122,48 @@ def make_drawing(shape, kernel=None, *, title: str = "part", sheet: str = "A3") 
                             _fmt(size["front"][1]), vertical=True))
     d.dims.append(Dimension((tx - DIM_OFFSET, ty), (tx - DIM_OFFSET, ty + th),
                             _fmt(size["top"][1]), vertical=True))
+
+    _add_hole_dimensions(d, kernel, shape, placements["top"], bb["top"], scale)
     return d
+
+
+def _add_hole_dimensions(d: Drawing, kernel, shape, top_origin: Point,
+                         top_bounds, scale: float) -> None:
+    """Derived (associative) hole dimensions on the top view: a Ø-callout per
+    unique hole plus x/y position dims from the part datum. Derived from the
+    kernel's face enumeration — the same geometry source feature recognition
+    uses — so regenerating the drawing after a model edit updates every value.
+    Failures degrade to an undimensioned (but correct) drawing, never a crash.
+    """
+    try:
+        faces = kernel.entities(shape, "face")
+    except NotImplementedError:
+        return
+    holes: dict[tuple, tuple[float, float, float]] = {}
+    for f in faces:
+        if f.get("surface") == "cylinder" and abs(abs(f["axis_dir"][2]) - 1.0) < 1e-6:
+            hx, hy = round(f["axis_origin"][0], 6), round(f["axis_origin"][1], 6)
+            holes[(hx, hy, round(f["radius"], 6))] = (hx, hy, f["radius"])
+    if not holes:
+        return
+
+    ox, oy = top_origin
+    bx, by = top_bounds[0], top_bounds[1]
+    to_sheet = lambda mx, my: (ox + (mx - bx) * scale, oy + (my - by) * scale)  # noqa: E731
+    top_h = (top_bounds[3] - top_bounds[1]) * scale
+
+    for i, (hx, hy, r) in enumerate(sorted(holes.values())):
+        cx, cy = to_sheet(hx, hy)
+        rs = r * scale
+        # Ø-callout: leader from the circle's 45° edge point outward.
+        k = 0.7071
+        anchor = (cx + rs * k, cy + rs * k)
+        d.callouts.append(Callout(anchor, (anchor[0] + 5.0, anchor[1] + 5.0),
+                                  f"Ø{_fmt(2 * r)}"))
+        # Position dims from the part datum (view min corner), stacked above
+        # the view (x) and left of it (y) so multiple holes don't collide.
+        x_off = top_h + DIM_OFFSET * (i + 1)
+        d.dims.append(Dimension((ox, oy + x_off), (cx, oy + x_off), _fmt(hx - bx)))
+        y_off = DIM_OFFSET * (i + 2)   # (i+2): outside the overall-depth dim
+        d.dims.append(Dimension((ox - y_off, oy), (ox - y_off, cy),
+                                _fmt(hy - by), vertical=True))

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from xml.sax.saxutils import escape
 
-from gitcad.drawing.sheet import Dimension, Drawing
+from gitcad.drawing.sheet import Callout, Dimension, Drawing  # noqa: F401 - Callout used in render
 
 _STYLE = (
     ".v{stroke:#111;stroke-width:0.35;fill:none;stroke-linecap:round}"
@@ -44,6 +44,12 @@ def render_svg(d: Drawing) -> str:
 
     for dim in d.dims:
         out.append(_dim_svg(dim, y))
+
+    for c in d.callouts:
+        out.append(f'<line class="d" x1="{c.anchor[0]:.2f}" y1="{y(c.anchor[1]):.2f}" '
+                   f'x2="{c.label[0]:.2f}" y2="{y(c.label[1]):.2f}"/>')
+        out.append(f'<text class="t" x="{c.label[0] + 0.8:.2f}" y="{y(c.label[1]):.2f}">'
+                   f'{escape(c.text)}</text>')
 
     out.append(_title_block(d, y))
     out.append("</svg>")

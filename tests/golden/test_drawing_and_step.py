@@ -63,7 +63,9 @@ def test_drawing_renders_svg_and_pdf(part) -> None:
     assert svg.startswith("<svg") and "polyline" in svg and "test part" in svg
     pdf = d.to_pdf()
     assert pdf.startswith(b"%PDF-1.4") and pdf.rstrip().endswith(b"%%EOF")
-    assert len(d.views) == 4 and len(d.dims) == 3
+    assert len(d.views) == 4
+    # 3 overall dims + 2 position dims and a Ø-callout for the hole.
+    assert len(d.dims) == 5 and len(d.callouts) == 1
 
 
 def test_fillet_reduces_volume_and_stays_valid(part) -> None:
