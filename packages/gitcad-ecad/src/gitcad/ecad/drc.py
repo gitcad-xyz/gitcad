@@ -313,7 +313,12 @@ def run_drc(board: Board, pack: RulePack | None = None) -> ValidationReport:
                 d = min(x1 - minx, x2 - minx, maxx - x1, maxx - x2,
                         y1 - miny, y2 - miny, maxy - y1, maxy - y2) - hw
             else:
-                bx1, by1, bx2, by2 = it.box
+                if it.box is not None:
+                    bx1, by1, bx2, by2 = it.box
+                else:  # zone: bounds of its polygon
+                    xs = [p[0] for p in it.poly]
+                    ys = [p[1] for p in it.poly]
+                    bx1, by1, bx2, by2 = min(xs), min(ys), max(xs), max(ys)
                 d = min(bx1 - minx, maxx - bx2, by1 - miny, maxy - by2)
             if d < elo:
                 violations.append(f"edge-clearance:{it.label}:d={max(d, 0):.3f}mm<{elo}mm")

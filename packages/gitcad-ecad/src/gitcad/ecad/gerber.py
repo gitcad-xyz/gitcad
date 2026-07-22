@@ -74,6 +74,8 @@ class _GerberFile:
                 lines.append(f"D{code}*")
                 current = code
             lines.extend(commands)
+        for region in self._regions:
+            lines.extend(region)
         lines.append("M02*")
         return "\n".join(lines) + "\n"
 
