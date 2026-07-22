@@ -5,27 +5,27 @@
 # the seam interfaces, and the durable spec itself. Everything else may flow
 # through the tiered autonomy process.
 #
-# Replace @gitcad-maintainers with real reviewers before enabling branch protection.
+# Reviewers: @theironchef (add more as the team grows).
 
 # The durable spec — changing intent requires a human.
-/docs/adr/                     @gitcad-maintainers
-/CLAUDE.md                     @gitcad-maintainers
+/docs/adr/                     @theironchef
+/CLAUDE.md                     @theironchef
 
 # The seam interfaces — widening or adding a seam is a human decision.
-/src/gitcad/seams.py           @gitcad-maintainers
+/src/gitcad/seams.py           @theironchef
 
 # Stable identity — foundational; changes need a migration story.
-/src/gitcad/identity.py        @gitcad-maintainers
+/src/gitcad/identity.py        @theironchef
 
 # The document/text format — geometric-semver surface.
-/src/gitcad/document.py        @gitcad-maintainers
+/src/gitcad/document.py        @theironchef
 
 # Kernel semantics — geometry output changes are breaking by definition.
-/src/gitcad/kernel/            @gitcad-maintainers
+/src/gitcad/kernel/            @theironchef
 
 # The permanent test tiers are the real specification.
-/tests/invariants/             @gitcad-maintainers
-/tests/golden/                 @gitcad-maintainers
+/tests/invariants/             @theironchef
+/tests/golden/                 @theironchef
 
 # The autonomy/security machinery of the loop itself.
-/src/gitcad/report/            @gitcad-maintainers
+/src/gitcad/report/            @theironchef
