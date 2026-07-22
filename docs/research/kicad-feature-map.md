@@ -1,0 +1,92 @@
+# KiCad feature map — every feature, agent-first
+
+Audited against KiCad 10.0 (menus + `kicad-cli` surface enumerated on a
+live install). The translation rule: a KiCad feature is a menu item a
+human clicks; the gitcad equivalent is an MCP tool, a check, or a
+projection an agent calls — same capability, different actor. Status is
+honest: ✅ shipped · 🟡 partial · ❌ missing.
+
+## 1. Schematic editor (eeschema)
+
+| KiCad | agent-first form | status |
+|-------|------------------|--------|
+| Place symbols | `schematic_author` place ops; built-in lib + imported lib_symbols | ✅ |
+| Draw wires / junctions | `SheetEditor.wire/connect/junction`; netlist derived FROM geometry | ✅ |
+| Local / global / hierarchical labels | labels in authoring + import; hierarchy flattened with KiCad semantics | ✅ |
+| Power symbols / no-connect | power flags name nets; nc markers type pins `no_connect` | ✅ |
+| Hierarchical sheets (import) | recursive import, sheet pins bridge structurally, scoped names | ✅ |
+| Hierarchical sheets (authoring) | SheetEditor subsheet support | ❌ |
+| Sheet reuse (one file, N instances) | needs ref-instancing model | ❌ |
+| **Buses / bus entries / bus aliases** | grouped-net vocabulary + fan-out helper | ❌ |
+| ERC | pin-type matrix + system ERC across sheets | ✅ |
+| **ERC/DRC exclusions (waivers)** | reviewed, persistent waiver records (a check you silence must leave a trace) | ❌ |
+| Electrical envelope checking | — KiCad has none; ADR-0015 type system | ✅ (beyond) |
+| **Annotation (auto ref numbering)** | `schematic_annotate` deterministic renumber | ❌ |
+| Netlist export (kicadsexpr/spice…) | SPICE ✅ (`to_spice`); kicad netlist export for interop | 🟡 |
+| Simulation (ngspice) | sim-as-test: op assertions per commit | ✅ |
+| BOM | `bom`/`bom_csv` + MPN-atomic parts + assembly_bom | ✅ |
+| Plot PDF/SVG/DXF | schematic SVG ✅ (auto-layout + sheet fidelity); PDF/DXF of sheets | 🟡 |
+| Text / graphic annotations on sheets | notes in authoring + render | ❌ |
+| **Net classes** | named net groups binding DRC rules + envelope specs | 🟡 (DRC rules are net-scoped; no named classes) |
+| Symbol fields / properties | `attrs` free-form + `pin_specs` typed | ✅ |
+| Find/replace, cross-probe | GUI cross-probe (sch ↔ 3D/board) | ❌ (GUI queue) |
+
+## 2. PCB editor (pcbnew)
+
+| KiCad | agent-first form | status |
+|-------|------------------|--------|
+| Footprint placement | Board components + placement ops | ✅ |
+| Interactive routing | `route()` — wrong-net refused, auto-vias; not push-and-shove | ✅ (agent form) |
+| **Autorouting assist** | net-order suggestion + simple maze router for agents | ❌ |
+| Zones / pours | first-class: model, Gerber G36/G37, DRC, connectivity | ✅ |
+| **Keepout / rule areas** | zone kind `keepout` + DRC enforcement | ❌ |
+| DRC | net-scoped RulePacks, poly clearance, edge, drill | ✅ |
+| **Courtyard overlap check** | courtyards exist; overlap check missing | ❌ |
+| Copper connectivity | union-find touch graph, pads_with_nets honesty | ✅ |
+| **Length tuning / diff pairs** | length report per net + matched-pair rule | ❌ |
+| Teardrops | generator op | ❌ |
+| **Silkscreen text (refs/values)** | Gerber legend text (courtyards only today) | ❌ |
+| >2 copper layers | honest refusal today; layer-count model | ❌ |
+| Forward annotation (sch→pcb sync) | `annotate_board` (63 pads on the real Altair) | ✅ |
+| Back annotation | board→schematic writer | ❌ |
+| 3D viewer | board_to_model bridge + WebGL viewer | ✅ |
+| Gerbers / drill / position | X2 + Excellon + PnP, byte-deterministic | ✅ |
+| STEP/GLB/STL export of board | bridge → model exporters | ✅ (STEP/STL) |
+| **IPC-2581 / ODB++ / GenCAD / IPC-D-356** | modern fab-exchange exporters | ❌ |
+| Board statistics | counts/areas report (trivial over our model) | ❌ |
+| Import Eagle/Altium/etc. boards | importers beyond .kicad_pcb | ❌ |
+| Render PNG (3D) | headless viewer screenshot path | 🟡 |
+
+## 3. Symbol & footprint editors / libraries
+
+| KiCad | agent-first form | status |
+|-------|------------------|--------|
+| Symbol libraries | built-in generator lib + imported lib_symbols + registry | 🟡 |
+| Footprint libraries | registry parts, content-addressed shared assets | ✅ |
+| **Footprint wizards (QFP/BGA/…)** | parametric generators: `footprint_gen("QFN", pins=32, pitch=0.5)` — perfect agent fit | ❌ |
+| Library conventions (KLC) | registry validate.py gates + trust tiers | ✅ |
+| Datasheet linkage | hash-anchored datasheet refs (%PDF verified) | ✅ (beyond) |
+
+## 4. Project manager / cross-cutting
+
+| KiCad | agent-first form | status |
+|-------|------------------|--------|
+| New project | `gitcad-init` (root .gitcad, merge driver, CI, reqs) | ✅ |
+| Jobsets (`kicad-cli jobset run`) | `release()` all-or-nothing + CI workflows | ✅ |
+| Plugin system (Python/IPC) | the MCP surface IS the API | ✅ |
+| Project templates | init `--template` | ❌ |
+| Undo/redo, autosave, file locking | git; semantic merge instead of locks | ✅ (beyond) |
+| Version control integration | native: review gates, semantic diff/merge, lots | ✅ (beyond) |
+| Interactive GUI editing | deliberate non-goal v1: agents author, humans review | — |
+
+## Priority queue from this audit
+
+1. **Net classes** — named groups binding DRC rules + envelope specs; unlocks real board constraints ("50Ω class", "HV class") and is the KiCad concept users ask for first.
+2. **Keepout areas + courtyard-overlap DRC** — placement correctness gaps an agent hits immediately when placing parts.
+3. **Silkscreen refs/values** — fab outputs look bare without them.
+4. **`schematic_annotate`** — deterministic ref numbering; agents currently hand-assign.
+5. **Footprint generators** — parametric QFN/SOIC/BGA/0402…; multiplies the registry.
+6. **Buses** — grouped nets + fan-out helper (authoring ergonomics for MCU-heavy designs).
+7. **ERC/DRC waivers** — reviewed suppression records with reasons (a silenced check must leave a trace).
+8. **Board stats report** — trivial, useful in reviews.
+9. Back annotation; length tuning; IPC-2581/ODB++; multi-layer model; Eagle/Altium importers — larger, staged later.
