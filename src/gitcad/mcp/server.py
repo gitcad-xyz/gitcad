@@ -152,6 +152,41 @@ def board_export_fab(board: str, outdir: str) -> dict[str, Any]:
     return {"files": files, "board": b.name}
 
 
+@tool("model_import")
+def model_import(path: str, fmt: str = "auto", assets_dir: str = ".") -> dict[str, Any]:
+    """Import existing mechanical work (STEP or FreeCAD .FCStd) into a gitcad
+    model. Returns the model text plus an honest report of what was imported,
+    approximated, and dropped. Requires the OCCT kernel."""
+    kernel = get_kernel(require="occt")
+    if fmt == "auto":
+        lower = path.lower()
+        fmt = "fcstd" if lower.endswith(".fcstd") else "step"
+    if fmt == "step":
+        from gitcad.importers import import_step_file
+
+        doc, report = import_step_file(path, kernel)
+    elif fmt == "fcstd":
+        from gitcad.importers import import_fcstd
+
+        doc, report = import_fcstd(path, kernel, assets_dir)
+    else:
+        raise ValueError(f"unknown import format {fmt!r} (want step|fcstd)")
+    return {"model": doc.dumps(), "report": report.to_dict(), "kernel": kernel.name}
+
+
+@tool("board_import")
+def board_import(path: str) -> dict[str, Any]:
+    """Import an existing KiCad board (.kicad_pcb) into a gitcad board.
+    Pure Python — no kernel needed. The report lists every approximation and
+    drop (zones, arcs, complex outlines); nothing is lost silently."""
+    from gitcad.importers import import_kicad_pcb
+
+    board, report = import_kicad_pcb(path)
+    validation = board.validate()
+    return {"board": board.dumps(), "report": report.to_dict(),
+            "valid": validation.ok, "violations": validation.violations}
+
+
 @tool("part_check_release")
 def part_check_release(old_part: str, new_part: str) -> dict[str, Any]:
     """Interface-semver release gate (ADR-0009): given old and new part.json

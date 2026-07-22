@@ -85,6 +85,18 @@ class NullKernel:
     def export_stl(self, shape: Shape, path: str, *, deflection: float = 0.1) -> None:
         raise NotImplementedError("STL export requires the OCCT backend (pip install 'gitcad[occt]')")
 
+    def import_step(self, path: str) -> Shape:
+        raise NotImplementedError("STEP import requires the OCCT backend (pip install 'gitcad[occt]')")
+
+    def import_brep(self, path: str) -> Shape:
+        raise NotImplementedError("BREP import requires the OCCT backend (pip install 'gitcad[occt]')")
+
+    def export_brep(self, shape: Shape, path: str) -> None:
+        raise NotImplementedError("BREP export requires the OCCT backend (pip install 'gitcad[occt]')")
+
+    def compound(self, shapes: list[Shape]) -> Shape:
+        return NullShape("compound", {}, tuple(shapes))
+
     def boolean(self, op: str, a: Shape, b: Shape) -> Shape:
         if op not in {"union", "cut", "intersect"}:
             raise ValueError(f"unknown boolean op {op!r}")

@@ -88,6 +88,22 @@ class Kernel(Protocol):
         """Tessellate and write STL for 3D printing."""
         ...
 
+    def import_step(self, path: str) -> Shape:
+        """Read STEP — the onboarding path for existing mechanical work."""
+        ...
+
+    def import_brep(self, path: str) -> Shape:
+        """Read OCCT-native .brep (what .FCStd embeds per object)."""
+        ...
+
+    def export_brep(self, shape: Shape, path: str) -> None:
+        """Write OCCT-native .brep — the content-addressed import artifact."""
+        ...
+
+    def compound(self, shapes: list[Shape]) -> Shape:
+        """Combine shapes into one compound (multi-body import container)."""
+        ...
+
 
 @runtime_checkable
 class IdentityService(Protocol):

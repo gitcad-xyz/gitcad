@@ -227,6 +227,23 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
             rotate_axis=tuple(p.get("rotate_axis", (0, 0, 1))),
             rotate_deg=p.get("rotate_deg", 0.0),
         )
+    if f.op == "import":
+        # Imported geometry is the one case where a binary artifact IS source
+        # (the user's existing work). The document pins its sha256 so a build
+        # can never silently use a swapped or corrupted file (ADR-0004 spirit:
+        # the text names exactly one artifact, verifiably).
+        path, fmt = p["file"], p.get("format", "step")
+        digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
+        if p.get("sha256") and digest != p["sha256"]:
+            raise GitcadError(
+                f"import integrity failure: {path!r} hashes {digest[:12]}..., "
+                f"document pins {p['sha256'][:12]}..."
+            )
+        if fmt == "step":
+            return kernel.import_step(path)
+        if fmt == "brep":
+            return kernel.import_brep(path)
+        raise GitcadError(f"unknown import format {fmt!r} (want step|brep)")
     if f.op == "boolean":
         return kernel.boolean(p["kind"], ins[0], ins[1])
     if f.op == "fillet":

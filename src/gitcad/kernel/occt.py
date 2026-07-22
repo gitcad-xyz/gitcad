@@ -34,11 +34,13 @@ try:
     from OCP.GeomAbs import GeomAbs_CurveType, GeomAbs_SurfaceType
     from OCP.gp import gp_Ax1, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
     from OCP.GProp import GProp_GProps
-    from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
+    from OCP.BRep import BRep_Builder
+    from OCP.BRepTools import BRepTools
+    from OCP.STEPControl import STEPControl_AsIs, STEPControl_Reader, STEPControl_Writer
     from OCP.StlAPI import StlAPI_Writer
     from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
     from OCP.TopExp import TopExp, TopExp_Explorer
-    from OCP.TopoDS import TopoDS
+    from OCP.TopoDS import TopoDS, TopoDS_Compound, TopoDS_Shape
     from OCP.TopTools import TopTools_IndexedMapOfShape
 
     _OCP_AVAILABLE = True
@@ -231,6 +233,55 @@ class OcctKernel:
                 f"STEP write failed (status {int(status)})",
                 FailureSignature(op="export.step", diagnostic=f"IFSelect:{int(status)}", kernel=self.name),
             )
+
+    # -- imports (onboarding existing work) -----------------------------------
+
+    def import_step(self, path: str) -> Shape:
+        """Read a STEP file into one shape (compound if multi-body)."""
+        reader = STEPControl_Reader()
+        status = reader.ReadFile(path)
+        if int(status) != 1:  # IFSelect_RetDone
+            raise KernelError(
+                f"STEP read failed for {path!r} (status {int(status)})",
+                FailureSignature(op="import.step", diagnostic=f"IFSelect:{int(status)}", kernel=self.name),
+            )
+        reader.TransferRoots()
+        n = reader.NbShapes()
+        if n == 0:
+            raise KernelError(
+                f"STEP file {path!r} contained no transferable shapes",
+                FailureSignature(op="import.step", diagnostic="NoShapes", kernel=self.name),
+            )
+        if n == 1:
+            return reader.Shape(1)
+        return self.compound([reader.Shape(i) for i in range(1, n + 1)])
+
+    def import_brep(self, path: str) -> Shape:
+        """Read OCCT's native .brep text format (what .FCStd files embed)."""
+        shape = TopoDS_Shape()
+        builder = BRep_Builder()
+        if not BRepTools.Read_s(shape, path, builder):
+            raise KernelError(
+                f"BREP read failed for {path!r}",
+                FailureSignature(op="import.brep", diagnostic="BRepTools:ReadFalse", kernel=self.name),
+            )
+        return shape
+
+    def export_brep(self, shape: Shape, path: str) -> None:
+        if not BRepTools.Write_s(shape, path):
+            raise KernelError(
+                f"BREP write failed for {path!r}",
+                FailureSignature(op="export.brep", diagnostic="BRepTools:WriteFalse", kernel=self.name),
+            )
+
+    def compound(self, shapes: list[Shape]) -> Shape:
+        """Combine shapes into one compound (multi-body import container)."""
+        comp = TopoDS_Compound()
+        builder = BRep_Builder()
+        builder.MakeCompound(comp)
+        for s in shapes:
+            builder.Add(comp, s)
+        return comp
 
     def export_stl(self, shape: Shape, path: str, *, deflection: float = 0.1) -> None:
         BRepMesh_IncrementalMesh(shape, deflection, False, 0.5, True)
