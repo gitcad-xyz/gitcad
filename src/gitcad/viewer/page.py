@@ -31,15 +31,15 @@ const gl = canvas.getContext("webgl2", {antialias: true});
 const hud = document.getElementById("hud"), err = document.getElementById("err");
 
 const VS = `#version 300 es
-in vec3 pos; uniform mat4 mvp; out vec3 vPos;
-void main(){ vPos = pos; gl_Position = mvp * vec4(pos, 1.0); }`;
+in vec3 pos; in vec3 col; uniform mat4 mvp; out vec3 vPos; out vec3 vCol;
+void main(){ vPos = pos; vCol = col; gl_Position = mvp * vec4(pos, 1.0); }`;
 const FS = `#version 300 es
-precision highp float; in vec3 vPos; out vec4 color;
+precision highp float; in vec3 vPos; in vec3 vCol; out vec4 color;
 void main(){
   vec3 n = normalize(cross(dFdx(vPos), dFdy(vPos)));
   float l = 0.25 + 0.65 * max(dot(n, normalize(vec3(0.5, 0.4, 0.8))), 0.0)
                  + 0.18 * max(dot(n, normalize(vec3(-0.6, -0.3, 0.2))), 0.0);
-  color = vec4(vec3(0.35, 0.62, 0.85) * l, 1.0);
+  color = vec4(vCol * l, 1.0);
 }`;
 
 function compile(type, src){
@@ -50,6 +50,7 @@ function compile(type, src){
 const prog = gl.createProgram();
 gl.attachShader(prog, compile(gl.VERTEX_SHADER, VS));
 gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FS));
+gl.bindAttribLocation(prog, 0, "pos"); gl.bindAttribLocation(prog, 1, "col");
 gl.linkProgram(prog); gl.useProgram(prog);
 const uMvp = gl.getUniformLocation(prog, "mvp");
 gl.enable(gl.DEPTH_TEST);
@@ -64,6 +65,16 @@ function upload(mesh){
   gl.bindBuffer(gl.ARRAY_BUFFER, vb);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mesh.positions), gl.STATIC_DRAW);
   gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+  const nVerts = mesh.positions.length / 3;
+  let cols = mesh.colors;
+  if(!cols || cols.length !== mesh.positions.length){
+    cols = new Array(mesh.positions.length);
+    for(let i = 0; i < nVerts; i++){ cols[3*i] = 0.35; cols[3*i+1] = 0.62; cols[3*i+2] = 0.85; }
+  }
+  const cb = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, cb);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cols), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
   const ib = gl.createBuffer();
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(mesh.indices), gl.STATIC_DRAW);
@@ -72,8 +83,13 @@ function upload(mesh){
   center = [(lo[0]+hi[0])/2, (lo[1]+hi[1])/2, (lo[2]+hi[2])/2];
   radius = Math.max(1e-6, Math.hypot(hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]) / 2);
   const s = mesh.stats;
-  hud.textContent = `${s.features} features · ${s.triangles} tris · vol ${s.volume_mm3} mm³\n` +
-                    `kernel ${s.kernel} · drag orbit · wheel zoom`;
+  if(mesh.groups){
+    const names = mesh.groups.map(g => `${g.name}(${g.part})`).join(" · ");
+    hud.textContent = `assembly: ${names}\n${s.triangles} tris · kernel ${s.kernel} · drag orbit · wheel zoom`;
+  } else {
+    hud.textContent = `${s.features} features · ${s.triangles} tris · vol ${s.volume_mm3} mm³\n` +
+                      `kernel ${s.kernel} · drag orbit · wheel zoom`;
+  }
 }
 
 // -- tiny matrix math ---------------------------------------------------------

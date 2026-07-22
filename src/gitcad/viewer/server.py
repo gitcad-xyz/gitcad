@@ -22,11 +22,17 @@ from gitcad.viewer.page import PAGE
 
 
 def detect_kind(text: str) -> str:
-    schema = json.loads(text).get("schema", "")
+    doc = json.loads(text)
+    schema = doc.get("schema", "")
     if schema.startswith("gitcad/board"):
         return "board"
     if schema.startswith("gitcad/document"):
         return "model"
+    if schema.startswith("gitcad/part"):
+        if doc.get("domain") == "assembly":
+            return "assembly"
+        raise ValueError("view a part's MODEL file, not its manifest "
+                         "(only assembly manifests are viewable directly)")
     raise ValueError(f"cannot view schema {schema!r}")
 
 
@@ -49,6 +55,79 @@ def mesh_payload(doc: Document, kernel: Kernel) -> dict:
             "kernel": kernel.name,
             "features": len(doc),
         },
+    }
+
+
+# Distinct-instance palette (dark-theme friendly), cycled.
+_PALETTE = [(0.35, 0.62, 0.85), (0.85, 0.55, 0.35), (0.45, 0.78, 0.55),
+            (0.78, 0.45, 0.72), (0.80, 0.75, 0.40), (0.45, 0.72, 0.78),
+            (0.65, 0.50, 0.85), (0.60, 0.60, 0.60)]
+
+
+def assembly_mesh_payload(manifest_path: Path, kernel: Kernel) -> dict:
+    """Merge every instance's built, placed geometry into one colored mesh.
+
+    Instances resolve part id -> sibling part.json (scanned from the assembly
+    file's directory tree) -> its body["model"] document, built and placed per
+    the instance transform.
+    """
+    from gitcad.part import PartManifest
+
+    manifest = PartManifest.loads(manifest_path.read_text(encoding="utf-8"))
+    root = manifest_path.parent
+
+    by_id: dict[str, tuple[PartManifest, Path]] = {}
+    for pj in sorted(root.rglob("*part.json")):
+        if pj == manifest_path:
+            continue
+        try:
+            m = PartManifest.loads(pj.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        by_id.setdefault(m.id, (m, pj))
+
+    positions: list[float] = []
+    colors: list[float] = []
+    indices: list[int] = []
+    groups: list[dict] = []
+    los, his = [], []
+
+    for n, (name, inst) in enumerate(sorted(manifest.body.get("instances", {}).items())):
+        entry = by_id.get(inst["part"])
+        if entry is None:
+            raise ValueError(f"instance {name!r}: part {inst['part']!r} not found "
+                             f"next to the assembly (need its part.json + model)")
+        part, pj_path = entry
+        model_file = pj_path.parent / part.body.get("model", "")
+        if not model_file.exists():
+            raise ValueError(f"instance {name!r}: model file {model_file.name!r} "
+                             f"missing next to {pj_path.name}")
+        doc = Document.loads(model_file.read_text(encoding="utf-8"))
+        shape = kernel.transform(
+            doc.build(kernel).final(doc),
+            translate=tuple(inst.get("translate", (0, 0, 0))),
+            rotate_axis=(0, 0, 1), rotate_deg=inst.get("rotate_z_deg", 0.0))
+        mesh = kernel.tessellate(shape)
+        lo, hi = kernel.bbox(shape)
+        los.append(lo)
+        his.append(hi)
+        base = len(positions) // 3
+        color = _PALETTE[n % len(_PALETTE)]
+        positions.extend(mesh["positions"])
+        colors.extend(color * (len(mesh["positions"]) // 3))
+        indices.extend(base + i for i in mesh["indices"])
+        groups.append({"name": name, "part": part.name, "triangles": len(mesh["indices"]) // 3,
+                       "color": list(color)})
+
+    lo = [min(p[i] for p in los) for i in range(3)] if los else [0, 0, 0]
+    hi = [max(p[i] for p in his) for i in range(3)] if his else [0, 0, 0]
+    return {
+        "kind": "assembly",
+        "positions": positions, "colors": colors, "indices": indices,
+        "bbox": [lo, hi], "groups": groups,
+        "stats": {"vertices": len(positions) // 3, "triangles": len(indices) // 3,
+                  "instances": len(groups), "kernel": kernel.name,
+                  "volume_mm3": 0, "features": len(groups)},
     }
 
 
@@ -80,8 +159,10 @@ class _Handler(BaseHTTPRequestHandler):
                                             "name": self.path_watched.name}).encode(),
                            "application/json")
             elif self.path == "/api/mesh":
-                doc = Document.loads(text)
-                payload = mesh_payload(doc, self.kernel)
+                if detect_kind(text) == "assembly":
+                    payload = assembly_mesh_payload(self.path_watched, self.kernel)
+                else:
+                    payload = mesh_payload(Document.loads(text), self.kernel)
                 self._send(200, json.dumps(payload).encode(), "application/json")
             elif self.path == "/api/board.svg":
                 board = Board.loads(text)
