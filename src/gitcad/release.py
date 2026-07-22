@@ -146,7 +146,7 @@ def release(sources: list[str], outdir: str, version: str) -> ReleaseResult:
                     result.failures.append(f"{label}:validate:{fid}:{r.violations}")
             result.checks[f"{label}:validate"] = "ok"
         elif kind == "board":
-            from gitcad.ecad import Board, run_drc
+            from gitcad.ecad import Board, check_connectivity, run_drc
 
             board = Board.loads(text)
             r = board.validate()
@@ -155,8 +155,12 @@ def release(sources: list[str], outdir: str, version: str) -> ReleaseResult:
             d = run_drc(board)
             if not d.ok:
                 result.failures.extend(f"{label}:drc:{v}" for v in d.violations)
+            c = check_connectivity(board)
+            if not c.ok:
+                result.failures.extend(f"{label}:connectivity:{v}" for v in c.violations)
             result.checks[f"{label}:fab"] = "ok" if r.ok else "FAIL"
             result.checks[f"{label}:drc"] = "ok" if d.ok else "FAIL"
+            result.checks[f"{label}:connectivity"] = "ok" if c.ok else "FAIL"
         elif kind == "schematic":
             from gitcad.ecad import Schematic
 

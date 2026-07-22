@@ -252,6 +252,17 @@ def board_drc(board: str, rulepack: str | None = None) -> dict[str, Any]:
     return {"ok": r.ok, "checks": r.checks, "violations": r.violations}
 
 
+@tool("board_connectivity")
+def board_connectivity(board: str) -> dict[str, Any]:
+    """Copper connectivity check: every net's pads must be joined by actual
+    touching copper (tracks/vias), and no copper component may bridge two
+    nets. Geometric — catches mislabeled tracks as the shorts they are."""
+    from gitcad.ecad import Board, check_connectivity
+
+    r = check_connectivity(Board.loads(board))
+    return {"ok": r.ok, "checks": r.checks, "violations": r.violations}
+
+
 @tool("schematic_erc")
 def schematic_erc(schematic: str) -> dict[str, Any]:
     """Electrical rule check on a schematic document: pin-type conflicts,

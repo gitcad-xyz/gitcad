@@ -12,9 +12,10 @@ the same board text produces byte-identical Gerbers on any machine.
 
 from gitcad.ecad.board import Board, Component, Footprint, MountingHole, Pad, Track, Via
 from gitcad.ecad.fab import export_fab
+from gitcad.ecad.connectivity import check_connectivity
 from gitcad.ecad.drc import Rule, RulePack, default_rules, run_drc
 from gitcad.ecad.schematic import Pin, SchComponent, Schematic, board_parity
 
 __all__ = ["Board", "Component", "Footprint", "MountingHole", "Pad", "Track", "Via",
            "export_fab", "Schematic", "SchComponent", "Pin", "board_parity",
-           "Rule", "RulePack", "default_rules", "run_drc"]
+           "Rule", "RulePack", "default_rules", "run_drc", "check_connectivity"]
