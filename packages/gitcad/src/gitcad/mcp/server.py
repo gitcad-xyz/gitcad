@@ -31,7 +31,7 @@ def tool(name: str) -> Callable[[Handler], Handler]:
         import json as _json
 
         from gitcad.errors import GitcadError, KernelError
-        from gitcad.report import fingerprint
+        from gitcad.report.fingerprint import fingerprint
 
         @functools.wraps(fn)
         def wrapped(*args: Any, **kwargs: Any) -> dict[str, Any]:

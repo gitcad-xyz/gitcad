@@ -12,8 +12,9 @@ Uses the OCCT kernel if installed, the null kernel otherwise.
 from gitcad.document import Document, Feature
 from gitcad.ecad import Board, MountingHole
 from gitcad.kernel import get_kernel
+from gitcad.derive import model_to_part
 from gitcad.part import (
-    Assembly, Frame, Port, Workspace, check_release, model_to_part, resolve,
+    Assembly, Frame, Port, Workspace, check_release, resolve,
 )
 
 # -- the ecad part: interface DERIVED from board geometry ---------------------

@@ -10,7 +10,8 @@ pytestmark = pytest.mark.occt
 def test_assembly_mesh_payload(tmp_path) -> None:
     from gitcad.document import Document, Feature
     from gitcad.kernel.occt import OcctKernel
-    from gitcad.part import Assembly, PartManifest, model_to_part
+    from gitcad.derive import model_to_part
+    from gitcad.part import Assembly, PartManifest
     from gitcad.viewer.server import assembly_mesh_payload, detect_kind
 
     kernel = OcctKernel()

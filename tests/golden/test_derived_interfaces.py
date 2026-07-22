@@ -13,7 +13,8 @@ from gitcad.document import Document, Feature
 from gitcad.ecad import Board, MountingHole
 from gitcad.ecad import excellon
 from gitcad.kernel.null import NullKernel
-from gitcad.part import Frame, Port, check_release, model_to_part
+from gitcad.derive import model_to_part
+from gitcad.part import Frame, Port, check_release
 
 
 def _board() -> Board:

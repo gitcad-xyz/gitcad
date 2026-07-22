@@ -11,8 +11,10 @@ exact payload before anything leaves the machine.
 """
 
 from gitcad.report.fingerprint import fingerprint
-from gitcad.report.reduce import ReductionResult, reduce_document
-from gitcad.report.scrub import Submission, prepare_submission, scrub, similarity
 
-__all__ = ["fingerprint", "reduce_document", "ReductionResult",
-           "scrub", "similarity", "prepare_submission", "Submission"]
+# reduce/scrub operate on mech Documents and import gitcad.document — they are
+# NOT re-exported here so gitcad-core stays importable standalone (the registry
+# installs core only). Import them directly: gitcad.report.reduce / .scrub —
+# which requires gitcad-mech installed.
+
+__all__ = ["fingerprint"]

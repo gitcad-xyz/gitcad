@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from gitcad.document import Document, Feature
-from gitcad.report import prepare_submission, scrub, similarity
+from gitcad.report.scrub import prepare_submission, scrub, similarity
 
 
 def _user_design() -> tuple[Document, str]:
