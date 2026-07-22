@@ -6,6 +6,7 @@ fixed decimal mm.
 
 from __future__ import annotations
 
+import gitcad
 from gitcad.ecad.board import Board
 
 
@@ -13,7 +14,7 @@ def _render(holes: list[tuple[float, float, float]]) -> str:
     diameters = sorted({d for d, _, _ in holes})
     tool_of = {d: i + 1 for i, d in enumerate(diameters)}
 
-    lines = ["M48", ";GenerationSoftware,gitcad,0.1.0", "METRIC,TZ"]
+    lines = ["M48", f";GenerationSoftware,gitcad,{gitcad.__version__}", "METRIC,TZ"]
     for d in diameters:
         lines.append(f"T{tool_of[d]:02d}C{d:.3f}")
     lines.append("%")

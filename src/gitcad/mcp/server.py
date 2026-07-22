@@ -50,25 +50,47 @@ def model_measure(model: str) -> dict[str, Any]:
     feature — the deterministic oracle an agent verifies against."""
     doc = Document.loads(model)
     kernel = get_kernel()
-    shapes = doc.build(kernel)
+    result = doc.build(kernel)
     return {
         "kernel": kernel.name,
-        "measures": {fid: kernel.measure(shape) for fid, shape in shapes.items()},
+        "geometry_verified": not kernel.name.startswith("null"),
+        "measures": {fid: kernel.measure(shape) for fid, shape in result.shapes.items()},
     }
 
 
 @tool("model_validate")
 def model_validate(model: str) -> dict[str, Any]:
     """Build and run geometric validity checks per feature (watertight,
-    self-intersection, ...). Machine-readable so the agent can act on it."""
+    self-intersection, ...). ``geometry_verified: false`` means only the null
+    backend was available — structure was checked, geometry was NOT."""
     doc = Document.loads(model)
     kernel = get_kernel()
-    shapes = doc.build(kernel)
+    result = doc.build(kernel)
     out: dict[str, Any] = {}
-    for fid, shape in shapes.items():
+    for fid, shape in result.shapes.items():
         r = kernel.validate(shape)
         out[fid] = {"ok": r.ok, "checks": r.checks, "violations": r.violations}
-    return {"kernel": kernel.name, "results": out}
+    return {
+        "kernel": kernel.name,
+        "geometry_verified": not kernel.name.startswith("null"),
+        "results": out,
+    }
+
+
+@tool("model_entities")
+def model_entities(model: str, feature_id: str, kind: str = "edge") -> dict[str, Any]:
+    """Stable entity ids + descriptors for a feature's topology (ADR-0003).
+    Use the returned ids in entity-referencing params (e.g. fillet ``edges``) —
+    they survive upstream edits because identity re-binds by fingerprint."""
+    doc = Document.loads(model)
+    kernel = get_kernel()
+    result = doc.build(kernel)
+    if feature_id not in result.entities:
+        raise ValueError(f"unknown feature {feature_id!r}")
+    return {
+        "kernel": kernel.name,
+        "entities": [{"id": eid, **desc} for eid, desc in result.entities[feature_id].get(kind, [])],
+    }
 
 
 @tool("model_export")
@@ -79,8 +101,7 @@ def model_export(model: str, path: str, fmt: str = "step") -> dict[str, Any]:
     if not len(doc):
         raise ValueError("model has no features")
     kernel = get_kernel()
-    shapes = doc.build(kernel)
-    final = shapes[doc.features[-1].id]
+    final = doc.build(kernel).final(doc)
     if fmt == "step":
         kernel.export_step(final, path)
     elif fmt == "stl":
@@ -100,8 +121,7 @@ def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3")
     if not len(doc):
         raise ValueError("model has no features")
     kernel = get_kernel()
-    shapes = doc.build(kernel)
-    d = make_drawing(shapes[doc.features[-1].id], title=title, sheet=sheet)
+    d = make_drawing(doc.build(kernel).final(doc), title=title, sheet=sheet)
     if path.lower().endswith(".pdf"):
         with open(path, "wb") as f:
             f.write(d.to_pdf())

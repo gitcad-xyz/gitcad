@@ -11,6 +11,7 @@ v0.1 layers: top/bottom copper, top/bottom solder mask, top silkscreen
 
 from __future__ import annotations
 
+import gitcad
 from gitcad.ecad.board import Board
 
 _SCALE = 1_000_000  # 4.6 format: mm * 1e6
@@ -23,7 +24,7 @@ def _c(v: float) -> int:
 class _GerberFile:
     def __init__(self, function: str, polarity: str = "Positive") -> None:
         self.head = [
-            "%TF.GenerationSoftware,gitcad,gitcad,0.1.0*%",
+            f"%TF.GenerationSoftware,gitcad,gitcad,{gitcad.__version__}*%",
             f"%TF.FileFunction,{function}*%",
             f"%TF.FilePolarity,{polarity}*%",
             "%FSLAX46Y46*%",
@@ -113,6 +114,8 @@ def silkscreen(board: Board, side: str = "top") -> str:
         if comp.side != side or comp.footprint.courtyard is None:
             continue
         cw, ch = comp.footprint.courtyard
+        if round(comp.rot) % 180 == 90:   # courtyard follows the rotation
+            cw, ch = ch, cw
         x0, y0 = comp.x - cw / 2, comp.y - ch / 2
         corners = [(x0, y0), (x0 + cw, y0), (x0 + cw, y0 + ch), (x0, y0 + ch), (x0, y0)]
         for (x1, y1), (x2, y2) in zip(corners, corners[1:]):

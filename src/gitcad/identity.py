@@ -22,6 +22,9 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from gitcad.canonical import canonical_json
+from gitcad.errors import GitcadError
+
 
 @dataclass(frozen=True)
 class EntityId:
@@ -33,24 +36,20 @@ class EntityId:
         return self.value
 
 
-def _canonical(obj: Any) -> str:
-    """Deterministic JSON: sorted keys, no whitespace jitter. Determinism here
-    is load-bearing — the same construction must hash identically on every run
-    and every machine, or IDs would not be stable."""
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-
-
 def _round_geo(descriptor: dict[str, Any], ndigits: int) -> dict[str, Any]:
     """Round geometric quantities so floating-point noise doesn't split an
-    identity. Non-numeric fields pass through unchanged."""
+    identity. ``+ 0.0`` normalizes the ``-0.0`` that rounding a tiny negative
+    produces — without it, noise crossing zero splits identities (reviewed
+    2026-07-22). Non-numeric fields pass through unchanged."""
+    def r(x: Any) -> Any:
+        return round(x, ndigits) + 0.0 if isinstance(x, float) else x
+
     out: dict[str, Any] = {}
     for k, v in descriptor.items():
-        if isinstance(v, float):
-            out[k] = round(v, ndigits)
-        elif isinstance(v, (list, tuple)):
-            out[k] = [round(x, ndigits) if isinstance(x, float) else x for x in v]
+        if isinstance(v, (list, tuple)):
+            out[k] = [r(x) for x in v]
         else:
-            out[k] = v
+            out[k] = r(v)
     return out
 
 
@@ -80,10 +79,29 @@ class IdentityService:
             "lineage": list(lineage),
             "geo": _round_geo(descriptor, self._digits),
         }
-        digest = hashlib.blake2b(_canonical(payload).encode(), digest_size=self._id_length).hexdigest()
+        digest = hashlib.blake2b(canonical_json(payload).encode(), digest_size=self._id_length).hexdigest()
         entity_id = f"e_{digest}"
         self._registry[entity_id] = payload
         return entity_id
+
+    # -- persistence (ADR-0003: stored ids must resolve in future processes) --
+
+    SCHEMA = "gitcad/identity@1"
+
+    def dumps(self) -> str:
+        """Canonical text of the registry — commit it alongside the model
+        (like a lockfile) so entity ids stored in document text can re-bind
+        after a rebuild in another process."""
+        return canonical_json({"schema": self.SCHEMA, "registry": self._registry}, indent=2) + "\n"
+
+    @classmethod
+    def loads(cls, text: str, **kwargs: Any) -> "IdentityService":
+        doc = json.loads(text)
+        if doc.get("schema") != cls.SCHEMA:
+            raise GitcadError(f"unsupported identity schema {doc.get('schema')!r}")
+        svc = cls(**kwargs)
+        svc._registry = dict(doc["registry"])
+        return svc
 
     def resolve(self, entity_id: str, candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
         """Re-bind ``entity_id`` to the best current candidate after a rebuild.

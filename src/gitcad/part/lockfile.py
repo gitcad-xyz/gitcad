@@ -14,6 +14,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from gitcad.canonical import canonical_json
 from gitcad.errors import GitcadError
 from gitcad.part.manifest import PartManifest
 from gitcad.part.semver import Version, satisfies
@@ -55,8 +56,7 @@ class Lockfile:
     SCHEMA = "gitcad/lock@1"
 
     def dumps(self) -> str:
-        return json.dumps({"schema": self.SCHEMA, "locks": self.locks},
-                          indent=2, sort_keys=True) + "\n"
+        return canonical_json({"schema": self.SCHEMA, "locks": self.locks}, indent=2) + "\n"
 
     @classmethod
     def loads(cls, text: str) -> "Lockfile":

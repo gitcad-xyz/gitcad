@@ -68,6 +68,6 @@ def test_drawing_renders_svg_and_pdf(part) -> None:
 
 def test_fillet_reduces_volume_and_stays_valid(part) -> None:
     k, shape = part
-    filleted = k.fillet(shape, [], 1.0)
+    filleted = k.fillet(shape, None, 1.0)
     assert k.validate(filleted).ok
     assert k.measure(filleted)["volume"] < k.measure(shape)["volume"]

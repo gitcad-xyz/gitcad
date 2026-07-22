@@ -69,8 +69,12 @@ def satisfies(version: Version | str, constraint: str) -> bool:
         base = Version.parse(c[1:])
         if base.major > 0:
             return base <= v < Version(base.major + 1, 0, 0)
-        # ^0.y.z: 0.x versions treat minor as breaking (npm/cargo convention)
-        return base <= v < Version(0, base.minor + 1, 0)
+        if base.minor > 0:
+            # ^0.y.z: 0.x treats minor as breaking (npm/cargo convention)
+            return base <= v < Version(0, base.minor + 1, 0)
+        # ^0.0.z: exact only — every 0.0.x may break (npm/cargo convention;
+        # deviation was flagged in the 2026-07-22 review)
+        return v == base
     if c.startswith("~"):
         base = Version.parse(c[1:])
         return base <= v < Version(base.major, base.minor + 1, 0)

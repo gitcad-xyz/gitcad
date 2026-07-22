@@ -13,6 +13,7 @@ import json
 import secrets
 from dataclasses import dataclass, field
 
+from gitcad.canonical import canonical_json
 from gitcad.errors import GitcadError
 from gitcad.part.interface import Interface
 from gitcad.part.semver import Version
@@ -54,7 +55,7 @@ class PartManifest:
             "deps": dict(sorted(self.deps.items())),
             "body": self.body,
         }
-        return json.dumps(doc, indent=2, sort_keys=True) + "\n"
+        return canonical_json(doc, indent=2) + "\n"
 
     @classmethod
     def loads(cls, text: str) -> "PartManifest":

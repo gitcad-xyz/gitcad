@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import asdict, dataclass, field
 
+from gitcad.canonical import canonical_json
 from gitcad.errors import GitcadError, ValidationReport
 
 
@@ -113,7 +115,7 @@ class Board:
 
     def dumps(self) -> str:
         doc = {"schema": self.SCHEMA, "board": asdict(self)}
-        return json.dumps(doc, indent=2, sort_keys=True) + "\n"
+        return canonical_json(doc, indent=2) + "\n"
 
     @classmethod
     def loads(cls, text: str) -> "Board":
@@ -155,6 +157,11 @@ class Board:
         """Fab-readiness checks, machine-readable. Not a full DRC yet — the
         checks that make a fab reject the files outright."""
         violations: list[str] = []
+        # Filesystem-safe name: fab filenames derive from it, and the board
+        # text can arrive via MCP from untrusted sources (path traversal was
+        # flagged in the 2026-07-22 review).
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", self.name) or ".." in self.name:
+            violations.append("board-name-not-filesystem-safe")
         if len(self.outline) < 3:
             violations.append("outline:degenerate")
         minx, miny, maxx, maxy = self.bbox()
@@ -162,6 +169,10 @@ class Board:
         if len(refs) != len(set(refs)):
             violations.append("components:duplicate-refs")
         for comp in self.components:
+            # v0.1 writers can only render right-angle rotations; anything else
+            # would emit wrong copper silently — reject at the fab gate.
+            if round(comp.rot) % 90 != 0:
+                violations.append(f"rotation-not-multiple-of-90:{comp.ref}")
             for pad, bx, by, _ in comp.placed_pads():
                 if not (minx <= bx <= maxx and miny <= by <= maxy):
                     violations.append(f"pad-outside-outline:{comp.ref}.{pad.name}")

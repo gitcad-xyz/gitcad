@@ -37,8 +37,9 @@ try:
     from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
     from OCP.StlAPI import StlAPI_Writer
     from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
-    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopExp import TopExp, TopExp_Explorer
     from OCP.TopoDS import TopoDS
+    from OCP.TopTools import TopTools_IndexedMapOfShape
 
     _OCP_AVAILABLE = True
 except Exception as _exc:  # pragma: no cover - depends on environment
@@ -47,6 +48,16 @@ except Exception as _exc:  # pragma: no cover - depends on environment
 
 
 _BOOL_OPS = {"union": "Fuse", "cut": "Cut", "intersect": "Common"}
+
+
+def _unique_shapes(shape, kind) -> list:
+    """Unique sub-shapes in stable order. TopExp_Explorer visits shared
+    topology once per parent (a box's 12 edges appear 24 times) — the indexed
+    map deduplicates, and BOTH entities() and fillet() must use this same
+    enumeration so selector indices line up."""
+    m = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(shape, kind, m)
+    return [m.FindKey(i) for i in range(1, m.Extent() + 1)]
 
 
 class OcctKernel:
@@ -59,7 +70,14 @@ class OcctKernel:
                 "    pip install 'gitcad[occt]'   # pulls cadquery-ocp binary wheels\n"
                 f"(underlying import error: {_IMPORT_ERROR!r})"
             )
-        self.name = "occt"
+        # Versioned name: fingerprints must distinguish OCCT releases
+        # (a bug fixed in 7.9 is not the bug present in 7.8).
+        try:
+            from importlib.metadata import version
+
+            self.name = f"occt-{version('cadquery-ocp')}"
+        except Exception:
+            self.name = "occt"
 
     # -- primitives -----------------------------------------------------------
 
@@ -90,20 +108,22 @@ class OcctKernel:
         self.validate(shape).raise_if_invalid(f"boolean.{op}", self.name)
         return shape
 
-    def fillet(self, shape: Shape, edges: list[str], radius: float) -> Shape:
-        """Fillet edges by stable-id selector; empty ``edges`` = all edges.
-
-        v0.1: selectors are matched against the same descriptors ``entities``
-        returns; the IdentityService resolves stored ids to current descriptors
-        upstream of this call.
-        """
+    def fillet(self, shape: Shape, edges: list[int] | None, radius: float) -> Shape:
+        """Fillet by enumeration index into ``entities(shape, "edge")`` order;
+        ``None`` = all edges. Identity-to-index resolution happens in the
+        document build — this method only ever sees concrete indices."""
         mk = BRepFilletAPI_MakeFillet(shape)
-        exp = TopExp_Explorer(shape, TopAbs_EDGE)
+        wanted = set(edges) if edges is not None else None
         count = 0
-        while exp.More():
-            mk.Add(radius, TopoDS.Edge_s(exp.Current()))
-            count += 1
-            exp.Next()
+        for index, raw in enumerate(_unique_shapes(shape, TopAbs_EDGE)):
+            if wanted is None or index in wanted:
+                mk.Add(radius, TopoDS.Edge_s(raw))
+                count += 1
+        if wanted is not None and count != len(wanted):
+            raise KernelError(
+                f"fillet: {len(wanted)} edge indices given, only {count} exist on shape",
+                FailureSignature(op="fillet", diagnostic="EdgeIndexOutOfRange", kernel=self.name),
+            )
         if count == 0:
             raise KernelError(
                 "fillet: shape has no edges",
@@ -143,9 +163,8 @@ class OcctKernel:
         the raw material the IdentityService hashes into stable ids."""
         out: list[dict[str, Any]] = []
         if kind == "face":
-            exp = TopExp_Explorer(shape, TopAbs_FACE)
-            while exp.More():
-                face = TopoDS.Face_s(exp.Current())
+            for raw in _unique_shapes(shape, TopAbs_FACE):
+                face = TopoDS.Face_s(raw)
                 surf = BRepAdaptor_Surface(face)
                 props = GProp_GProps()
                 BRepGProp.SurfaceProperties_s(face, props)
@@ -155,11 +174,9 @@ class OcctKernel:
                     "area": props.Mass(),
                     "centroid": [c.X(), c.Y(), c.Z()],
                 })
-                exp.Next()
         elif kind == "edge":
-            exp = TopExp_Explorer(shape, TopAbs_EDGE)
-            while exp.More():
-                edge = TopoDS.Edge_s(exp.Current())
+            for raw in _unique_shapes(shape, TopAbs_EDGE):
+                edge = TopoDS.Edge_s(raw)
                 curve = BRepAdaptor_Curve(edge)
                 props = GProp_GProps()
                 BRepGProp.LinearProperties_s(edge, props)
@@ -169,12 +186,8 @@ class OcctKernel:
                     "length": props.Mass(),
                     "centroid": [c.X(), c.Y(), c.Z()],
                 })
-                exp.Next()
         elif kind == "vertex":
-            exp = TopExp_Explorer(shape, TopAbs_VERTEX)
-            while exp.More():
-                out.append({"kind": "vertex"})
-                exp.Next()
+            out.extend({"kind": "vertex"} for _ in _unique_shapes(shape, TopAbs_VERTEX))
         else:
             raise ValueError(f"unknown entity kind {kind!r}")
         return out

@@ -2,20 +2,25 @@
 
 Source of truth is text (ADR-0004). A model is a linear list of features, each
 an intent-level operation with named inputs referring to earlier features by
-stable id. The canonical text form is deterministic JSON so it diffs cleanly in
-git and hashes identically across machines.
+stable id. The canonical text form is deterministic (via
+:mod:`gitcad.canonical`) so it diffs cleanly in git and hashes identically
+across machines.
 
 Geometry is never stored here. Building a document against a :class:`Kernel`
-produces shapes on demand; those are *build artifacts*, not source.
+produces shapes on demand; those are *build artifacts*, not source. Building
+also assigns stable entity ids (ADR-0003) so features can reference faces and
+edges durably — see :meth:`Document.build`.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from gitcad.errors import GitcadError
+from gitcad.canonical import canonical_json
+from gitcad.errors import GitcadError, IdentityError
 from gitcad.identity import IdentityService
 from gitcad.seams import Kernel, Shape
 
@@ -24,9 +29,11 @@ from gitcad.seams import Kernel, Shape
 class Feature:
     """One intent-level operation in the tree.
 
-    ``id`` is stable and content-independent of ordering: it is derived from the
-    operation and its inputs, so inserting a feature earlier does not renumber
-    the ones after it (contrast ordinal indexing — the naming bug).
+    ``id`` is stable and order-independent: derived from the operation, its
+    parameter *values*, and its input ids — so an unrelated insertion never
+    renumbers a downstream feature (ADR-0003). Two *identical* constructions
+    (structural twins) are disambiguated by occurrence order at add-time and
+    keep their minted id verbatim in the text form thereafter.
     """
 
     op: str
@@ -42,11 +49,26 @@ class Feature:
         return cls(op=d["op"], params=dict(d.get("params", {})), inputs=list(d.get("inputs", [])), id=d.get("id", ""))
 
 
-class Document:
-    """An ordered feature tree with canonical text (de)serialization.
+@dataclass
+class BuildResult:
+    """Everything a build produces: shapes per feature, plus the stable entity
+    ids assigned to each feature's topology (ADR-0003).
 
-    Implements the :class:`gitcad.seams.DocumentModel` protocol structurally.
+    ``entities[feature_id][kind]`` is an ordered list of ``(entity_id,
+    descriptor)`` pairs; the list index is the kernel's enumeration index for
+    the same shape, which is how selectors resolve back to concrete topology.
     """
+
+    shapes: dict[str, Shape] = field(default_factory=dict)
+    entities: dict[str, dict[str, list[tuple[str, dict[str, Any]]]]] = field(default_factory=dict)
+    identity: IdentityService | None = None
+
+    def final(self, doc: "Document") -> Shape:
+        return self.shapes[doc.features[-1].id]
+
+
+class Document:
+    """An ordered feature tree with canonical text (de)serialization."""
 
     SCHEMA = "gitcad/document@1"
 
@@ -57,12 +79,8 @@ class Document:
     # -- construction ---------------------------------------------------------
 
     def add(self, feature: Feature) -> str:
-        """Append a feature, minting a stable id from its op + inputs.
-
-        The id is a hash of (op, params-shape, input-ids), NOT a running index —
-        so two documents that build the same thing get the same ids, and edits
-        elsewhere don't perturb it.
-        """
+        """Append a feature, minting a stable id from its full construction:
+        op + canonical param values + input ids. Never a running index."""
         for ref in feature.inputs:
             if ref not in self._by_id:
                 raise GitcadError(f"feature input {ref!r} does not exist yet (forward reference)")
@@ -75,18 +93,18 @@ class Document:
         return feature.id
 
     def _mint_id(self, feature: Feature) -> str:
-        import hashlib
-
-        # Params keys (not values) + inputs: identity is structural. Occurrence
-        # disambiguation keeps two structurally identical siblings distinct.
-        basis = {
+        # Full construction identity: op + canonical param VALUES + inputs.
+        # (Param values matter: box(1,1,1) after box(9,9,9) must not collide —
+        # ids survive reordering, not revaluing. Reviewed 2026-07-22.)
+        basis = canonical_json({
             "op": feature.op,
-            "param_keys": sorted(feature.params),
+            "params": feature.params,
             "inputs": list(feature.inputs),
-        }
-        raw = json.dumps(basis, sort_keys=True, separators=(",", ":"))
-        base = "f_" + hashlib.blake2b(raw.encode(), digest_size=8).hexdigest()
-        # Disambiguate structural twins deterministically by occurrence order.
+        })
+        base = "f_" + hashlib.blake2b(basis.encode(), digest_size=8).hexdigest()
+        # Exact structural twins (identical op+params+inputs) are disambiguated
+        # by occurrence order; the suffix is persisted in text and never
+        # re-derived, so it is stable for existing documents.
         if base not in self._by_id:
             return base
         n = 1
@@ -104,11 +122,8 @@ class Document:
     # -- text form (the git-diffable source) ----------------------------------
 
     def dumps(self) -> str:
-        """Canonical, deterministic text. Two documents that are semantically
-        equal serialize byte-identically — a hard requirement for clean diffs
-        and for content hashing."""
         doc = {"schema": self.SCHEMA, "features": [f.to_dict() for f in self._features]}
-        return json.dumps(doc, indent=2, sort_keys=True) + "\n"
+        return canonical_json(doc, indent=2) + "\n"
 
     @classmethod
     def loads(cls, text: str) -> "Document":
@@ -118,9 +133,12 @@ class Document:
         out = cls()
         for fd in doc["features"]:
             f = Feature.from_dict(fd)
-            # Preserve stored ids verbatim on load (round-trip fidelity).
             if not f.id:
                 raise GitcadError("stored feature is missing its id")
+            if f.id in out._by_id:
+                # The state a git merge of two branches can produce — refuse
+                # loudly instead of silently collapsing (reviewed 2026-07-22).
+                raise GitcadError(f"duplicate feature id in document: {f.id!r}")
             for ref in f.inputs:
                 if ref not in out._by_id:
                     raise GitcadError(f"feature {f.id} references unknown input {ref}")
@@ -129,30 +147,70 @@ class Document:
         return out
 
     def content_hash(self) -> str:
-        import hashlib
-
         return hashlib.blake2b(self.dumps().encode(), digest_size=16).hexdigest()
 
     # -- build (produces artifacts, not source) -------------------------------
 
-    def build(self, kernel: Kernel, identity: IdentityService | None = None) -> dict[str, Shape]:
-        """Evaluate the tree against a kernel. Returns {feature_id: shape}.
+    def build(self, kernel: Kernel, identity: IdentityService | None = None) -> BuildResult:
+        """Evaluate the tree against a kernel.
 
-        The mapping between kernel-produced entities and stable ids is what the
-        drawing engine and downstream references rely on; ``identity`` is
-        threaded through so entity ids are assigned during the build.
+        Assigns stable entity ids to every feature's faces/edges via
+        ``identity`` (ADR-0003): id = hash(lineage + rounded geometric
+        fingerprint). Entity-referencing params (e.g. fillet ``edges``) are
+        resolved against these ids during the build. Persist the registry with
+        ``result.identity.dumps()`` alongside the model so stored references
+        resolve in future processes.
         """
         identity = identity or IdentityService()
-        shapes: dict[str, Shape] = {}
+        result = BuildResult(identity=identity)
         for f in self._features:
-            ins = [shapes[i] for i in f.inputs]
-            shapes[f.id] = _dispatch(kernel, f, ins)
-        return shapes
+            ins = [result.shapes[i] for i in f.inputs]
+            shape = _dispatch(kernel, f, ins, result)
+            result.shapes[f.id] = shape
+            result.entities[f.id] = _index_entities(kernel, shape, f.id, identity)
+        return result
 
 
-def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape]) -> Shape:
-    """Map an intent op to a kernel call. Central place to add operations;
-    unknown ops fail loud so an agent gets an actionable error, not silence."""
+def _index_entities(kernel: Kernel, shape: Shape, feature_id: str,
+                    identity: IdentityService) -> dict[str, list[tuple[str, dict[str, Any]]]]:
+    out: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    for kind in ("face", "edge"):
+        try:
+            descriptors = kernel.entities(shape, kind)
+        except NotImplementedError:
+            descriptors = []
+        out[kind] = [(identity.assign(d, lineage=(feature_id, kind)), d) for d in descriptors]
+    return out
+
+
+def _resolve_edge_indices(edge_ids: list[str], input_feature: str,
+                          result: BuildResult) -> list[int]:
+    """Map stored entity ids to the input shape's current edge enumeration
+    indices — the moment ADR-0003 pays off: the reference survives upstream
+    edits because identity re-binds by fingerprint, not position."""
+    identity = result.identity
+    assert identity is not None
+    indexed = result.entities.get(input_feature, {}).get("edge", [])
+    descriptors = [d for _, d in indexed]
+    by_current_id = {eid: i for i, (eid, _) in enumerate(indexed)}
+    indices: list[int] = []
+    for eid in edge_ids:
+        if eid in by_current_id:            # exact id still present
+            indices.append(by_current_id[eid])
+            continue
+        resolved = identity.resolve(eid, descriptors)   # re-bind by fingerprint
+        if resolved is None:
+            raise IdentityError(
+                f"edge {eid!r} no longer exists on feature {input_feature!r}",
+                entity=eid,
+            )
+        indices.append(descriptors.index(resolved))
+    return indices
+
+
+def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult) -> Shape:
+    """Map an intent op to a kernel call. Unknown ops fail loud so an agent
+    gets an actionable error, not silence."""
     p = f.params
     if f.op == "box":
         return kernel.box(p["dx"], p["dy"], p["dz"])
@@ -172,5 +230,7 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape]) -> Shape:
     if f.op == "boolean":
         return kernel.boolean(p["kind"], ins[0], ins[1])
     if f.op == "fillet":
-        return kernel.fillet(ins[0], p.get("edges", []), p["radius"])
+        edge_ids = p.get("edges", [])
+        indices = _resolve_edge_indices(edge_ids, f.inputs[0], result) if edge_ids else None
+        return kernel.fillet(ins[0], indices, p["radius"])
     raise GitcadError(f"unknown operation {f.op!r} (feature {f.id})")

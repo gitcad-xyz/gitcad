@@ -7,6 +7,8 @@ dimensions, per usual drafting practice.
 
 from __future__ import annotations
 
+from xml.sax.saxutils import escape
+
 from gitcad.drawing.sheet import Dimension, Drawing
 
 _STYLE = (
@@ -38,7 +40,7 @@ def render_svg(d: Drawing) -> str:
         if view.visible:
             xs = [x for p in view.visible for x, _ in p]
             ys = [v for p in view.visible for _, v in p]
-            out.append(f'<text class="lbl" x="{min(xs):.2f}" y="{y(min(ys)) + 5:.2f}">{view.label}</text>')
+            out.append(f'<text class="lbl" x="{min(xs):.2f}" y="{y(min(ys)) + 5:.2f}">{escape(view.label)}</text>')
 
     for dim in d.dims:
         out.append(_dim_svg(dim, y))
@@ -59,12 +61,12 @@ def _dim_svg(dim: Dimension, y) -> str:
             s.append(f'<line class="d" x1="{xx:.2f}" y1="{y(yy):.2f}" x2="{xx + a/2:.2f}" y2="{y(yy + sgn*a):.2f}"/>')
         mx, my = x1 - 1.2, (y1 + y2) / 2
         s.append(f'<text class="t" x="{mx:.2f}" y="{y(my):.2f}" text-anchor="middle" '
-                 f'transform="rotate(-90 {mx:.2f} {y(my):.2f})">{dim.text}</text>')
+                 f'transform="rotate(-90 {mx:.2f} {y(my):.2f})">{escape(dim.text)}</text>')
     else:
         for xx, yy, sgn in ((x1, y1, 1), (x2, y2, -1)):
             s.append(f'<line class="d" x1="{xx:.2f}" y1="{y(yy):.2f}" x2="{xx + sgn*a:.2f}" y2="{y(yy) - a/2:.2f}"/>')
             s.append(f'<line class="d" x1="{xx:.2f}" y1="{y(yy):.2f}" x2="{xx + sgn*a:.2f}" y2="{y(yy) + a/2:.2f}"/>')
-        s.append(f'<text class="t" x="{(x1 + x2) / 2:.2f}" y="{y(y1) - 1.2:.2f}" text-anchor="middle">{dim.text}</text>')
+        s.append(f'<text class="t" x="{(x1 + x2) / 2:.2f}" y="{y(y1) - 1.2:.2f}" text-anchor="middle">{escape(dim.text)}</text>')
     return "".join(s)
 
 
@@ -79,5 +81,5 @@ def _title_block(d: Drawing, y) -> str:
     ]
     s = [f'<rect x="{x0}" y="{y(y0 + h):.2f}" width="{w}" height="{h}" class="tb"/>']
     for text, dy, cls in rows:
-        s.append(f'<text class="{cls}" x="{x0 + 3:.2f}" y="{y(y0 + h) + dy:.2f}">{text}</text>')
+        s.append(f'<text class="{cls}" x="{x0 + 3:.2f}" y="{y(y0 + h) + dy:.2f}">{escape(text)}</text>')
     return "".join(s)

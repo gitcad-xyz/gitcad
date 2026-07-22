@@ -90,9 +90,10 @@ class NullKernel:
             raise ValueError(f"unknown boolean op {op!r}")
         return NullShape("boolean", {"op": op}, (a, b))
 
-    def fillet(self, shape: Shape, edges: list[str], radius: float) -> Shape:
+    def fillet(self, shape: Shape, edges: list[int] | None, radius: float) -> Shape:
         _require_positive(radius=radius)
-        return NullShape("fillet", {"edges": list(edges), "radius": radius}, (shape,))
+        return NullShape("fillet", {"edges": list(edges) if edges is not None else None,
+                                    "radius": radius}, (shape,))
 
     def entities(self, shape: Shape, kind: str) -> list[dict[str, Any]]:
         """Deterministic synthetic topology so identity assignment is testable.
@@ -107,9 +108,11 @@ class NullKernel:
         return []
 
     def validate(self, shape: Shape) -> ValidationReport:
-        # The null backend can only assert structural well-formedness.
+        # The null backend can only assert structural well-formedness — it must
+        # say so explicitly, or a silent fallback would let agents "verify"
+        # geometry that was never built (reviewed 2026-07-22).
         ok = isinstance(shape, NullShape)
-        return ValidationReport(ok=ok, checks={"backend": "null", "watertight": None})
+        return ValidationReport(ok=ok, checks={"backend": "null", "geometry_checked": False})
 
     def measure(self, shape: Shape) -> dict[str, float]:
         vol = shape.volume() if isinstance(shape, NullShape) else None

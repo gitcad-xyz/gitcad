@@ -103,10 +103,11 @@ class Assembly:
         violations: list[str] = []
         for m in self.mates:
             (ia, pa), (ib, pb) = m.split()
-            for iname in (ia, ib):
-                if iname not in self.instances:
-                    violations.append(f"mate:unknown-instance:{iname}")
-            if violations and violations[-1].startswith("mate:unknown-instance"):
+            # Per-mate validity — earlier mates' failures must never swallow
+            # this mate's checks (reviewed 2026-07-22).
+            missing = [i for i in (ia, ib) if i not in self.instances]
+            if missing:
+                violations.extend(f"mate:unknown-instance:{i}" for i in missing)
                 continue
             inst_a, inst_b = self.instances[ia], self.instances[ib]
             try:
@@ -118,12 +119,15 @@ class Assembly:
             if frozenset({port_a.type, port_b.type}) not in COMPATIBLE_TYPES:
                 violations.append(f"mate:incompatible-types:{m.a}({port_a.type})<->{m.b}({port_b.type})")
             pos_a, pos_b = inst_a.port_position(pa), inst_b.port_position(pb)
-            dist = math.dist(pos_a[:2], pos_b[:2])  # v1: XY coincidence
+            dist = math.dist(pos_a, pos_b)   # full 3D coincidence
             if dist > _TOL:
                 violations.append(f"mate:position-mismatch:{m.a}<->{m.b}:d={dist:.3f}mm")
+        # checks states METHOD and coverage so ok=True can never overstate what
+        # was verified (frame orientation is not yet checked, only position).
         return ValidationReport(
             ok=not violations,
-            checks={"instances": len(self.instances), "mates": len(self.mates)},
+            checks={"instances": len(self.instances), "mates": len(self.mates),
+                    "coincidence": "xyz-position", "orientation_checked": False},
             violations=violations,
         )
 

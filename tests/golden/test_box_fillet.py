@@ -18,16 +18,16 @@ from gitcad.kernel.null import NullKernel
 def test_box_volume_null_kernel() -> None:
     d = Document()
     d.add(Feature(op="box", params={"dx": 10, "dy": 20, "dz": 5}))
-    shapes = d.build(NullKernel())
-    (shape,) = shapes.values()
+    result = d.build(NullKernel())
+    (shape,) = result.shapes.values()
     assert NullKernel().measure(shape)["volume"] == pytest.approx(1000.0)
 
 
 def test_cylinder_volume_null_kernel() -> None:
     d = Document()
     d.add(Feature(op="cylinder", params={"radius": 2, "height": 10}))
-    shapes = d.build(NullKernel())
-    (shape,) = shapes.values()
+    result = d.build(NullKernel())
+    (shape,) = result.shapes.values()
     assert NullKernel().measure(shape)["volume"] == pytest.approx(math.pi * 4 * 10)
 
 

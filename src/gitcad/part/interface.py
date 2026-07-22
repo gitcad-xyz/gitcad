@@ -77,7 +77,9 @@ class Interface:
         )
 
     def canonical(self) -> str:
-        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
+        from gitcad.canonical import canonical_json
+
+        return canonical_json(self.to_dict())
 
 
 # -- the semver enforcer ------------------------------------------------------
@@ -133,15 +135,26 @@ def classify_change(old: Interface, new: Interface) -> tuple[str, list[str]]:
         elif new.envelope is None:
             require("major", "envelope removed")
         else:
-            grew = any(new.envelope.get(k, 0) > old.envelope.get(k, 0) + _TOL
-                       for k in ("dx", "dy", "dz"))
-            origin_moved = any(abs(a - b) > _TOL for a, b in
-                               zip(new.envelope.get("origin", (0, 0, 0)),
-                                   old.envelope.get("origin", (0, 0, 0))))
-            if grew or origin_moved:
-                require("major", "envelope grew or moved")
-            else:
-                require("minor", "envelope shrank")
+            # Containment semantics (ADR-0009, corrected per 2026-07-22 review):
+            # new fits inside old (within tolerance) -> compatible shrink =
+            # MINOR; identical within tolerance -> no interface change; any
+            # extension beyond the old box -> MAJOR. A centered shrink that
+            # moves the origin is still MINOR — what matters is fit, not the
+            # min corner.
+            def corners(env: dict) -> tuple[tuple[float, ...], tuple[float, ...]]:
+                o = tuple(env.get("origin", (0, 0, 0)))
+                return o, tuple(o[i] + env[k] for i, k in enumerate(("dx", "dy", "dz")))
+
+            (old_lo, old_hi), (new_lo, new_hi) = corners(old.envelope), corners(new.envelope)
+            outside = any(new_lo[i] < old_lo[i] - _TOL or new_hi[i] > old_hi[i] + _TOL
+                          for i in range(3))
+            identical = all(abs(new_lo[i] - old_lo[i]) <= _TOL and
+                            abs(new_hi[i] - old_hi[i]) <= _TOL for i in range(3))
+            if outside:
+                require("major", "envelope extends beyond previous bounds")
+            elif not identical:
+                require("minor", "envelope shrank (fits within previous bounds)")
+            # else: sub-tolerance float noise — not an interface change
 
     if not reasons:
         reasons.append("PATCH: interface identical")

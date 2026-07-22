@@ -177,3 +177,30 @@ def test_unresolvable_constraint_raises() -> None:
     consumer.deps["prt_0000000000000001"] = "^3.0.0"
     with pytest.raises(GitcadError):
         resolve(consumer, ws)
+
+
+def test_caret_zero_zero_is_exact() -> None:
+    """^0.0.z matches only itself (npm/cargo convention; reviewed 2026-07-22)."""
+    assert satisfies("0.0.3", "^0.0.3")
+    assert not satisfies("0.0.4", "^0.0.3")
+
+
+def test_centered_envelope_shrink_is_minor() -> None:
+    """A shrink strictly inside the old box is MINOR even though the origin
+    moved — containment semantics (reviewed 2026-07-22)."""
+    old = _iface(envelope={"origin": [0, 0, 0], "dx": 10, "dy": 10, "dz": 10})
+    new = _iface(envelope={"origin": [1, 1, 1], "dx": 8, "dy": 8, "dz": 8})
+    assert classify_change(old, new)[0] == "minor"
+
+
+def test_mate_failures_do_not_swallow_later_mates() -> None:
+    """A ghost-instance mate must not suppress checking of subsequent mates
+    (reviewed 2026-07-22)."""
+    board = _part()
+    asm = Assembly("t")
+    asm.add("b", board)
+    asm.mate("ghost.mnt_1", "b.mnt_1")          # unknown instance
+    asm.mate("b.mnt_1", "b.mnt_2")              # real mate, 30mm apart
+    report = asm.validate()
+    assert any(v.startswith("mate:unknown-instance") for v in report.violations)
+    assert any(v.startswith("mate:position-mismatch") for v in report.violations)

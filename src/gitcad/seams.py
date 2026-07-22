@@ -38,11 +38,20 @@ class Kernel(Protocol):
 
     def cylinder(self, radius: float, height: float) -> Shape: ...
 
+    def sphere(self, radius: float) -> Shape: ...
+
+    def cone(self, r1: float, r2: float, height: float) -> Shape: ...
+
     def boolean(self, op: str, a: Shape, b: Shape) -> Shape:
         """``op`` in {"union", "cut", "intersect"}."""
         ...
 
-    def fillet(self, shape: Shape, edges: list[str], radius: float) -> Shape: ...
+    def fillet(self, shape: Shape, edges: list[int] | None, radius: float) -> Shape:
+        """Fillet by enumeration index into ``entities(shape, "edge")`` order
+        (``None`` = all edges). Index resolution from stable entity ids happens
+        one level up, in the document build (ADR-0003) — the kernel never sees
+        identity, only concrete indices valid for this exact shape."""
+        ...
 
     def entities(self, shape: Shape, kind: str) -> list[dict[str, Any]]:
         """Enumerate topological entities (``kind`` in {"face","edge","vertex"})

@@ -31,8 +31,7 @@ def model_to_part(
     geometry's bounding box; declared frames/ports carried through."""
     if not len(doc):
         raise ValueError("document has no features")
-    shapes = doc.build(kernel)
-    final = shapes[doc.features[-1].id]
+    final = doc.build(kernel).final(doc)
     (minx, miny, minz), (maxx, maxy, maxz) = kernel.bbox(final)
     # Round to fixed precision: a derived envelope feeds interface-semver
     # (ADR-0009), so float noise between rebuilds must never register as an
