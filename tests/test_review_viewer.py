@@ -57,3 +57,15 @@ def test_review_client_ships_tabs_and_measure_tool():
     assert '#sheets' in PAGE
     # escape clears picks
     assert 'e.key === "Escape"' in PAGE
+
+
+def test_review_client_ships_selection_and_explode():
+    # click-to-select with group highlight + info readout
+    assert "selectAt" in PAGE
+    assert "click again to deselect" in PAGE
+    # exploded view: display projection only, slider + #x= deep link
+    assert "applyExplode" in PAGE
+    assert 'id="explodeslider"' in PAGE
+    assert "x=([0-9.]+)" in PAGE
+    # explode never touches the model text — positions rebuilt from basePos
+    assert "new Float32Array(basePos)" in PAGE

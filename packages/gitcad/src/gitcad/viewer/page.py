@@ -35,10 +35,17 @@ PAGE = r"""<!DOCTYPE html>
            white-space:pre;text-align:right}
   #err{position:fixed;top:38px;left:12px;color:#f85149;white-space:pre-wrap}
   #logo{position:fixed;right:12px;top:10px;color:var(--acc);font-weight:700}
+  #sel{position:fixed;left:12px;bottom:64px;color:#d29922;pointer-events:none;white-space:pre}
+  #explodebox{position:fixed;right:12px;top:40px;display:none;align-items:center;
+              gap:8px;color:var(--dim);z-index:5}
+  #explodebox input{width:140px;accent-color:var(--acc)}
 </style></head><body>
 <canvas id="gl"></canvas><div id="board"></div><div id="sheets"></div>
 <div id="tabs"></div>
-<div id="hud"></div><div id="measure"></div><div id="err"></div><div id="logo">gitcad</div>
+<div id="explodebox"><span>explode</span>
+  <input id="explodeslider" type="range" min="0" max="100" value="0"></div>
+<div id="hud"></div><div id="sel"></div><div id="measure"></div>
+<div id="err"></div><div id="logo">gitcad</div>
 <script>
 "use strict";
 const canvas = document.getElementById("gl");
@@ -77,12 +84,16 @@ gl.enable(gl.DEPTH_TEST);
 
 let nIndices = 0, center = [0,0,0], radius = 50;
 let yaw = 0.7, pitch = 0.5, dist = 3;   // dist in units of radius
-let meshPos = null, meshIdx = null;     // kept for measure raycasts
+let meshPos = null, meshIdx = null;     // LIVE positions (explode applied)
+let basePos = null, baseCols = null;    // as-designed positions/colors
+let groups = [];                        // {name, part, i0, i1, v0, v1, centroid}
+let selected = -1, explode = 0;
+let vb = null, cb = null;
 const vao = gl.createVertexArray();
 
 function upload(mesh){
   gl.bindVertexArray(vao);
-  const vb = gl.createBuffer();
+  vb = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, vb);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(mesh.positions), gl.STATIC_DRAW);
   gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
@@ -92,7 +103,7 @@ function upload(mesh){
     cols = new Array(mesh.positions.length);
     for(let i = 0; i < nVerts; i++){ cols[3*i] = 0.35; cols[3*i+1] = 0.62; cols[3*i+2] = 0.85; }
   }
-  const cb = gl.createBuffer();
+  cb = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, cb);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(cols), gl.STATIC_DRAW);
   gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
@@ -100,8 +111,24 @@ function upload(mesh){
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(mesh.indices), gl.STATIC_DRAW);
   nIndices = mesh.indices.length;
+  basePos = new Float32Array(mesh.positions);
+  baseCols = new Float32Array(cols);
   meshPos = new Float32Array(mesh.positions);
   meshIdx = new Uint32Array(mesh.indices);
+  // group index/vertex ranges + centroids, for selection and explode
+  groups = []; selected = -1;
+  let i0 = 0;
+  for(const g of (mesh.groups || [])){
+    const i1 = i0 + g.triangles * 3;
+    let v0 = Infinity, v1 = -1;
+    for(let k = i0; k < i1; k++){ const v = meshIdx[k];
+      if(v < v0) v0 = v; if(v > v1) v1 = v; }
+    let cx = 0, cy = 0, cz = 0, n = Math.max(1, v1 - v0 + 1);
+    for(let v = v0; v <= v1; v++){ cx += basePos[3*v]; cy += basePos[3*v+1]; cz += basePos[3*v+2]; }
+    groups.push({name: g.name, part: g.part, i0, i1, v0, v1,
+                 centroid: [cx/n, cy/n, cz/n]});
+    i0 = i1;
+  }
   const [lo, hi] = mesh.bbox;
   center = [(lo[0]+hi[0])/2, (lo[1]+hi[1])/2, (lo[2]+hi[2])/2];
   radius = Math.max(1e-6, Math.hypot(hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]) / 2);
@@ -176,28 +203,81 @@ function rayTriangle(o, d, a, b, c){    // Moller-Trumbore; returns t or null
   const t = dot3(e2, q) * inv;
   return t > 1e-9 ? t : null;
 }
-function pick(px, py){
-  if(!meshPos) return;
+function raycast(px, py){
+  if(!meshPos) return null;
   const {orig, dir} = pickRay(px, py);
-  let best = null, bestTri = null;
+  let best = null, bestTri = null, bestI = -1;
   for(let i = 0; i < meshIdx.length; i += 3){
     const a = [meshPos[3*meshIdx[i]], meshPos[3*meshIdx[i]+1], meshPos[3*meshIdx[i]+2]];
     const b = [meshPos[3*meshIdx[i+1]], meshPos[3*meshIdx[i+1]+1], meshPos[3*meshIdx[i+1]+2]];
     const c = [meshPos[3*meshIdx[i+2]], meshPos[3*meshIdx[i+2]+1], meshPos[3*meshIdx[i+2]+2]];
     const t = rayTriangle(orig, dir, a, b, c);
-    if(t !== null && (best === null || t < best)){ best = t; bestTri = [a, b, c]; }
+    if(t !== null && (best === null || t < best)){ best = t; bestTri = [a, b, c]; bestI = i; }
   }
-  if(best === null) return;
-  let hit = add3(orig, scl3(dir, best));
+  if(best === null) return null;
+  return {orig, dir, t: best, tri: bestTri, index: bestI};
+}
+
+// -- selection: click a body, see what it is ---------------------------------
+const selHud = document.getElementById("sel");
+function selectAt(px, py){
+  const hit = raycast(px, py);
+  const before = selected;
+  selected = -1;
+  if(hit) selected = groups.findIndex(g => hit.index >= g.i0 && hit.index < g.i1);
+  if(selected === before && hit) selected = -1;   // click again to deselect
+  const cols = new Float32Array(baseCols);
+  if(selected >= 0){
+    const g = groups[selected];
+    for(let v = g.v0; v <= g.v1; v++){
+      cols[3*v] = Math.min(1, cols[3*v] * 0.5 + 0.55);
+      cols[3*v+1] = Math.min(1, cols[3*v+1] * 0.5 + 0.45);
+      cols[3*v+2] = Math.min(1, cols[3*v+2] * 0.3 + 0.1);
+    }
+    selHud.textContent = `selected: ${g.name}  (${g.part})\n` +
+      `centroid (${g.centroid.map(v=>v.toFixed(1)).join(", ")}) · ` +
+      `${(g.i1 - g.i0) / 3} tris · click again to deselect`;
+  } else {
+    selHud.textContent = "";
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, cb);
+  gl.bufferData(gl.ARRAY_BUFFER, cols, gl.STATIC_DRAW);
+}
+
+// -- exploded view: a display projection, never a model edit (ADR-0014) ------
+function applyExplode(){
+  const out = new Float32Array(basePos);
+  if(explode > 0 && groups.length > 1){
+    for(const g of groups){
+      let d = sub3(g.centroid, center);
+      const l = Math.hypot(...d);
+      d = l < 1e-6 ? [0, 0, 1] : scl3(d, 1 / l);
+      const off = scl3(d, explode * radius * 0.9);
+      for(let v = g.v0; v <= g.v1; v++){
+        out[3*v] += off[0]; out[3*v+1] += off[1]; out[3*v+2] += off[2];
+      }
+    }
+  }
+  meshPos = out;
+  gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+  gl.bufferData(gl.ARRAY_BUFFER, out, gl.STATIC_DRAW);
+  picks = []; updateMeasure();
+}
+
+function pick(px, py){
+  const hit = raycast(px, py);
+  if(!hit) return;
+  const bestTri = hit.tri;
+  let hitp = add3(hit.orig, scl3(hit.dir, hit.t));
   // vertex snap: nearest corner of the hit triangle within 4% of model radius
   let snap = null, snapD = radius * 0.04;
   for(const v of bestTri){
-    const dd = Math.hypot(...sub3(v, hit));
+    const dd = Math.hypot(...sub3(v, hitp));
     if(dd < snapD){ snapD = dd; snap = v; }
   }
-  if(snap) hit = snap;
-  picks.push(hit);
-  if(picks.length > 2) picks = [hit];
+  if(snap) hitp = snap;
+  picks.push(hitp);
+  if(picks.length > 2) picks = [hitp];
   updateMeasure();
 }
 function updateMeasure(){
@@ -251,7 +331,10 @@ let dragging = false, moved = false, px = 0, py = 0;
 canvas.addEventListener("pointerdown", e => {
   dragging = true; moved = false; px = e.clientX; py = e.clientY; });
 addEventListener("pointerup", e => {
-  if(dragging && !moved && measureMode) pick(e.clientX, e.clientY);
+  if(dragging && !moved && canvas.style.display !== "none" && e.target === canvas){
+    if(measureMode) pick(e.clientX, e.clientY);
+    else if(groups.length) selectAt(e.clientX, e.clientY);
+  }
   dragging = false;
 });
 addEventListener("pointermove", e => {
@@ -337,6 +420,15 @@ async function poll(){
         if(mesh.error) throw new Error(mesh.error);
         upload(mesh);
         picks = []; updateMeasure();
+        // explode slider only makes sense for multi-instance assemblies;
+        // #x=0.6 deep-links an exploded state (a display projection —
+        // the model text never changes, ADR-0014)
+        const box = document.getElementById("explodebox");
+        box.style.display = groups.length > 1 ? "flex" : "none";
+        const m = location.hash.match(/x=([0-9.]+)/);
+        explode = m ? Math.min(1, parseFloat(m[1])) : explode;
+        document.getElementById("explodeslider").value = String(explode * 100);
+        applyExplode();
         showTab();
       }
       loadSheets();
@@ -344,6 +436,10 @@ async function poll(){
   } catch(e){ err.textContent = String(e); }
   setTimeout(poll, 1000);
 }
+document.getElementById("explodeslider").addEventListener("input", e => {
+  explode = Number(e.target.value) / 100;
+  applyExplode();
+});
 renderTabs();
 poll();
 </script></body></html>
