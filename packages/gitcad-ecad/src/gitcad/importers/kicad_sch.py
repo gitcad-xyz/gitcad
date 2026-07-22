@@ -33,22 +33,54 @@ _TYPE_MAP = {
 }
 
 
-def _lib_pins(lib_symbols) -> dict[str, list[dict]]:
-    """lib_id -> [{number, name, type, x, y}] (connection points, y-up)."""
-    out: dict[str, list[dict]] = {}
+def _lib_symbols(lib_symbols) -> dict[str, dict]:
+    """lib_id -> {"pins": [...], "shapes": [...]} in library coords (y-up).
+
+    Shapes are the symbol body graphics (rectangles, polylines, circles,
+    arcs) plus pin stubs — enough to reproduce KiCad's drawing of the
+    symbol, not just its connectivity."""
+    out: dict[str, dict] = {}
     for sym in find_all(lib_symbols or [], "symbol"):
         lib_id = sym[1]
         pins: list[dict] = []
+        shapes: list[dict] = []
         for unit in find_all(sym, "symbol"):          # sub-units R_0_1, R_1_1...
             for pin in find_all(unit, "pin"):
-                at = find_one(pin, "at") or ["at", 0, 0]
+                at = find_one(pin, "at") or ["at", 0, 0, 0]
                 pins.append({
                     "number": str(value_of(pin, "number", default="")),
                     "name": str(value_of(pin, "name", default="~")),
                     "type": _TYPE_MAP.get(pin[1] if len(pin) > 1 and isinstance(pin[1], str) else "passive", "passive"),
                     "x": float(at[1]), "y": float(at[2]),
+                    "angle": float(at[3]) if len(at) > 3 else 0.0,
+                    "len": float(value_of(pin, "length", default=0.0) or 0.0),
                 })
-        out[lib_id] = pins
+            for r in find_all(unit, "rectangle"):
+                s, e = find_one(r, "start"), find_one(r, "end")
+                if s and e:
+                    shapes.append({"kind": "rect",
+                                   "pts": [[float(s[1]), float(s[2])],
+                                           [float(e[1]), float(e[2])]]})
+            for pl in find_all(unit, "polyline"):
+                pts = find_one(pl, "pts")
+                if pts:
+                    shapes.append({"kind": "poly",
+                                   "pts": [[float(xy[1]), float(xy[2])]
+                                           for xy in find_all(pts, "xy")]})
+            for c in find_all(unit, "circle"):
+                ctr = find_one(c, "center")
+                if ctr:
+                    shapes.append({"kind": "circle",
+                                   "pts": [[float(ctr[1]), float(ctr[2])]],
+                                   "r": float(value_of(c, "radius", default=0.5) or 0.5)})
+            for a in find_all(unit, "arc"):
+                s, m, e = find_one(a, "start"), find_one(a, "mid"), find_one(a, "end")
+                if s and m and e:
+                    shapes.append({"kind": "arc",
+                                   "pts": [[float(s[1]), float(s[2])],
+                                           [float(m[1]), float(m[2])],
+                                           [float(e[1]), float(e[2])]]})
+        out[lib_id] = {"pins": pins, "shapes": shapes}
     return out
 
 
@@ -94,7 +126,7 @@ def import_kicad_sch(path: str) -> tuple[Schematic, ImportReport]:
     if not (isinstance(root, list) and root and root[0] == "kicad_sch"):
         raise GitcadError(f"{path!r} is not a kicad_sch document")
 
-    lib = _lib_pins(find_one(root, "lib_symbols"))
+    lib = _lib_symbols(find_one(root, "lib_symbols"))
 
     # honesty: out-of-scope structures
     sheets = find_all(root, "sheet")
@@ -115,6 +147,14 @@ def import_kicad_sch(path: str) -> tuple[Schematic, ImportReport]:
                       float((find_one(n, "at") or ["at", 0, 0])[2]))
                  for n in find_all(root, "no_connect")}
 
+    # Sheet graphics — the designer's actual drawing, kept as a runtime
+    # projection cache (never serialized into the schematic's canonical text;
+    # the diagram is a rendering of the source, not part of it).
+    gfx_wires: list[list[float]] = []
+    gfx_powers: list[dict] = []
+    gfx_labels: list[dict] = []
+    gfx_symbols: dict[str, dict] = {}
+
     # -- placed symbols --------------------------------------------------------
     power_count = 0
     for sym in find_all(root, "symbol"):
@@ -125,7 +165,8 @@ def import_kicad_sch(path: str) -> tuple[Schematic, ImportReport]:
         mirror = value_of(sym, "mirror")
         props = {p[1]: str(p[2]) for p in find_all(sym, "property") if len(p) >= 3}
         ref = props.get("Reference", "?")
-        pins = lib.get(lib_id, [])
+        entry = lib.get(lib_id, {"pins": [], "shapes": []})
+        pins = entry["pins"]
 
         if lib_id.startswith("power:") or ref.startswith("#PWR") or ref.startswith("#FLG"):
             # power symbol: names the net at its pin point
@@ -134,10 +175,12 @@ def import_kicad_sch(path: str) -> tuple[Schematic, ImportReport]:
                 pt = _pin_abs(p["x"], p["y"], sx, sy, rot, mirror)
                 net_names[_key(*pt)] = name
                 dsu.find(("pt", _key(*pt)))
+            gfx_powers.append({"name": name, "x": sx, "y": sy, "rot": rot})
             power_count += 1
             continue
 
         comp_pins: list[Pin] = []
+        pin_xy: dict[str, list[float]] = {}
         for p in pins:
             pt = _pin_abs(p["x"], p["y"], sx, sy, rot, mirror)
             k = _key(*pt)
@@ -145,12 +188,38 @@ def import_kicad_sch(path: str) -> tuple[Schematic, ImportReport]:
             comp_pins.append(Pin(p["name"] if p["name"] != "~" else p["number"],
                                  p["number"], ptype))
             pin_nodes.append((k, f"{ref}.{p['number']}", ptype))
+            pin_xy[p["number"]] = [pt[0], pt[1]]
             dsu.union(("pt", k), ("pin", ref, p["number"]))
+        attrs = {"at": [sx, sy], "lib_id": lib_id, "pin_xy": pin_xy}
+        if rot:
+            attrs["rot"] = rot
+        if mirror:
+            attrs["mirror"] = mirror
         sch.components.append(SchComponent(
             ref=ref, value=props.get("Value", ""),
             footprint=props.get("Footprint", "").split(":")[-1],
-            pins=comp_pins, attrs={"at": [sx, sy], "lib_id": lib_id}))
+            pins=comp_pins, attrs=attrs))
         report.count("symbols", 1)
+
+        # Bake the symbol's body graphics + pin stubs into sheet coordinates.
+        def _abs(px: float, py: float) -> list[float]:
+            ax, ay = _pin_abs(px, py, sx, sy, rot, mirror)
+            return [ax, ay]
+
+        shapes_abs: list[dict] = []
+        for shp in entry["shapes"]:
+            baked = {"kind": shp["kind"], "pts": [_abs(*pt) for pt in shp["pts"]]}
+            if "r" in shp:
+                baked["r"] = shp["r"]
+            shapes_abs.append(baked)
+        for p in pins:
+            rad = math.radians(p["angle"])
+            bx = p["x"] + p["len"] * math.cos(rad)
+            by = p["y"] + p["len"] * math.sin(rad)
+            shapes_abs.append({"kind": "pin",
+                               "pts": [_abs(p["x"], p["y"]), _abs(bx, by)]})
+        gfx_symbols[ref] = {"shapes": shapes_abs, "at": [sx, sy],
+                            "value": props.get("Value", "")}
 
     # -- wires / junctions / labels / no-connects ------------------------------
     wires: list[tuple[tuple, tuple]] = []
@@ -158,9 +227,11 @@ def import_kicad_sch(path: str) -> tuple[Schematic, ImportReport]:
         pts = find_one(w, "pts")
         xs = find_all(pts, "xy") if pts else []
         if len(xs) >= 2:
-            a = _key(float(xs[0][1]), float(xs[0][2]))
-            b = _key(float(xs[-1][1]), float(xs[-1][2]))
+            x1, y1 = float(xs[0][1]), float(xs[0][2])
+            x2, y2 = float(xs[-1][1]), float(xs[-1][2])
+            a, b = _key(x1, y1), _key(x2, y2)
             wires.append((a, b))
+            gfx_wires.append([x1, y1, x2, y2])
             dsu.union(("pt", a), ("pt", b))
             report.count("wires", 1)
 
@@ -186,9 +257,12 @@ def import_kicad_sch(path: str) -> tuple[Schematic, ImportReport]:
         for lb in find_all(root, lbl_kind):
             name = str(lb[1])
             at = find_one(lb, "at") or ["at", 0, 0]
-            k = _key(float(at[1]), float(at[2]))
+            lx, ly = float(at[1]), float(at[2])
+            k = _key(lx, ly)
             net_names[k] = name
             dsu.find(("pt", k))
+            gfx_labels.append({"name": name, "x": lx, "y": ly, "kind": lbl_kind,
+                               "rot": float(at[3]) if len(at) > 3 else 0.0})
             report.count("labels", 1)
 
     # -- transform self-check: wire endpoints should land somewhere known -----
@@ -227,4 +301,8 @@ def import_kicad_sch(path: str) -> tuple[Schematic, ImportReport]:
             sch.connect(name, pr)
     report.count("nets", len(sch.nets))
     report.imported["power_symbols"] = power_count
+    sch.graphics = {  # type: ignore[attr-defined]
+        "wires": gfx_wires, "powers": gfx_powers, "labels": gfx_labels,
+        "symbols": gfx_symbols,
+        "junctions": [[jx / 100, jy / 100] for jx, jy in junctions]}
     return sch, report

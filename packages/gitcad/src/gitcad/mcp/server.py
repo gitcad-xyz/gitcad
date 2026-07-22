@@ -307,8 +307,15 @@ def schematic_import(path: str) -> dict[str, Any]:
 
     sch, report = import_kicad_sch(path)
     erc = sch.erc()
-    return {"schematic": sch.dumps(), "report": report.to_dict(),
-            "erc_ok": erc.ok, "erc_violations": erc.violations}
+    out = {"schematic": sch.dumps(), "report": report.to_dict(),
+           "erc_ok": erc.ok, "erc_violations": erc.violations}
+    try:
+        from gitcad.ecad.schsvg import sheet_to_svg
+
+        out["sheet_svg"] = sheet_to_svg(sch)   # the sheet exactly as drawn
+    except GitcadError:
+        pass  # no graphics (unusual) — netlist import still succeeds
+    return out
 
 
 @tool("schematic_system_erc")

@@ -225,3 +225,124 @@ def schematic_to_svg(sch: Schematic) -> str:
             f'<text x="{_f(width-4)}" y="{_f(height-4)}" fill="{_C["field"]}" font-size="3" '
             f'text-anchor="end" font-family="monospace">{escape(sch.name)} — gitcad</text>'
             + "".join(body) + "</svg>\n")
+
+
+# -- sheet-fidelity rendering (visual track v3) --------------------------------
+#
+# For IMPORTED schematics: draw the designer's actual sheet — symbol body
+# graphics, real wire routes, junction dots, labels and power flags, all at
+# their original coordinates (mm). The auto-layout above stays the renderer
+# for born-in-gitcad netlists that have no drawing yet.
+
+def _sheet_power_glyph(p: dict) -> str:
+    name = p["name"]
+    x, y, rot = p["x"], p["y"], p.get("rot", 0.0)
+    g = [f'<g transform="translate({_f(x)},{_f(y)}) rotate({_f(rot)})" '
+         f'stroke="{_C["wire"]}" fill="none" stroke-width="0.25">']
+    if _is_gnd(name):
+        g.append('<line x1="0" y1="0" x2="0" y2="1.3"/>')
+        for i, w in enumerate((1.3, 0.85, 0.4)):
+            yy = 1.3 + i * 0.55
+            g.append(f'<line x1="{_f(-w)}" y1="{_f(yy)}" x2="{_f(w)}" y2="{_f(yy)}"/>')
+    else:
+        g.append('<line x1="0" y1="0" x2="0" y2="-1.6"/>')
+        g.append('<line x1="-0.9" y1="-1.6" x2="0.9" y2="-1.6"/>')
+        g.append(f'<text x="0" y="-2.4" fill="{_C["label"]}" stroke="none" '
+                 f'font-size="1.27" text-anchor="middle" '
+                 f'font-family="monospace">{escape(name)}</text>')
+    g.append("</g>")
+    return "".join(g)
+
+
+def sheet_to_svg(sch: Schematic) -> str:
+    """Render an imported schematic exactly as drawn — KiCad's own sheet.
+
+    Requires the runtime ``graphics`` projection the .kicad_sch importer
+    attaches; born-in-gitcad schematics render via :func:`schematic_to_svg`.
+    """
+    from gitcad.errors import GitcadError
+
+    gfx = getattr(sch, "graphics", None)
+    if not gfx:
+        raise GitcadError(
+            "schematic has no sheet graphics (not imported from .kicad_sch?) "
+            "— use schematic_to_svg for auto-layout rendering")
+
+    xs: list[float] = []
+    ys: list[float] = []
+    for w in gfx["wires"]:
+        xs += [w[0], w[2]]; ys += [w[1], w[3]]
+    for sym in gfx["symbols"].values():
+        for shp in sym["shapes"]:
+            for px, py in shp["pts"]:
+                xs.append(px); ys.append(py)
+    for lb in gfx["labels"]:
+        xs.append(lb["x"]); ys.append(lb["y"])
+    for p in gfx["powers"]:
+        xs.append(p["x"]); ys.append(p["y"])
+    if not xs:
+        raise GitcadError("sheet graphics are empty")
+    m = 8.0
+    x0, y0 = min(xs) - m, min(ys) - m
+    w, h = max(xs) - x0 + m, max(ys) - y0 + m
+
+    out: list[str] = []
+    # symbol bodies first (cream fills under everything else)
+    for ref, sym in gfx["symbols"].items():
+        for shp in sym["shapes"]:
+            pts = shp["pts"]
+            if shp["kind"] == "rect":
+                (x1, y1), (x2, y2) = pts
+                out.append(f'<rect x="{_f(min(x1, x2))}" y="{_f(min(y1, y2))}" '
+                           f'width="{_f(abs(x2 - x1))}" height="{_f(abs(y2 - y1))}" '
+                           f'fill="{_C["fill"]}" stroke="{_C["sym"]}" stroke-width="0.25"/>')
+            elif shp["kind"] == "poly":
+                d = " ".join(f"{_f(px)},{_f(py)}" for px, py in pts)
+                out.append(f'<polyline points="{d}" fill="none" '
+                           f'stroke="{_C["sym"]}" stroke-width="0.25"/>')
+            elif shp["kind"] == "circle":
+                (cx, cy), = pts
+                out.append(f'<circle cx="{_f(cx)}" cy="{_f(cy)}" r="{_f(shp["r"])}" '
+                           f'fill="none" stroke="{_C["sym"]}" stroke-width="0.25"/>')
+            elif shp["kind"] == "arc":
+                (x1, y1), (xm, ym), (x2, y2) = pts
+                out.append(f'<path d="M {_f(x1)} {_f(y1)} Q {_f(2*xm-(x1+x2)/2)} '
+                           f'{_f(2*ym-(y1+y2)/2)} {_f(x2)} {_f(y2)}" fill="none" '
+                           f'stroke="{_C["sym"]}" stroke-width="0.25"/>')
+            elif shp["kind"] == "pin":
+                (x1, y1), (x2, y2) = pts
+                out.append(f'<line x1="{_f(x1)}" y1="{_f(y1)}" x2="{_f(x2)}" y2="{_f(y2)}" '
+                           f'stroke="{_C["sym"]}" stroke-width="0.25"/>')
+
+    # ref/value fields near the symbol anchor
+    for comp in sch.components:
+        at = comp.attrs.get("at")
+        if not at or comp.ref not in gfx["symbols"]:
+            continue
+        out.append(f'<text x="{_f(at[0] + 1.2)}" y="{_f(at[1] - 1.2)}" fill="{_C["field"]}" '
+                   f'font-size="1.27" font-family="monospace">{escape(comp.ref)}</text>')
+        if comp.value:
+            out.append(f'<text x="{_f(at[0] + 1.2)}" y="{_f(at[1] + 2.2)}" fill="{_C["field"]}" '
+                       f'font-size="1.27" font-family="monospace">{escape(comp.value)}</text>')
+
+    for wx in gfx["wires"]:
+        out.append(f'<line x1="{_f(wx[0])}" y1="{_f(wx[1])}" x2="{_f(wx[2])}" y2="{_f(wx[3])}" '
+                   f'stroke="{_C["wire"]}" stroke-width="0.25"/>')
+    for jx, jy in gfx["junctions"]:
+        out.append(f'<circle cx="{_f(jx)}" cy="{_f(jy)}" r="0.45" fill="{_C["wire"]}"/>')
+    for lb in gfx["labels"]:
+        anchor = "start" if lb.get("rot", 0) in (0, 360) else "end" if lb.get("rot") == 180 else "start"
+        weight = ' font-weight="bold"' if lb["kind"] != "label" else ""
+        out.append(f'<text x="{_f(lb["x"])}" y="{_f(lb["y"] - 0.4)}" fill="{_C["label"]}" '
+                   f'font-size="1.27" text-anchor="{anchor}"{weight} '
+                   f'font-family="monospace">{escape(lb["name"])}</text>')
+    for p in gfx["powers"]:
+        out.append(_sheet_power_glyph(p))
+
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" '
+            f'viewBox="{_f(x0)} {_f(y0)} {_f(w)} {_f(h)}" '
+            f'width="{_f(w * 5)}" style="background:{_C["bg"]}">'
+            f'<text x="{_f(x0 + w - 2)}" y="{_f(y0 + h - 2)}" fill="{_C["field"]}" '
+            f'font-size="1.6" text-anchor="end" font-family="monospace">'
+            f'{escape(sch.name)} — gitcad sheet</text>'
+            + "".join(out) + "</svg>\n")

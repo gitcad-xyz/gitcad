@@ -126,6 +126,42 @@ def test_pin_types_map_into_gitcad_vocabulary(sch_and_report):
     assert {p.type for p in u1.pins} == {"power_in", "passive"}
 
 
+# -- sheet-fidelity rendering (the designer's actual drawing) -----------------
+
+def test_importer_attaches_sheet_graphics(sch_and_report):
+    sch, _ = sch_and_report
+    gfx = sch.graphics
+    assert len(gfx["wires"]) == 4          # 3 SIG-chain segments + M wire
+    assert gfx["powers"][0]["name"] == "GND"
+    assert {lb["name"] for lb in gfx["labels"]} == {"SIG", "M"}
+    # graphics are a runtime projection — never serialized into canonical text
+    assert "graphics" not in sch.dumps()
+    assert "wires" not in sch.dumps()
+
+
+def test_sheet_to_svg_draws_real_geometry(sch_and_report):
+    from gitcad.ecad.schsvg import sheet_to_svg
+
+    sch, _ = sch_and_report
+    svg = sheet_to_svg(sch)
+    # the SIG wire segment from R1.1 down to the label lane, as drawn
+    assert '<line x1="100" y1="96.19" x2="100" y2="90"' in svg
+    assert ">SIG</text>" in svg
+    assert 'stroke="#008400"' in svg       # KiCad wire green
+    assert 'stroke="#840000"' in svg       # maroon pin stubs
+
+
+def test_sheet_to_svg_refuses_schematic_without_graphics():
+    import pytest as _pytest
+
+    from gitcad.ecad.schematic import Schematic
+    from gitcad.ecad.schsvg import sheet_to_svg
+    from gitcad.errors import GitcadError
+
+    with _pytest.raises(GitcadError, match="no sheet graphics"):
+        sheet_to_svg(Schematic(name="born-in-gitcad"))
+
+
 # -- multi-board system merge (nets union by name across sheets) --------------
 
 def test_merge_schematics_unions_named_nets():
