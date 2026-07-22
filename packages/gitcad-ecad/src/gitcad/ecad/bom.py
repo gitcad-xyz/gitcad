@@ -29,23 +29,32 @@ from gitcad.part import Interface, PartManifest
 def mpn_component(mpn: str, manufacturer: str, footprint_part: PartManifest,
                   part_id: str, version: str = "0.1.0", *,
                   kind: str = "", params: dict | None = None,
-                  datasheet: str = "") -> PartManifest:
+                  datasheet: dict | None = None) -> PartManifest:
     """An atomic MPN part. Pads/envelope inherit from the footprint component
     (the shared asset); electrical facts ride as properties."""
     if footprint_part.domain != "ecad.component":
         raise GitcadError("footprint_part must be an ecad.component")
+    if datasheet is not None:
+        # Hash-anchored, never the PDF itself (copyright vs CC0 data): the
+        # verification pipeline fetches the url and REFUSES on hash mismatch,
+        # so submitter and verifier provably read the same document.
+        if set(datasheet) - {"url", "sha256", "retrieved"} or                 "url" not in datasheet or "sha256" not in datasheet:
+            raise GitcadError("datasheet must be {url, sha256[, retrieved]}")
+        import re as _re
+        if not _re.fullmatch(r"[0-9a-f]{64}", datasheet["sha256"]):
+            raise GitcadError("datasheet.sha256 must be 64 lowercase hex chars")
     iface = Interface.from_dict(footprint_part.interface.to_dict())
     iface.properties = {
         "mpn": mpn, "manufacturer": manufacturer, "kind": kind,
         **(params or {}),
-        **({"datasheet": datasheet} if datasheet else {}),
     }
     return PartManifest(
         id=part_id, name=mpn, domain="ecad.component", version=version,
         interface=iface,
         deps={footprint_part.id: f"^{footprint_part.version}"},
         body={"kind": "mpn-component", "mpn": mpn, "manufacturer": manufacturer,
-              "footprint": footprint_part.id, "footprint_name": footprint_part.name},
+              "footprint": footprint_part.id, "footprint_name": footprint_part.name,
+              **({"datasheet": datasheet} if datasheet else {})},
     )
 
 

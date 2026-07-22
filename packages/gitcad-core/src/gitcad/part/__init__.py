@@ -9,6 +9,7 @@ most change-resistant surface gitcad owns.
 """
 
 from gitcad.part.assembly import Assembly, Instance, Mate
+from gitcad.part.bought import assembly_bom, bought_part, is_bought
 from gitcad.part.interference import check_interference
 from gitcad.part.interface import Frame, Interface, Port, check_release, classify_change
 from gitcad.part.lockfile import Lockfile, Workspace, resolve
@@ -19,6 +20,7 @@ __all__ = [
     "PartManifest", "new_part_id",
     "Interface", "Frame", "Port", "classify_change", "check_release",
     "Assembly", "Instance", "Mate", "check_interference",
+    "bought_part", "is_bought", "assembly_bom",
     "Lockfile", "Workspace", "resolve",
     "Version", "satisfies",
 ]
