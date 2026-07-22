@@ -46,7 +46,13 @@ class Rule:
             raise GitcadError(f"unknown rule type {self.type!r} (want one of {sorted(RULE_TYPES)})")
 
     def applies_to(self, net: str) -> bool:
-        return self.scope == "*" or self.scope == net
+        if self.scope == "*" or self.scope == net:
+            return True
+        if any(ch in self.scope for ch in "*?[") :
+            from fnmatch import fnmatchcase
+
+            return fnmatchcase(net, self.scope)
+        return False
 
 
 @dataclass
@@ -223,10 +229,31 @@ def _copper_dist(a: _Item, b: _Item) -> float:
 
 # -- the checker --------------------------------------------------------------
 
+def expand_net_classes(board: Board) -> list[Rule]:
+    """Board net classes -> net-scoped rules (KiCad-map P1). Each class's
+    net patterns (fnmatch globs allowed) get scoped rules that the tightest-
+    bound resolution in ``limit`` naturally lets OVERRIDE pack defaults."""
+    rules: list[Rule] = []
+    for cname, spec in sorted(board.net_classes.items()):
+        for pattern in spec.get("nets", []):
+            if "clearance" in spec:
+                rules.append(Rule(f"class-{cname}-clearance", "clearance",
+                                  {"min": spec["clearance"]}, scope=pattern))
+            if "track_width_min" in spec:
+                rules.append(Rule(f"class-{cname}-width", "track_width",
+                                  {"min": spec["track_width_min"]}, scope=pattern))
+    return rules
+
+
 def run_drc(board: Board, pack: RulePack | None = None) -> ValidationReport:
-    """Check ``board`` against ``pack`` (default profile if omitted).
+    """Check ``board`` against ``pack`` (default profile if omitted) plus the
+    board's own net classes, expanded into net-scoped rules.
     Violations are ``code:detail``; ``checks`` records rule counts + method."""
     pack = pack or default_rules()
+    class_rules = expand_net_classes(board)
+    if class_rules:
+        pack = RulePack(name=f"{pack.name}+netclasses",
+                        rules=list(pack.rules) + class_rules)
     violations: list[str] = []
     items = _items(board)
     minx, miny, maxx, maxy = board.bbox()

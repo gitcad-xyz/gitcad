@@ -119,6 +119,12 @@ class Board:
     mounting_holes: list[MountingHole] = field(default_factory=list)
     thickness: float = 1.6               # mm — board stack height
     mask_expansion: float = 0.05         # mm per side
+    # Net classes: named net groups binding DRC constraints (KiCad-map P1).
+    # {"power": {"nets": ["VCC", "GND", "+*"], "clearance": 0.3,
+    #            "track_width_min": 0.5}} — nets may be fnmatch globs; DRC
+    # expands each class into net-scoped rules that OVERRIDE the pack's
+    # defaults for matching nets.
+    net_classes: dict[str, dict] = field(default_factory=dict)
 
     SCHEMA = "gitcad/board@1"
 
@@ -158,6 +164,7 @@ class Board:
             mounting_holes=[MountingHole(**m) for m in b.get("mounting_holes", [])],
             thickness=b.get("thickness", 1.6),
             mask_expansion=b.get("mask_expansion", 0.05),
+            net_classes={k: dict(v) for k, v in b.get("net_classes", {}).items()},
         )
 
     # -- checks (the agent verification loop) ---------------------------------
@@ -208,6 +215,17 @@ class Board:
                 violations.append(f"zone-degenerate:{i}")
             if z.layer not in ("top", "bottom"):
                 violations.append(f"zone-bad-layer:{i}")
+        for cname, spec in sorted(self.net_classes.items()):
+            nets = spec.get("nets")
+            if not nets or not all(isinstance(n, str) and n for n in nets):
+                violations.append(f"netclass-empty-nets:{cname}")
+            for key in spec:
+                if key == "nets":
+                    continue
+                if key not in ("clearance", "track_width_min"):
+                    violations.append(f"netclass-unknown-param:{cname}:{key}")
+                elif not isinstance(spec[key], (int, float)) or spec[key] <= 0:
+                    violations.append(f"netclass-bad-value:{cname}:{key}")
         hole_names = [m.name for m in self.mounting_holes]
         if len(hole_names) != len(set(hole_names)):
             violations.append("mounting-holes-duplicate-names")
