@@ -79,14 +79,33 @@ honest: ✅ shipped · 🟡 partial · ❌ missing.
 | Version control integration | native: review gates, semantic diff/merge, lots | ✅ (beyond) |
 | Interactive GUI editing | deliberate non-goal v1: agents author, humans review | — |
 
-## Priority queue from this audit
+## Status after the parity push (all priorities shipped)
 
-1. **Net classes** — named groups binding DRC rules + envelope specs; unlocks real board constraints ("50Ω class", "HV class") and is the KiCad concept users ask for first.
-2. **Keepout areas + courtyard-overlap DRC** — placement correctness gaps an agent hits immediately when placing parts.
-3. **Silkscreen refs/values** — fab outputs look bare without them.
-4. **`schematic_annotate`** — deterministic ref numbering; agents currently hand-assign.
-5. **Footprint generators** — parametric QFN/SOIC/BGA/0402…; multiplies the registry.
-6. **Buses** — grouped nets + fan-out helper (authoring ergonomics for MCU-heavy designs).
-7. **ERC/DRC waivers** — reviewed suppression records with reasons (a silenced check must leave a trace).
-8. **Board stats report** — trivial, useful in reviews.
-9. Back annotation; length tuning; IPC-2581/ODB++; multi-layer model; Eagle/Altium importers — larger, staged later.
+Everything above marked ❌/🟡 was worked through in two tiers. Final
+state — updated statuses for the previously-missing rows:
+
+| feature | status | note |
+|---------|--------|------|
+| Net classes | ✅ | glob-scoped, override pack defaults per net |
+| Keepouts + courtyard overlap | ✅ | zone kind=keepout; named DRC violations |
+| Silkscreen refs | ✅ | built-in stroke font, rasterize-verified |
+| Annotation | ✅ | reading-order, existing refs never move |
+| Footprint generators | ✅ | chip/SOIC/QFN(+EP)/header |
+| Buses | ✅ | visual per KiCad semantics; members unify by label |
+| ERC/DRC waivers | ✅ | reasoned, visible, stale-waiver-flagging |
+| Board stats | ✅ | + net lengths |
+| Length tuning (check half) | ✅ | matched-pair tolerance violations |
+| Back annotation | ✅ | values board→sch; board-only refs reported |
+| Netlist export (kicadsexpr) | ✅ | author in gitcad, lay out in pcbnew |
+| IPC-D-356 | 🟡 | records emitted per spec; not yet run on a physical tester |
+| Sheet text annotations | ✅ | authoring + import + render |
+| Eagle import | 🟡 | .sch netlist-level (explicit XML nets); board geometry later |
+| Sheet reuse (file instanced twice) | ⏸ deferred | needs a ref-instancing model (KiCad `instances` semantics); fails loud today |
+| Multi-layer (>2 copper) | ⏸ deferred | a board-model generation; refuses honestly today |
+| IPC-2581 / ODB++ / GenCAD | ⏸ deferred | large XML/structured specs — shipping an unconformant file would be worse than none; needs a conformance target (reference viewer/fab acceptance) first |
+| Altium binary import | ⏸ deferred | OLE compound format; route through Altium→KiCad conversion meanwhile |
+| Autorouting / push-and-shove / teardrops | ⏸ deferred | route() covers agent routing; interactive routing is GUI-era work |
+| Schematic PDF plot | ⏸ deferred | SVG ships; PDF wrapper when the drawing PDF engine grows text |
+
+Deferred means: honest refusal or documented workaround today, with the
+design intent recorded here — never a silent gap.

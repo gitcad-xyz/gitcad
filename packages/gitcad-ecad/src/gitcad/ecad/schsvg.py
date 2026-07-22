@@ -344,6 +344,10 @@ def sheet_to_svg(sch: Schematic) -> str:
                    f'font-family="monospace">{escape(lb["name"])}</text>')
     for p in gfx["powers"]:
         out.append(_sheet_power_glyph(p))
+    for nt in gfx.get("notes", []):
+        out.append(f'<text x="{_f(nt["x"])}" y="{_f(nt["y"])}" '
+                   f'fill="{_C["label"]}" font-size="{_f(nt.get("size", 1.6))}" '
+                   f'font-family="monospace">{escape(nt["text"])}</text>')
     for ss in gfx.get("sheets", []):
         # hierarchical subsheet box, KiCad-style: outline + name + pin ticks
         out.append(f'<rect x="{_f(ss["x"])}" y="{_f(ss["y"])}" '

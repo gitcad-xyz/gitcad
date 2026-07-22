@@ -232,6 +232,12 @@ def import_kicad_sch(path: str, *,
                      float((find_one(j, "at") or ["at", 0, 0])[2]))
                     for j in find_all(root, "junction")]
 
+    gfx_notes: list[dict] = []
+    for tx in find_all(root, "text"):
+        at = find_one(tx, "at") or ["at", 0, 0]
+        gfx_notes.append({"text": str(tx[1]), "x": float(at[1]),
+                          "y": float(at[2]), "size": 1.6})
+
     for lbl_kind in ("label", "global_label", "hierarchical_label"):
         for lb in find_all(root, lbl_kind):
             name = str(lb[1])
@@ -292,7 +298,7 @@ def import_kicad_sch(path: str, *,
     sch.graphics = {  # type: ignore[attr-defined]
         "wires": gfx_wires, "powers": gfx_powers, "labels": gfx_labels,
         "symbols": gfx_symbols, "sheets": subsheets,
-        "buses": gfx_buses, "bus_entries": gfx_bus_entries,
+        "buses": gfx_buses, "bus_entries": gfx_bus_entries, "notes": gfx_notes,
         "junctions": [[jx, jy] for jx, jy in junctions_mm]}
     return sch, report
 

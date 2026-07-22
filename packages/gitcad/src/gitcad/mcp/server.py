@@ -461,6 +461,80 @@ def design_review(repo: str, base: str, head: str = "HEAD") -> dict[str, Any]:
     return slim
 
 
+@tool("board_stats")
+def board_stats_tool(board: str) -> dict[str, Any]:
+    """Board statistics report: area, component counts by side, SMD/PTH
+    pads, routed copper length, vias, zones vs keepouts, drill-size
+    histogram — kicad-cli's stats as data."""
+    from gitcad.ecad import Board
+    from gitcad.ecad.stats import board_stats, net_lengths
+
+    b = Board.loads(board)
+    return {"stats": board_stats(b), "net_lengths": net_lengths(b)}
+
+
+@tool("board_length_match")
+def board_length_match(board: str, pairs: list[list],
+                       tol_mm: float = 1.0) -> dict[str, Any]:
+    """Matched-pair length check (USB, LVDS, clocks): each [netA, netB]
+    pair's routed lengths must agree within tol_mm; unrouted members and
+    mismatches are named violations."""
+    from gitcad.ecad import Board
+    from gitcad.ecad.stats import check_length_match
+
+    r = check_length_match(Board.loads(board),
+                           [(a, b) for a, b in pairs], tol_mm)
+    return {"ok": r.ok, "checks": r.checks, "violations": r.violations}
+
+
+@tool("board_back_annotate")
+def board_back_annotate(schematic: str, board: str) -> dict[str, Any]:
+    """Reverse ECO: board value edits flow back into the schematic source
+    (matched by ref); board-only refs are reported, never invented."""
+    from gitcad.ecad import Board
+    from gitcad.ecad.schematic import Schematic
+    from gitcad.ecad.sync import back_annotate
+
+    sch = Schematic.loads(schematic)
+    report = back_annotate(sch, Board.loads(board))
+    return {"schematic": sch.dumps(), **report}
+
+
+@tool("schematic_export_kicad")
+def schematic_export_kicad(schematic: str) -> dict[str, Any]:
+    """Export a KiCad-format netlist (kicadsexpr) — author in gitcad, lay
+    out in pcbnew or anything else that reads KiCad netlists."""
+    from gitcad.ecad.kicadout import to_kicad_netlist
+    from gitcad.ecad.schematic import Schematic
+
+    return {"netlist": to_kicad_netlist(Schematic.loads(schematic))}
+
+
+@tool("board_ipcd356")
+def board_ipcd356(board: str) -> dict[str, Any]:
+    """IPC-D-356 electrical test netlist (flying probe / bed-of-nails):
+    every netted pad and via as fixed-column records, metric units.
+    Structure follows the published layout; not yet conformance-run on a
+    physical tester."""
+    from gitcad.ecad import Board
+    from gitcad.ecad.ipcd356 import to_ipcd356
+
+    return {"ipcd356": to_ipcd356(Board.loads(board))}
+
+
+@tool("schematic_import_eagle")
+def schematic_import_eagle(path: str) -> dict[str, Any]:
+    """Import an Eagle .sch (XML): parts + explicit netlist, honest report
+    (netlist-only — Eagle pin names stand in for pad numbers until device
+    mappings are resolved)."""
+    from gitcad.importers.eagle import import_eagle_sch
+
+    sch, report = import_eagle_sch(path)
+    erc = sch.erc()
+    return {"schematic": sch.dumps(), "report": report.to_dict(),
+            "erc_ok": erc.ok, "erc_violations": erc.violations}
+
+
 @tool("schematic_annotate")
 def schematic_annotate_tool(schematic: str) -> dict[str, Any]:
     """Deterministic reference numbering (KiCad-map P4): placeholder refs

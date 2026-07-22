@@ -175,6 +175,13 @@ class SheetEditor:
             self._gfx["buses"].append([float(x1), float(y1), float(x2), float(y2)])
         return self
 
+    def note(self, text: str, x: float, y: float, *,
+             size: float = 1.6) -> "SheetEditor":
+        """Free text annotation on the sheet — documentation, not netlist."""
+        self._gfx.setdefault("notes", []).append(
+            {"text": str(text), "x": float(x), "y": float(y), "size": size})
+        return self
+
     def label(self, name: str, x: float, y: float) -> "SheetEditor":
         self._gfx["labels"].append({"name": name, "x": float(x), "y": float(y),
                                     "kind": "label", "rot": 0.0})
