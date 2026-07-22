@@ -132,6 +132,41 @@ def board_export_fab(board: str, outdir: str) -> dict[str, Any]:
     return {"files": files, "board": b.name}
 
 
+@tool("part_check_release")
+def part_check_release(old_part: str, new_part: str) -> dict[str, Any]:
+    """Interface-semver release gate (ADR-0009): given old and new part.json
+    texts, classify the interface change and verify the version bump suffices.
+    The check that stops shipping a breaking change as a patch."""
+    from gitcad.part import PartManifest, check_release, classify_change
+
+    old, new = PartManifest.loads(old_part), PartManifest.loads(new_part)
+    required, reasons = classify_change(old.interface, new.interface)
+    violations = check_release(old.version, new.version, old.interface, new.interface)
+    return {"ok": not violations, "required_bump": required,
+            "reasons": reasons, "violations": violations}
+
+
+@tool("assembly_validate")
+def assembly_validate(assembly_body: dict[str, Any], parts: list[str]) -> dict[str, Any]:
+    """Validate an assembly body (instances + mates) against its parts'
+    interfaces: port-type compatibility and positional coincidence — the
+    cross-domain co-design check (ADR-0008)."""
+    from gitcad.part import Assembly, PartManifest
+
+    by_id = {m.id: m for m in (PartManifest.loads(p) for p in parts)}
+    asm = Assembly(assembly_body.get("name", "assembly"))
+    for name, inst in assembly_body["instances"].items():
+        part = by_id.get(inst["part"])
+        if part is None:
+            raise ValueError(f"instance {name!r} references unknown part {inst['part']!r}")
+        asm.add(name, part, translate=tuple(inst.get("translate", (0, 0, 0))),
+                rotate_z_deg=inst.get("rotate_z_deg", 0.0))
+    for m in assembly_body.get("mates", []):
+        asm.mate(m["a"], m["b"])
+    r = asm.validate()
+    return {"ok": r.ok, "checks": r.checks, "violations": r.violations}
+
+
 def main() -> None:  # pragma: no cover - process entrypoint
     """Serve the registry over MCP (requires the optional ``mcp`` dependency)."""
     try:

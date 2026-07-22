@@ -34,6 +34,7 @@ jobs:
         run: |
           python examples/bracket.py /tmp/out
           python examples/blinky.py /tmp/out
+          python examples/product.py
       - name: upload demo artifacts
         uses: actions/upload-artifact@v4
         with:

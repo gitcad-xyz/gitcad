@@ -20,6 +20,10 @@
 # The document/text format — geometric-semver surface.
 /src/gitcad/document.py        @theironchef
 
+# The Part standard — the cross-domain interchange contract (ADR-0008/9).
+# The most change-resistant surface gitcad owns; schema changes need migrations.
+/src/gitcad/part/              @theironchef
+
 # Kernel semantics — geometry output changes are breaking by definition.
 /src/gitcad/kernel/            @theironchef
 
