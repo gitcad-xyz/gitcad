@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 
+from gitcad.ecad.netderive import derive_nets, key as _key, wire_end_hit_rate
 from gitcad.ecad.schematic import Pin, SchComponent, Schematic
 from gitcad.errors import GitcadError
 from gitcad.importers.report import ImportReport
@@ -98,27 +99,6 @@ def _pin_abs(px: float, py: float, sx: float, sy: float, rot: float,
     return (round(sx + rx, 4), round(sy + ry, 4))
 
 
-class _DSU:
-    def __init__(self) -> None:
-        self.p: dict = {}
-
-    def find(self, a):
-        self.p.setdefault(a, a)
-        while self.p[a] != a:
-            self.p[a] = self.p[self.p[a]]
-            a = self.p[a]
-        return a
-
-    def union(self, a, b):
-        ra, rb = self.find(a), self.find(b)
-        if ra != rb:
-            self.p[rb] = ra
-
-
-def _key(x: float, y: float) -> tuple[int, int]:
-    return (round(x * 100), round(y * 100))
-
-
 def import_kicad_sch(path: str) -> tuple[Schematic, ImportReport]:
     report = ImportReport(source=path, format="kicad_sch")
     with open(path, encoding="utf-8") as f:
@@ -136,16 +116,18 @@ def import_kicad_sch(path: str) -> tuple[Schematic, ImportReport]:
     if buses:
         report.dropped.append(f"{len(buses)} bus segment(s) — buses not yet modeled")
 
-    dsu = _DSU()
-    pin_nodes: list[tuple[tuple, str, str]] = []   # (key, "REF.num", type)
-    net_names: dict[tuple, str] = {}               # point -> label/power name
+    pin_pts: list[tuple[tuple[float, float], str, str]] = []   # (mm pt, "REF.num", type)
+    net_names: dict[tuple[float, float], str] = {}             # mm pt -> net name
+    wires_mm: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    junctions_mm: list[tuple[float, float]] = []
     sch = Schematic(name=path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1].replace(".kicad_sch", ""))
 
     # no_connect X markers are design intent: the pin under one becomes
     # type no_connect, so ERC honors the designer's "yes, deliberately open".
-    nc_points = {_key(float((find_one(n, "at") or ["at", 0, 0])[1]),
-                      float((find_one(n, "at") or ["at", 0, 0])[2]))
-                 for n in find_all(root, "no_connect")}
+    nc_mm = {(float((find_one(n, "at") or ["at", 0, 0])[1]),
+              float((find_one(n, "at") or ["at", 0, 0])[2]))
+             for n in find_all(root, "no_connect")}
+    nc_keys = {_key(*p) for p in nc_mm}
 
     # Sheet graphics — the designer's actual drawing, kept as a runtime
     # projection cache (never serialized into the schematic's canonical text;
@@ -173,8 +155,7 @@ def import_kicad_sch(path: str) -> tuple[Schematic, ImportReport]:
             name = props.get("Value", lib_id.split(":")[-1])
             for p in pins:
                 pt = _pin_abs(p["x"], p["y"], sx, sy, rot, mirror)
-                net_names[_key(*pt)] = name
-                dsu.find(("pt", _key(*pt)))
+                net_names[pt] = name
             gfx_powers.append({"name": name, "x": sx, "y": sy, "rot": rot})
             power_count += 1
             continue
@@ -183,13 +164,11 @@ def import_kicad_sch(path: str) -> tuple[Schematic, ImportReport]:
         pin_xy: dict[str, list[float]] = {}
         for p in pins:
             pt = _pin_abs(p["x"], p["y"], sx, sy, rot, mirror)
-            k = _key(*pt)
-            ptype = "no_connect" if k in nc_points else p["type"]
+            ptype = "no_connect" if _key(*pt) in nc_keys else p["type"]
             comp_pins.append(Pin(p["name"] if p["name"] != "~" else p["number"],
                                  p["number"], ptype))
-            pin_nodes.append((k, f"{ref}.{p['number']}", ptype))
+            pin_pts.append((pt, f"{ref}.{p['number']}", ptype))
             pin_xy[p["number"]] = [pt[0], pt[1]]
-            dsu.union(("pt", k), ("pin", ref, p["number"]))
         attrs = {"at": [sx, sy], "lib_id": lib_id, "pin_xy": pin_xy}
         if rot:
             attrs["rot"] = rot
@@ -221,88 +200,48 @@ def import_kicad_sch(path: str) -> tuple[Schematic, ImportReport]:
         gfx_symbols[ref] = {"shapes": shapes_abs, "at": [sx, sy],
                             "value": props.get("Value", "")}
 
-    # -- wires / junctions / labels / no-connects ------------------------------
-    wires: list[tuple[tuple, tuple]] = []
+    # -- wires / junctions / labels --------------------------------------------
     for w in find_all(root, "wire"):
         pts = find_one(w, "pts")
         xs = find_all(pts, "xy") if pts else []
         if len(xs) >= 2:
             x1, y1 = float(xs[0][1]), float(xs[0][2])
             x2, y2 = float(xs[-1][1]), float(xs[-1][2])
-            a, b = _key(x1, y1), _key(x2, y2)
-            wires.append((a, b))
+            wires_mm.append(((x1, y1), (x2, y2)))
             gfx_wires.append([x1, y1, x2, y2])
-            dsu.union(("pt", a), ("pt", b))
             report.count("wires", 1)
 
-    def on_segment(pk, a, b) -> bool:
-        (px, py), (ax, ay), (bx, by) = pk, a, b
-        if min(ax, bx) - 1 <= px <= max(ax, bx) + 1 and min(ay, by) - 1 <= py <= max(ay, by) + 1:
-            cross = (bx - ax) * (py - ay) - (by - ay) * (px - ax)
-            return abs(cross) <= 100  # 0.01mm*len scale in centi-units
-        return False
-
-    # junctions + wire-end-on-wire-interior connections
-    junctions = [_key(float((find_one(j, "at") or ["at", 0, 0])[1]),
-                      float((find_one(j, "at") or ["at", 0, 0])[2]))
-                 for j in find_all(root, "junction")]
-    endpoints = {p for w in wires for p in w} | {k for k, _, _ in pin_nodes} \
-        | set(junctions) | set(net_names)
-    for pk in endpoints:
-        for a, b in wires:
-            if pk != a and pk != b and on_segment(pk, a, b):
-                dsu.union(("pt", pk), ("pt", a))
+    junctions_mm = [(float((find_one(j, "at") or ["at", 0, 0])[1]),
+                     float((find_one(j, "at") or ["at", 0, 0])[2]))
+                    for j in find_all(root, "junction")]
 
     for lbl_kind in ("label", "global_label", "hierarchical_label"):
         for lb in find_all(root, lbl_kind):
             name = str(lb[1])
             at = find_one(lb, "at") or ["at", 0, 0]
             lx, ly = float(at[1]), float(at[2])
-            k = _key(lx, ly)
-            net_names[k] = name
-            dsu.find(("pt", k))
+            net_names[(lx, ly)] = name
             gfx_labels.append({"name": name, "x": lx, "y": ly, "kind": lbl_kind,
                                "rot": float(at[3]) if len(at) > 3 else 0.0})
             report.count("labels", 1)
 
     # -- transform self-check: wire endpoints should land somewhere known -----
-    pin_keys = {k for k, _, _ in pin_nodes} | set(net_names)
-    wire_ends = [p for w in wires for p in w]
-    if wire_ends:
-        hits = sum(1 for p in wire_ends
-                   if p in pin_keys or sum(q == p for q in wire_ends) > 1
-                   or any(on_segment(p, a, b) for a, b in wires if p not in (a, b)))
-        rate = hits / len(wire_ends)
+    rate = wire_end_hit_rate(pin_pts, wires_mm, net_names)
+    if rate is not None:
         report.imported["wire_end_hit_pct"] = round(rate * 100)
         if rate < 0.9:
             report.warnings.append(
                 f"only {rate:.0%} of wire endpoints land on known points — "
                 "symbol transform may be wrong for some rotations/mirrors")
 
-    # -- groups -> nets --------------------------------------------------------
-    groups: dict = {}
-    for k, pin_ref, ptype in pin_nodes:
-        if ptype == "no_connect" or k in nc_points:
-            continue
-        groups.setdefault(dsu.find(("pt", k)), []).append(pin_ref)
-    named: dict = {}
-    for k, name in net_names.items():
-        named.setdefault(dsu.find(("pt", k)), name)
-
-    auto = 0
-    for gid, pin_refs in groups.items():
-        if len(pin_refs) < 1:
-            continue
-        name = named.get(gid)
-        if not name:
-            auto += 1
-            name = f"N${auto}"
-        for pr in sorted(set(pin_refs)):
-            sch.connect(name, pr)
+    # -- geometry -> netlist (the shared engine; see ecad/netderive.py) --------
+    for name, refs in derive_nets(pin_pts, wires_mm, junctions_mm,
+                                  net_names, nc_mm).items():
+        sch.connect(name, *refs)
     report.count("nets", len(sch.nets))
     report.imported["power_symbols"] = power_count
     sch.graphics = {  # type: ignore[attr-defined]
         "wires": gfx_wires, "powers": gfx_powers, "labels": gfx_labels,
         "symbols": gfx_symbols,
-        "junctions": [[jx / 100, jy / 100] for jx, jy in junctions]}
+        "junctions": [[jx, jy] for jx, jy in junctions_mm]}
     return sch, report

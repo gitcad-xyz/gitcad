@@ -162,6 +162,39 @@ def test_sheet_to_svg_refuses_schematic_without_graphics():
         sheet_to_svg(Schematic(name="born-in-gitcad"))
 
 
+# -- sheet parity: drawn geometry must equal the declared netlist -------------
+
+def test_imported_sheet_passes_parity(sch_and_report):
+    from gitcad.ecad.netderive import sheet_parity
+
+    sch, _ = sch_and_report
+    report = sheet_parity(sch)
+    assert report.ok, report.violations
+
+
+def test_moving_a_wire_breaks_parity(sch_and_report):
+    from gitcad.ecad.netderive import sheet_parity
+
+    sch, _ = sch_and_report
+    # sever the SIG chain: drop the middle wire segment from the drawing
+    sch.graphics["wires"] = [w for w in sch.graphics["wires"]
+                             if w != [100, 90, 116.19, 90]]
+    report = sheet_parity(sch)
+    assert not report.ok
+    assert any(v.startswith("sheet-net-not-drawn:SIG") for v in report.violations)
+
+
+def test_parity_requires_sheet_graphics():
+    import pytest as _pytest
+
+    from gitcad.ecad.netderive import sheet_parity
+    from gitcad.ecad.schematic import Schematic
+    from gitcad.errors import GitcadError
+
+    with _pytest.raises(GitcadError, match="no sheet graphics"):
+        sheet_parity(Schematic(name="netlist-only"))
+
+
 # -- multi-board system merge (nets union by name across sheets) --------------
 
 def test_merge_schematics_unions_named_nets():
