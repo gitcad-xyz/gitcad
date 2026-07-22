@@ -189,6 +189,16 @@ Every mounting hole is simultaneously fab data and a published `mech.bolt`
 port in the board's derived `part.json` — the enclosure mates against it.
 See the [Part standard](adr/0008-part-standard.html).
 
+## see it
+
+```
+gitcad-view part.gitcad.json     # live 3D viewer at localhost:8137
+gitcad-view board.gitcad.json    # 2D board render
+```
+
+Zero-dependency WebGL viewer with live reload — edit the model text (or let
+an agent edit it) and the view updates in a second.
+
 ## the examples
 
 - [bracket.py](https://github.com/gitcad-xyz/gitcad/blob/main/examples/bracket.py) — model → verify → STEP + drawing

@@ -111,6 +111,11 @@ class Kernel(Protocol):
         the geometry backend of the DrawingEngine (ADR-0002)."""
         ...
 
+    def tessellate(self, shape: Shape, *, deflection: float = 0.2) -> dict[str, list]:
+        """Triangulate for display: {"positions": [x,y,z,...], "indices":
+        [a,b,c,...]} — the viewer/Renderer geometry source."""
+        ...
+
 
 @runtime_checkable
 class IdentityService(Protocol):

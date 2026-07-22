@@ -100,6 +100,9 @@ class NullKernel:
     def hlr_project(self, shape, direction, xdir, *, deflection: float = 0.05):
         raise NotImplementedError("HLR projection requires the OCCT backend (pip install 'gitcad[occt]')")
 
+    def tessellate(self, shape, *, deflection: float = 0.2):
+        raise NotImplementedError("tessellation requires the OCCT backend (pip install 'gitcad[occt]')")
+
     def boolean(self, op: str, a: Shape, b: Shape) -> Shape:
         if op not in {"union", "cut", "intersect"}:
             raise ValueError(f"unknown boolean op {op!r}")

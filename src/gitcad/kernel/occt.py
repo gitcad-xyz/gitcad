@@ -37,11 +37,12 @@ try:
     from OCP.HLRAlgo import HLRAlgo_Projector
     from OCP.HLRBRep import HLRBRep_Algo, HLRBRep_HLRToShape
     from OCP.GProp import GProp_GProps
-    from OCP.BRep import BRep_Builder
+    from OCP.BRep import BRep_Builder, BRep_Tool
     from OCP.BRepTools import BRepTools
     from OCP.STEPControl import STEPControl_AsIs, STEPControl_Reader, STEPControl_Writer
     from OCP.StlAPI import StlAPI_Writer
-    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX, TopAbs_Orientation
+    from OCP.TopLoc import TopLoc_Location
     from OCP.TopExp import TopExp, TopExp_Explorer
     from OCP.TopoDS import TopoDS, TopoDS_Compound, TopoDS_Shape
     from OCP.TopTools import TopTools_IndexedMapOfShape
@@ -245,6 +246,31 @@ class OcctKernel:
                 f"STEP write failed (status {int(status)})",
                 FailureSignature(op="export.step", diagnostic=f"IFSelect:{int(status)}", kernel=self.name),
             )
+
+    def tessellate(self, shape: Shape, *, deflection: float = 0.2) -> dict[str, list]:
+        """Triangulate for display: flat position array + triangle indices.
+        The viewer's (and any future Renderer backend's) geometry source."""
+        BRepMesh_IncrementalMesh(shape, deflection, False, 0.5, True)
+        positions: list[float] = []
+        indices: list[int] = []
+        for raw in _unique_shapes(shape, TopAbs_FACE):
+            face = TopoDS.Face_s(raw)
+            loc = TopLoc_Location()
+            tri = BRep_Tool.Triangulation_s(face, loc)
+            if tri is None:
+                continue
+            trsf = loc.Transformation()
+            base = len(positions) // 3
+            for i in range(1, tri.NbNodes() + 1):
+                p = tri.Node(i).Transformed(trsf)
+                positions.extend((round(p.X(), 5), round(p.Y(), 5), round(p.Z(), 5)))
+            flip = face.Orientation() == TopAbs_Orientation.TopAbs_REVERSED
+            for i in range(1, tri.NbTriangles() + 1):
+                a, b, c = tri.Triangle(i).Get()
+                if flip:
+                    a, c = c, a
+                indices.extend((base + a - 1, base + b - 1, base + c - 1))
+        return {"positions": positions, "indices": indices}
 
     # -- projection (the drawing engine's geometry backend) -------------------
 
