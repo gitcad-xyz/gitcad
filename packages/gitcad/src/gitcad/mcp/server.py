@@ -278,6 +278,21 @@ def board_import(path: str) -> dict[str, Any]:
             "valid": validation.ok, "violations": validation.violations}
 
 
+@tool("schematic_import")
+def schematic_import(path: str) -> dict[str, Any]:
+    """Import a KiCad schematic (.kicad_sch) into a gitcad schematic. The
+    netlist is derived the way KiCad derives it — geometrically, from
+    wire-pin connectivity, junctions, labels and power symbols — and the
+    report's wire_end_hit_pct self-checks the symbol transforms. Pure
+    Python — no kernel needed."""
+    from gitcad.importers.kicad_sch import import_kicad_sch
+
+    sch, report = import_kicad_sch(path)
+    erc = sch.erc()
+    return {"schematic": sch.dumps(), "report": report.to_dict(),
+            "erc_ok": erc.ok, "erc_violations": erc.violations}
+
+
 @tool("board_drc")
 def board_drc(board: str, rulepack: str | None = None) -> dict[str, Any]:
     """Design-rule check: clearance, track width, annular ring, drill sizes,
