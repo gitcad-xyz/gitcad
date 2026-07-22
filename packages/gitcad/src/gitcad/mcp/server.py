@@ -461,6 +461,18 @@ def design_review(repo: str, base: str, head: str = "HEAD") -> dict[str, Any]:
     return slim
 
 
+@tool("pcba_verify")
+def pcba_verify_tool(part: str, root: str) -> dict[str, Any]:
+    """Enter a PCBA's electrical workflow as one gate: ERC + electrical
+    envelopes per referenced schematic, board validation + DRC + copper
+    connectivity, and schematic<->board parity — the Fusion-360 duality:
+    a .pcba is mechanical from the outside (envelope, mounting ports, 3D
+    body) and this suite is what 'inside' means."""
+    from gitcad.pcba import pcba_verify
+
+    return pcba_verify(part, root)
+
+
 @tool("schematic_envelope")
 def schematic_envelope(schematic: str) -> dict[str, Any]:
     """The hardware type system, electrical v1 (ADR-0015): net voltages

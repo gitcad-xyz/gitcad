@@ -31,7 +31,7 @@ def _git_show(repo: Path, ref: str, relpath: str) -> str | None:
 # legibility); .json variants stay accepted forever — kind detection is by
 # CONTENT (the schema field), extensions only scope the scan.
 DESIGN_EXTENSIONS = (".json", ".gitcad", ".model", ".sch", ".board", ".part",
-                     ".reqs")
+                     ".pcba", ".reqs")
 
 
 def _changed_files(repo: Path, base: str, head: str) -> list[str]:

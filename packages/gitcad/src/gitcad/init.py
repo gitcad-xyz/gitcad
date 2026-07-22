@@ -32,6 +32,7 @@ _GITATTRIBUTES = """\
 *.sch    merge=gitcad
 *.board  merge=gitcad
 *.part   merge=gitcad
+*.pcba   merge=gitcad
 """
 
 _WORKFLOW = """\
@@ -63,6 +64,7 @@ A [gitcad](https://gitcad.xyz) project — the repo IS the project.
 | `{name}.gitcad` | THE project: the top-level assembly of every part, mechanical and electrical |
 | `*.part`   | part manifests (envelope / frames / typed ports; subassemblies are parts too) |
 | `*.model`  | mechanical feature-tree models (canonical text; geometry is a build artifact) |
+| `*.pcba`   | electrical assemblies — mechanical from outside, enter for the electrical workflow |
 | `*.sch`    | schematics — the electrical source of truth |
 | `*.board`  | board layouts |
 | `requirements.reqs` | executable requirements — `gitcad-verify` runs them |

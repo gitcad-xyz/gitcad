@@ -23,6 +23,7 @@ forever.
 | ``name.gitcad`` | **THE project root**: the top-level assembly manifest whose instances are the product's parts — mechanical and electrical alike (an assembly IS a part, ADR-0008; a board-backed part is an instance like any other). One per project. |
 | ``name.part`` | any other part manifest (subassemblies included) |
 | ``name.model`` | a mechanical feature-tree document — how one part gets its shape, never the product. ``model_to_part`` emits ``<name>.model``. |
+| ``name.pcba`` | an **electrical assembly as a part** (body ``{kind: pcba, board, schematics}``) — the Fusion-360 duality: from the outside it is mechanical (envelope, ``mech.bolt`` mounting ports, a 3D body via the bridge); "entering" it is the electrical workflow (``pcba_verify`` = ERC + envelopes + parity + DRC + connectivity over its referenced sources; the viewer opens it into board + schematics views) |
 | ``name.sch`` | schematic (gitcad canonical; ``.kicad_sch`` stays the import format) |
 | ``name.board`` | board layout |
 | ``requirements.reqs`` | executable requirements (ADR: requirements-as-code) |

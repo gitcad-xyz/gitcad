@@ -226,11 +226,19 @@ class Board:
 
     # -- the derived part interface (ADR-0008: domain wiring) -----------------
 
-    def to_part(self, part_id: str, version: str = "0.1.0"):
-        """Derive this board's ``part.json`` from its actual geometry:
-        envelope from the outline bbox × thickness, one frame + `mech.bolt`
-        port per mounting hole. Nothing hand-authored — change the board, and
-        the interface (and therefore interface-semver, ADR-0009) follows."""
+    def to_part(self, part_id: str, version: str = "0.1.0",
+                *, schematics: list[str] | None = None):
+        """Derive this board's PCBA part from its actual geometry — the
+        Fusion-360 duality: from the OUTSIDE this is a mechanical part
+        (envelope from outline bbox × thickness, one frame + ``mech.bolt``
+        port per mounting hole, a 3D body via the bridge); ENTERING it is
+        the electrical workflow (the referenced board + schematics, checked
+        by the pcba suite). Nothing hand-authored — change the board, and
+        the interface (interface-semver, ADR-0009) follows.
+
+        ``schematics`` lists the schematic files (ADR-0017 names) that are
+        this PCBA's electrical source; pass them and the part is a full
+        PCBA, omit them and it is a bare board part."""
         from gitcad.part import Frame, Interface, PartManifest, Port
 
         minx, miny, maxx, maxy = self.bbox()
@@ -242,6 +250,9 @@ class Board:
             if m.thread:
                 spec["thread"] = m.thread
             ports[m.name] = Port(m.name, "mech.bolt", m.name, spec)
+        body: dict = {"kind": "pcba", "board": f"{self.name}.board"}
+        if schematics:
+            body["schematics"] = sorted(schematics)
         return PartManifest(
             id=part_id, name=self.name, domain="ecad", version=version,
             interface=Interface(
@@ -250,5 +261,5 @@ class Board:
                 frames=frames, ports=ports,
                 properties={"layers": 2, "components": len(self.components)},
             ),
-            body={"board": f"{self.name}.gitcad.json"},
+            body=body,
         )

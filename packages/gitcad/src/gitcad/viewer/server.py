@@ -33,8 +33,10 @@ def detect_kind(text: str) -> str:
     if schema.startswith("gitcad/part"):
         if doc.get("domain") == "assembly":
             return "assembly"
+        if (doc.get("body") or {}).get("kind") == "pcba":
+            return "pcba"   # the Fusion duality: enter the electrical workflow
         raise ValueError("view a part's MODEL file, not its manifest "
-                         "(only assembly manifests are viewable directly)")
+                         "(only assembly and pcba manifests are viewable directly)")
     raise ValueError(f"cannot view schema {schema!r}")
 
 
@@ -79,7 +81,8 @@ def assembly_mesh_payload(manifest_path: Path, kernel: Kernel) -> dict:
     root = manifest_path.parent
 
     by_id: dict[str, tuple[PartManifest, Path]] = {}
-    for pj in sorted(list(root.rglob("*part.json")) + list(root.rglob("*.part"))):
+    for pj in sorted(list(root.rglob("*part.json")) + list(root.rglob("*.part"))
+                     + list(root.rglob("*.pcba"))):
         if pj == manifest_path:
             continue
         try:
@@ -211,8 +214,16 @@ class _Handler(BaseHTTPRequestHandler):
                                             "name": self.path_watched.name}).encode(),
                            "application/json")
             elif self.path == "/api/mesh":
-                if detect_kind(text) == "assembly":
+                kind = detect_kind(text)
+                if kind == "assembly":
                     payload = assembly_mesh_payload(self.path_watched, self.kernel)
+                elif kind == "pcba":
+                    from gitcad.bridge import board_to_model
+                    from gitcad.pcba import pcba_sources
+
+                    src = pcba_sources(text, str(self.path_watched.parent))
+                    board = Board.loads(src["board"].read_text(encoding="utf-8"))
+                    payload = mesh_payload(board_to_model(board), self.kernel)
                 else:
                     payload = mesh_payload(Document.loads(text), self.kernel)
                 self._send(200, json.dumps(payload).encode(), "application/json")
@@ -226,6 +237,12 @@ class _Handler(BaseHTTPRequestHandler):
                     from gitcad.ecad import Schematic, schematic_to_svg
 
                     svg = schematic_to_svg(Schematic.loads(text))
+                elif kind == "pcba":
+                    from gitcad.pcba import pcba_sources
+
+                    src = pcba_sources(text, str(self.path_watched.parent))
+                    svg = board_to_svg(Board.loads(
+                        src["board"].read_text(encoding="utf-8")))
                 else:
                     svg = board_to_svg(Board.loads(text))
                 self._send(200, svg.encode(), "image/svg+xml")
