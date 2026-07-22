@@ -10,7 +10,7 @@ model diffs and merges in git, and every generated output is deterministic —
 the same board text produces byte-identical Gerbers on any machine.
 """
 
-from gitcad.ecad.board import Board, Component, Footprint, MountingHole, Pad, Track, Via
+from gitcad.ecad.board import Board, Component, Footprint, MountingHole, Pad, Track, Via, Zone
 from gitcad.ecad.fab import export_fab
 from gitcad.ecad.bom import bom, bom_csv, mpn_component
 from gitcad.ecad.component import footprint_from_part, footprint_to_part
@@ -20,7 +20,7 @@ from gitcad.ecad.route import pad_position, route
 from gitcad.ecad.schematic import Pin, SchComponent, Schematic, board_parity
 from gitcad.ecad.schsvg import schematic_to_svg
 
-__all__ = ["Board", "Component", "Footprint", "MountingHole", "Pad", "Track", "Via",
+__all__ = ["Board", "Component", "Footprint", "MountingHole", "Pad", "Track", "Via", "Zone",
            "export_fab", "Schematic", "SchComponent", "Pin", "board_parity",
            "Rule", "RulePack", "default_rules", "run_drc", "check_connectivity",
            "pad_position", "route", "footprint_to_part", "footprint_from_part",
