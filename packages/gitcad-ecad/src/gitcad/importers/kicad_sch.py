@@ -114,10 +114,24 @@ def import_kicad_sch(path: str, *,
             "file": file, "x": float(at[1]), "y": float(at[2]),
             "w": float(size[1]), "h": float(size[2]), "pins": spins})
 
-    # honesty: out-of-scope structures
-    buses = find_all(root, "bus")
-    if buses:
-        report.dropped.append(f"{len(buses)} bus segment(s) — buses not yet modeled")
+    # buses: VISUAL groupings — connectivity comes from member labels, which
+    # unify by name in the shared engine, so a bus imports as graphics plus
+    # honest counting (KiCad-map tier 2). Ranged bus labels (D[0..7]) name
+    # the group; the member wires carry the individual labels.
+    gfx_buses: list[list[float]] = []
+    for bn in find_all(root, "bus"):
+        pts = find_one(bn, "pts")
+        xs = find_all(pts, "xy") if pts else []
+        if len(xs) >= 2:
+            gfx_buses.append([float(xs[0][1]), float(xs[0][2]),
+                              float(xs[-1][1]), float(xs[-1][2])])
+            report.count("buses", 1)
+    gfx_bus_entries: list[list[float]] = []
+    for be in find_all(root, "bus_entry"):
+        at = find_one(be, "at") or ["at", 0, 0]
+        size = find_one(be, "size") or ["size", 2.54, 2.54]
+        x, y = float(at[1]), float(at[2])
+        gfx_bus_entries.append([x, y, x + float(size[1]), y + float(size[2])])
 
     pin_pts: list[tuple[tuple[float, float], str, str]] = []   # (mm pt, "REF.num", type)
     net_names: dict[tuple[float, float], str] = {}             # mm pt -> net name
@@ -278,6 +292,7 @@ def import_kicad_sch(path: str, *,
     sch.graphics = {  # type: ignore[attr-defined]
         "wires": gfx_wires, "powers": gfx_powers, "labels": gfx_labels,
         "symbols": gfx_symbols, "sheets": subsheets,
+        "buses": gfx_buses, "bus_entries": gfx_bus_entries,
         "junctions": [[jx, jy] for jx, jy in junctions_mm]}
     return sch, report
 

@@ -118,6 +118,19 @@ def review_range(repo: str, base: str, head: str = "HEAD") -> dict:
             entry["diff"] = semantic_diff(old, new)
         old_v = _checks(kind, old) if old is not None else []
         new_v = _checks(kind, new) if new is not None else []
+        # sibling waivers file at HEAD applies to the gate (reviewable text —
+        # a PR that adds a waiver shows exactly what it silences and why)
+        wtext = _git_show(root, head, rel + ".waivers")
+        if wtext is not None:
+            from gitcad.waivers import load_waivers, waive
+
+            try:
+                ws = load_waivers(wtext)
+                new_v, waived, unused = waive(new_v, ws)
+                entry["waived"] = waived
+                new_v += [f"waiver-unused:{m}" for m in unused]
+            except Exception as exc:
+                new_v.append(f"waiver-error:{type(exc).__name__}:{exc}")
         entry["violations_introduced"] = sorted(set(new_v) - set(old_v))
         entry["violations_fixed"] = sorted(set(old_v) - set(new_v))
         entry["violations_preexisting"] = sorted(set(new_v) & set(old_v))

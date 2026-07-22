@@ -163,6 +163,18 @@ class SheetEditor:
         self._gfx["junctions"].append([float(x), float(y)])
         return self
 
+    def bus(self, *points: Point) -> "SheetEditor":
+        """A bus polyline — VISUAL grouping only (KiCad semantics): member
+        connectivity comes from same-named labels on the tapped wires, which
+        the netlist engine unifies by name. Draw the bus, tap wires off it,
+        label each tap; the labels are the electrical truth."""
+        if len(points) < 2:
+            raise GitcadError("bus needs at least 2 points")
+        self._gfx.setdefault("buses", [])
+        for (x1, y1), (x2, y2) in zip(points, points[1:]):
+            self._gfx["buses"].append([float(x1), float(y1), float(x2), float(y2)])
+        return self
+
     def label(self, name: str, x: float, y: float) -> "SheetEditor":
         self._gfx["labels"].append({"name": name, "x": float(x), "y": float(y),
                                     "kind": "label", "rot": 0.0})

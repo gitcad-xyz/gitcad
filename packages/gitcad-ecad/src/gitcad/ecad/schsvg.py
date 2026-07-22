@@ -328,6 +328,12 @@ def sheet_to_svg(sch: Schematic) -> str:
     for wx in gfx["wires"]:
         out.append(f'<line x1="{_f(wx[0])}" y1="{_f(wx[1])}" x2="{_f(wx[2])}" y2="{_f(wx[3])}" '
                    f'stroke="{_C["wire"]}" stroke-width="0.25"/>')
+    for bx in gfx.get("buses", []):
+        out.append(f'<line x1="{_f(bx[0])}" y1="{_f(bx[1])}" x2="{_f(bx[2])}" y2="{_f(bx[3])}" '
+                   f'stroke="#0000C2" stroke-width="0.75"/>')
+    for be in gfx.get("bus_entries", []):
+        out.append(f'<line x1="{_f(be[0])}" y1="{_f(be[1])}" x2="{_f(be[2])}" y2="{_f(be[3])}" '
+                   f'stroke="#0000C2" stroke-width="0.25"/>')
     for jx, jy in gfx["junctions"]:
         out.append(f'<circle cx="{_f(jx)}" cy="{_f(jy)}" r="0.45" fill="{_C["wire"]}"/>')
     for lb in gfx["labels"]:

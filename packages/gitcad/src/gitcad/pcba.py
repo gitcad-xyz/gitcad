@@ -97,5 +97,18 @@ def pcba_verify(part_text: str, root: str) -> dict:
         violations += [f"parity:{v}" for v in p.violations]
 
     checks["schematics_checked"] = len(sheets)
+
+    # waivers: <partname>.waivers next to the part — suppression that shows
+    waivers_file = Path(root) / f"{src['part'].name}.waivers"
+    waived: list[dict] = []
+    if waivers_file.is_file():
+        from gitcad.waivers import load_waivers, waive
+
+        ws = load_waivers(waivers_file.read_text(encoding="utf-8"))
+        violations, waived, unused = waive(violations, ws)
+        checks["waived"] = len(waived)
+        if unused:
+            violations += [f"waiver-unused:{m}" for m in unused]
+
     return {"ok": not violations, "part": src["part"].name,
-            "checks": checks, "violations": violations}
+            "checks": checks, "violations": violations, "waived": waived}
