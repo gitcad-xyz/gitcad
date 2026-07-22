@@ -76,6 +76,22 @@ def derive_nets(
     Pins typed ``no_connect`` (or sitting under an nc marker) are excluded —
     a designer's explicit "open" is intent, not connectivity.
     """
+    nets, _ = derive_nets_ex(pins, wires, junctions, net_names, nc_points)
+    return nets
+
+
+def derive_nets_ex(
+    pins: list[tuple[Point, str, str]],
+    wires: list[tuple[Point, Point]],
+    junctions: list[Point],
+    net_names: dict[Point, str],
+    nc_points: set[Point] = frozenset(),
+    query_points: tuple[Point, ...] = (),
+) -> tuple[dict[str, list[str]], list[str | None]]:
+    """derive_nets plus per-query-point net membership — the structural hook
+    hierarchical sheets need: a parent wire ending on a sheet pin belongs to
+    SOME net even when no component pin touches it (a pinless bridge between
+    two subsheets), so query groups materialize as (possibly empty) nets."""
     dsu = _DSU()
     pin_nodes = [(key(*pt), ref, typ) for pt, ref, typ in pins]
     wire_keys = [(key(*a), key(*b)) for a, b in wires]
@@ -89,10 +105,11 @@ def derive_nets(
     for k in name_keys:
         dsu.find(("pt", k))
 
+    query_keys = [key(*pt) for pt in query_points]
     junction_keys = [key(*j) for j in junctions]
     endpoints = ({p for w in wire_keys for p in w}
                  | {k for k, _, _ in pin_nodes}
-                 | set(junction_keys) | set(name_keys))
+                 | set(junction_keys) | set(name_keys) | set(query_keys))
     for pk in endpoints:
         for a, b in wire_keys:
             if pk != a and pk != b and _on_segment(pk, a, b):
@@ -103,20 +120,30 @@ def derive_nets(
         if typ == "no_connect" or k in nc_keys:
             continue
         groups.setdefault(dsu.find(("pt", k)), []).append(ref)
+    for k in query_keys:
+        # a query group with no pins still materializes (pinless bridge)
+        groups.setdefault(dsu.find(("pt", k)), [])
     named: dict = {}
     for k, name in name_keys.items():
         named.setdefault(dsu.find(("pt", k)), name)
 
     nets: dict[str, list[str]] = {}
+    name_of_gid: dict = {}
     auto = 0
-    # Deterministic auto-naming: order groups by their smallest pin ref.
-    for gid, refs in sorted(groups.items(), key=lambda kv: min(kv[1])):
+    # Deterministic auto-naming: order groups by their smallest pin ref
+    # (pinless query groups sort by their root token, after pin groups).
+    def order(kv):
+        gid, refs = kv
+        return (0, min(refs)) if refs else (1, str(gid))
+    for gid, refs in sorted(groups.items(), key=order):
         name = named.get(gid)
         if not name:
             auto += 1
             name = f"N${auto}"
+        name_of_gid[gid] = name
         nets.setdefault(name, []).extend(sorted(set(refs)))
-    return nets
+    query_net = [name_of_gid.get(dsu.find(("pt", k))) for k in query_keys]
+    return nets, query_net
 
 
 def sheet_parity(sch) -> "ValidationReport":
@@ -135,6 +162,10 @@ def sheet_parity(sch) -> "ValidationReport":
         raise GitcadError(
             "schematic has no sheet graphics — parity applies to drawn "
             "sheets (imported or sheet-authored), not netlist-only schematics")
+    if gfx.get("sheets"):
+        raise GitcadError(
+            "hierarchical parent sheet — run parity per child sheet file; "
+            "flattened cross-sheet parity is a later stage")
 
     pins: list[tuple[Point, str, str]] = []
     for comp in sch.components:

@@ -62,7 +62,7 @@ def test_entering_the_pcba_runs_the_electrical_suite(project):
     text = (project / "blinky.pcba").read_text(encoding="utf-8")
     r = pcba_verify(text, str(project))
     assert r["checks"]["schematics_checked"] == 1
-    assert r["checks"]["blinky.sch:parity"] == "ok"
+    assert r["checks"]["system:parity"] == "ok"
     # violations that DO exist are single-pin nets etc. from the tiny board;
     # parity/erc structure is what this asserts, not a clean tiny fixture
     assert "board:validate" in r["checks"]
@@ -76,7 +76,26 @@ def test_broken_parity_is_caught_inside(project):
     text = (project / "blinky.pcba").read_text(encoding="utf-8")
     r = pcba_verify(text, str(project))
     assert not r["ok"]
-    assert any(v.startswith("parity:blinky.sch:net-mismatch") for v in r["violations"])
+    assert any(v.startswith("parity:net-mismatch") for v in r["violations"])
+
+
+def test_multi_sheet_pcba_checks_the_merged_system(project):
+    # split the circuit across two sheets sharing net names — per-sheet
+    # parity would flag each half; the MERGED system must be checked
+    a = Schematic(name="sheet_a")
+    a.components = [SchComponent(ref="R1", value="10k",
+                                 pins=[Pin("1", "1"), Pin("2", "2")])]
+    a.connect("VCC", "R1.1")     # GND half lives on the other sheet
+    b = Schematic(name="sheet_b")
+    b.connect("GND", "R1.2")     # refers to R1 declared on sheet_a
+    (project / "a.sch").write_text(a.dumps(), encoding="utf-8")
+    (project / "b.sch").write_text(b.dumps(), encoding="utf-8")
+    part = _board().to_part("prt_pcba_0002", schematics=["a.sch", "b.sch"])
+    (project / "multi.pcba").write_text(part.dumps(), encoding="utf-8")
+    r = pcba_verify((project / "multi.pcba").read_text(encoding="utf-8"),
+                    str(project))
+    assert r["checks"]["schematics_checked"] == 2
+    assert r["checks"]["system:parity"] == "ok"      # merged view matches board
 
 
 def test_missing_board_fails_loud(project):

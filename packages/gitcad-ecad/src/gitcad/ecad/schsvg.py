@@ -338,6 +338,20 @@ def sheet_to_svg(sch: Schematic) -> str:
                    f'font-family="monospace">{escape(lb["name"])}</text>')
     for p in gfx["powers"]:
         out.append(_sheet_power_glyph(p))
+    for ss in gfx.get("sheets", []):
+        # hierarchical subsheet box, KiCad-style: outline + name + pin ticks
+        out.append(f'<rect x="{_f(ss["x"])}" y="{_f(ss["y"])}" '
+                   f'width="{_f(ss["w"])}" height="{_f(ss["h"])}" '
+                   f'fill="{_C["fill"]}" stroke="{_C["sym"]}" stroke-width="0.3"/>')
+        out.append(f'<text x="{_f(ss["x"])}" y="{_f(ss["y"] - 0.6)}" '
+                   f'fill="{_C["field"]}" font-size="1.6" '
+                   f'font-family="monospace">{escape(ss["name"])}</text>')
+        for sp in ss.get("pins", []):
+            out.append(f'<circle cx="{_f(sp["x"])}" cy="{_f(sp["y"])}" r="0.4" '
+                       f'fill="none" stroke="{_C["sym"]}" stroke-width="0.25"/>')
+            out.append(f'<text x="{_f(sp["x"] + 0.8)}" y="{_f(sp["y"] + 0.4)}" '
+                       f'fill="{_C["label"]}" font-size="1.1" '
+                       f'font-family="monospace">{escape(sp["name"])}</text>')
 
     return (f'<svg xmlns="http://www.w3.org/2000/svg" '
             f'viewBox="{_f(x0)} {_f(y0)} {_f(w)} {_f(h)}" '

@@ -53,11 +53,17 @@ def pcba_sources(part_text: str, root: str) -> dict:
 
 
 def pcba_verify(part_text: str, root: str) -> dict:
-    """The electrical workflow's gate, as one call. Every check runs; the
-    rollup is honest about what was checkable (no schematics referenced ->
-    parity/ERC coverage is visibly zero, not silently green)."""
+    """The electrical workflow's gate, as one call.
+
+    Multi-schematic semantics: a board's netlist can span many sheets, so
+    ERC, envelopes, and parity run on the MERGED system schematic (nets
+    union by name — the cross-sheet contract, ADR proved on the real
+    4-sheet Altair where per-sheet checks flag inter-sheet signals as
+    false positives). Per-sheet checks would lie; the merged system is
+    the electrical truth of this PCBA. Coverage is honest: zero referenced
+    schematics is visible, never silently green."""
     from gitcad.ecad import (Board, Schematic, board_parity, check_connectivity,
-                             check_envelopes)
+                             check_envelopes, merge_schematics)
     from gitcad.ecad.drc import run_drc
 
     src = pcba_sources(part_text, root)
@@ -75,19 +81,21 @@ def pcba_verify(part_text: str, root: str) -> dict:
     checks["board:connectivity"] = "ok" if c.ok else "FAIL"
     violations += [f"connectivity:{v}" for v in c.violations]
 
-    for schp in src["schematics"]:
-        sch = Schematic.loads(schp.read_text(encoding="utf-8"))
-        label = schp.name
-        e = sch.erc()
-        checks[f"{label}:erc"] = "ok" if e.ok else "FAIL"
-        violations += [f"erc:{label}:{v}" for v in e.violations]
-        env = check_envelopes(sch)
-        checks[f"{label}:envelope"] = "ok" if env.ok else "FAIL"
-        violations += [f"envelope:{label}:{v}" for v in env.violations]
-        p = board_parity(sch, board)
-        checks[f"{label}:parity"] = "ok" if p.ok else "FAIL"
-        violations += [f"parity:{label}:{v}" for v in p.violations]
+    sheets = [Schematic.loads(p.read_text(encoding="utf-8"))
+              for p in src["schematics"]]
+    if sheets:
+        system = sheets[0] if len(sheets) == 1 else \
+            merge_schematics(f"{src['part'].name}-system", sheets)
+        e = system.erc()
+        checks["system:erc"] = "ok" if e.ok else "FAIL"
+        violations += [f"erc:{v}" for v in e.violations]
+        env = check_envelopes(system)
+        checks["system:envelope"] = "ok" if env.ok else "FAIL"
+        violations += [f"envelope:{v}" for v in env.violations]
+        p = board_parity(system, board)
+        checks["system:parity"] = "ok" if p.ok else "FAIL"
+        violations += [f"parity:{v}" for v in p.violations]
 
-    checks["schematics_checked"] = len(src["schematics"])
+    checks["schematics_checked"] = len(sheets)
     return {"ok": not violations, "part": src["part"].name,
             "checks": checks, "violations": violations}
