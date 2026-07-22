@@ -308,6 +308,28 @@ def semantic_diff_tool(old: str, new: str) -> dict[str, Any]:
     return semantic_diff(old, new)
 
 
+@tool("assembly_interference")
+def assembly_interference(assembly_body: dict[str, Any], models: dict[str, str]) -> dict[str, Any]:
+    """EXACT interference check: build each instanced part's real geometry
+    (``models``: part id -> model text), place per the assembly transforms,
+    boolean-intersect every AABB-overlapping pair. Nonzero common volume =
+    collision, measured in mm3. Requires the OCCT kernel."""
+    from gitcad.part.interference import check_interference
+
+    kernel = get_kernel(require="occt")
+    instances: dict[str, Any] = {}
+    for name, inst in assembly_body["instances"].items():
+        text = models.get(inst["part"])
+        if text is None:
+            raise ValueError(f"no model text supplied for part {inst['part']!r}")
+        doc = Document.loads(text)
+        shape = doc.build(kernel).final(doc)
+        instances[name] = (shape, tuple(inst.get("translate", (0, 0, 0))),
+                           inst.get("rotate_z_deg", 0.0))
+    r = check_interference(kernel, instances)
+    return {"ok": r.ok, "checks": r.checks, "violations": r.violations}
+
+
 @tool("part_check_release")
 def part_check_release(old_part: str, new_part: str) -> dict[str, Any]:
     """Interface-semver release gate (ADR-0009): given old and new part.json
