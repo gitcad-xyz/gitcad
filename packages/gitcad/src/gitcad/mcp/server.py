@@ -302,6 +302,19 @@ def board_connectivity(board: str) -> dict[str, Any]:
     return {"ok": r.ok, "checks": r.checks, "violations": r.violations}
 
 
+@tool("schematic_render")
+def schematic_render(schematic: str, path: str) -> dict[str, Any]:
+    """Render the schematic DIAGRAM (SVG) — symbols, net lanes, junctions:
+    the human review surface before layout. Auto-layout; manual placement
+    honored via component attrs["at"]."""
+    from gitcad.ecad import Schematic, schematic_to_svg
+
+    svg = schematic_to_svg(Schematic.loads(schematic))
+    with open(path, "w", newline="\n") as f:
+        f.write(svg)
+    return {"path": path, "bytes": len(svg)}
+
+
 @tool("schematic_erc")
 def schematic_erc(schematic: str) -> dict[str, Any]:
     """Electrical rule check on a schematic document: pin-type conflicts,

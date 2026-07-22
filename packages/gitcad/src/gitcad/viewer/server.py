@@ -26,6 +26,8 @@ def detect_kind(text: str) -> str:
     schema = doc.get("schema", "")
     if schema.startswith("gitcad/board"):
         return "board"
+    if schema.startswith("gitcad/schematic"):
+        return "schematic"
     if schema.startswith("gitcad/document"):
         return "model"
     if schema.startswith("gitcad/part"):
@@ -165,8 +167,14 @@ class _Handler(BaseHTTPRequestHandler):
                     payload = mesh_payload(Document.loads(text), self.kernel)
                 self._send(200, json.dumps(payload).encode(), "application/json")
             elif self.path == "/api/board.svg":
-                board = Board.loads(text)
-                self._send(200, board_to_svg(board).encode(), "image/svg+xml")
+                kind = detect_kind(text)
+                if kind == "schematic":
+                    from gitcad.ecad import Schematic, schematic_to_svg
+
+                    svg = schematic_to_svg(Schematic.loads(text))
+                else:
+                    svg = board_to_svg(Board.loads(text))
+                self._send(200, svg.encode(), "image/svg+xml")
             else:
                 self._send(404, b"not found", "text/plain")
         except Exception as exc:  # surface errors to the page, never crash

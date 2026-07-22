@@ -152,7 +152,7 @@ async function poll(){
     if(v.version !== version){
       version = v.version;
       err.textContent = "";
-      if(v.kind === "board"){
+      if(v.kind === "board" || v.kind === "schematic"){
         const svg = await (await fetch("/api/board.svg")).text();
         document.getElementById("board").innerHTML = svg;
         document.getElementById("board").style.display = "flex";
