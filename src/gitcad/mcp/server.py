@@ -209,6 +209,19 @@ def board_import(path: str) -> dict[str, Any]:
             "valid": validation.ok, "violations": validation.violations}
 
 
+@tool("board_drc")
+def board_drc(board: str, rulepack: str | None = None) -> dict[str, Any]:
+    """Design-rule check: clearance, track width, annular ring, drill sizes,
+    hole spacing, edge clearance — against a rule pack (default: conservative
+    2-layer prototype profile). Rule packs are canonical text and shareable."""
+    from gitcad.ecad import Board, RulePack, run_drc
+
+    b = Board.loads(board)
+    pack = RulePack.loads(rulepack) if rulepack else None
+    r = run_drc(b, pack)
+    return {"ok": r.ok, "checks": r.checks, "violations": r.violations}
+
+
 @tool("schematic_erc")
 def schematic_erc(schematic: str) -> dict[str, Any]:
     """Electrical rule check on a schematic document: pin-type conflicts,

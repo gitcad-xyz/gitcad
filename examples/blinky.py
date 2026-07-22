@@ -10,7 +10,7 @@ from pathlib import Path
 
 from gitcad.ecad import (
     Board, Component, Footprint, MountingHole, Pad, Pin, SchComponent,
-    Schematic, Track, Via, board_parity, export_fab,
+    Schematic, Track, Via, board_parity, export_fab, run_drc,
 )
 
 # -- capture: the schematic IS the electrical source of truth -----------------
@@ -47,16 +47,21 @@ board.components += [
     Component("R1", R0603, value="330R", x=13, y=12, nets={"1": "VCC", "2": "LED_A"}),
     Component("D1", LED0603, value="RED", x=21, y=12, nets={"A": "LED_A", "K": "GND"}),
 ]
+# (DRC caught the original routing here: VCC/GND tracks were swapped at J1 —
+# parity can't see that, geometry can. Routed correctly per pad positions:
+# J1.1/VCC at (4, 8.73), J1.2/GND at (4, 11.27).)
 board.tracks += [
-    Track(4, 11.27, 4, 14, 0.5, "top", "VCC"),
-    Track(4, 14, 12.25, 12, 0.5, "top", "VCC"),
+    Track(4, 8.73, 7, 8.73, 0.5, "top", "VCC"),      # J1.1 out
+    Track(7, 8.73, 7, 14, 0.5, "top", "VCC"),        # around J1.2
+    Track(7, 14, 12.25, 12, 0.5, "top", "VCC"),      # to R1.1
     Track(13.75, 12, 20.25, 12, 0.4, "top", "LED_A"),
-    Track(21.75, 12, 26, 12, 0.4, "top", "GND"),
-    Track(4, 8.73, 4, 6, 0.5, "top", "GND"),
+    Track(21.75, 12, 26, 12, 0.4, "top", "GND"),     # D1.K to via
     Track(26, 12, 26, 6, 0.5, "bottom", "GND"),
-    Track(26, 6, 4, 6, 0.6, "bottom", "GND"),
+    Track(26, 6, 2, 6, 0.6, "bottom", "GND"),        # bottom return
+    Track(2, 6, 2, 11.27, 0.5, "bottom", "GND"),     # around J1.1
+    Track(2, 11.27, 4, 11.27, 0.5, "bottom", "GND"), # into J1.2 (through pad)
 ]
-board.vias += [Via(26, 12, net="GND"), Via(26, 6, net="GND")]
+board.vias += [Via(26, 12, net="GND")]
 board.mounting_holes += [MountingHole("mnt_1", 3, 3, 3.2, thread="M3"),
                          MountingHole("mnt_2", 27, 17, 3.2, thread="M3")]
 
@@ -68,6 +73,11 @@ print("board valid:", report.checks)
 parity = board_parity(sch, board)
 assert parity.ok, parity.violations
 print("schematic-board parity:", parity.checks)
+
+# -- DRC: geometric design rules against the default fab profile --------------
+drc = run_drc(board)
+assert drc.ok, drc.violations
+print("DRC clean:", drc.checks)
 (Path(sys.argv[1] if len(sys.argv) > 1 else "out")).mkdir(exist_ok=True)
 (Path(sys.argv[1] if len(sys.argv) > 1 else "out") / "blinky.sch.json").write_text(
     sch.dumps(), newline="\n")
