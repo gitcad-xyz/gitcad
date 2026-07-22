@@ -77,12 +77,33 @@ The test suite runs with **no geometry kernel installed** — the null backend
 covers identity, document round-tripping, and reduction. Tests that need real
 geometry are marked `@pytest.mark.occt` and skip when `cadquery-ocp` is absent.
 
-## Status
+## Status — v0.1
 
-Early scaffold. The seams, document model, stable-identity scheme, reducer, and
-MCP surface are real; kernel geometry beyond primitives, the renderer, and the
-drawing engine are stubs with defined interfaces. See `docs/adr/` for the
-reasoning and `CLAUDE.md` for the rules agents must follow.
+**Manufacturing outputs work end to end.** From a text model, gitcad produces
+files you can send to a manufacturer today:
+
+| Domain | Outputs |
+|---|---|
+| Mechanical | **STEP** (ISO 10303-21) · **STL** · dimensioned 2D **drawings** (SVG + PDF, third-angle front/top/right/iso via OCCT HLR) |
+| Electrical | **Gerber X2** (copper ×2, mask ×2, silk, profile) · **Excellon** drill · **pick-and-place** CSV · manifest |
+
+Working: OCCT kernel (primitives, booleans, fillets, transforms, validation,
+measurement, entity enumeration) · drawing engine · 2-layer board model with
+fab-readiness validation · MCP tools for all of it · deterministic, byte-stable
+outputs (same source → identical Gerbers).
+
+Try it:
+
+```bash
+pip install -e ".[dev,occt]"
+python examples/bracket.py   # → bracket.step, bracket.pdf, bracket.svg, bracket.stl
+python examples/blinky.py    # → full Gerber/drill/PnP fab package
+```
+
+Next: the cross-domain part standard (interfaces, ports, lockfile versioning),
+schematic capture + ERC, DRC engine, associative feature-level dimensions, the
+component registry. See `docs/adr/` for the reasoning, `docs/research/` for the
+competitive feature map, and `CLAUDE.md` for the rules agents must follow.
 
 ## License
 

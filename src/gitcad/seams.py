@@ -50,6 +50,12 @@ class Kernel(Protocol):
         raw material the :class:`IdentityService` turns into durable IDs."""
         ...
 
+    def transform(self, shape: Shape, *, translate: tuple[float, float, float] = (0, 0, 0),
+                  rotate_axis: tuple[float, float, float] = (0, 0, 1), rotate_deg: float = 0.0) -> Shape:
+        """Rigid placement: rotate about an axis through the origin, then
+        translate. The primitive every positioned feature builds on."""
+        ...
+
     def validate(self, shape: Shape) -> ValidationReport:
         """Machine-readable geometric checks (watertight, self-intersection,
         continuity). The core of the agent verification loop."""
@@ -58,6 +64,14 @@ class Kernel(Protocol):
     def measure(self, shape: Shape) -> dict[str, float]:
         """Mass properties: volume, area, centroid — deterministic oracle used
         by golden tests and by geometric-diff in PRs."""
+        ...
+
+    def export_step(self, shape: Shape, path: str) -> None:
+        """Write ISO 10303-21 STEP — the mechanical interchange deliverable."""
+        ...
+
+    def export_stl(self, shape: Shape, path: str, *, deflection: float = 0.1) -> None:
+        """Tessellate and write STL for 3D printing."""
         ...
 
 

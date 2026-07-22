@@ -1,0 +1,83 @@
+{
+  "features": [
+    {
+      "id": "f_86d2f0219e8931d7",
+      "inputs": [],
+      "op": "box",
+      "params": {
+        "dx": 60,
+        "dy": 40,
+        "dz": 8
+      }
+    },
+    {
+      "id": "f_a1bd11a5b8e71190",
+      "inputs": [],
+      "op": "cylinder",
+      "params": {
+        "height": 8,
+        "radius": 3.2
+      }
+    },
+    {
+      "id": "f_1f1116b3c362003a",
+      "inputs": [
+        "f_a1bd11a5b8e71190"
+      ],
+      "op": "move",
+      "params": {
+        "translate": [
+          12,
+          12,
+          0
+        ]
+      }
+    },
+    {
+      "id": "f_a1bd11a5b8e71190_1",
+      "inputs": [],
+      "op": "cylinder",
+      "params": {
+        "height": 8,
+        "radius": 3.2
+      }
+    },
+    {
+      "id": "f_e7555b9af8c2b151",
+      "inputs": [
+        "f_a1bd11a5b8e71190_1"
+      ],
+      "op": "move",
+      "params": {
+        "translate": [
+          48,
+          28,
+          0
+        ]
+      }
+    },
+    {
+      "id": "f_d2aee0eaea564bf1",
+      "inputs": [
+        "f_86d2f0219e8931d7",
+        "f_1f1116b3c362003a"
+      ],
+      "op": "boolean",
+      "params": {
+        "kind": "cut"
+      }
+    },
+    {
+      "id": "f_75e6486db2879ecf",
+      "inputs": [
+        "f_d2aee0eaea564bf1",
+        "f_e7555b9af8c2b151"
+      ],
+      "op": "boolean",
+      "params": {
+        "kind": "cut"
+      }
+    }
+  ],
+  "schema": "gitcad/document@1"
+}

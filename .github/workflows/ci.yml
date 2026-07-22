@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core:
+    name: core (null kernel, py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+
+  occt:
+    name: full (OCCT kernel)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,occt]"
+      - run: pytest -q
+      - name: end-to-end demos
+        run: |
+          python examples/bracket.py /tmp/out
+          python examples/blinky.py /tmp/out
+      - name: upload demo artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-outputs
+          path: /tmp/out

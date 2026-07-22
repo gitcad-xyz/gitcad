@@ -1,0 +1,231 @@
+{
+  "board": {
+    "components": [
+      {
+        "footprint": {
+          "courtyard": [
+            3.0,
+            5.6
+          ],
+          "name": "HDR-2P-2.54",
+          "pads": [
+            {
+              "drill": 1.0,
+              "h": 1.7,
+              "name": "1",
+              "net": "",
+              "shape": "circle",
+              "w": 1.7,
+              "x": 0,
+              "y": -1.27
+            },
+            {
+              "drill": 1.0,
+              "h": 1.7,
+              "name": "2",
+              "net": "",
+              "shape": "circle",
+              "w": 1.7,
+              "x": 0,
+              "y": 1.27
+            }
+          ]
+        },
+        "nets": {
+          "1": "VCC",
+          "2": "GND"
+        },
+        "ref": "J1",
+        "rot": 0.0,
+        "side": "top",
+        "value": "PWR",
+        "x": 4,
+        "y": 10
+      },
+      {
+        "footprint": {
+          "courtyard": [
+            2.4,
+            1.4
+          ],
+          "name": "R0603",
+          "pads": [
+            {
+              "drill": null,
+              "h": 0.95,
+              "name": "1",
+              "net": "",
+              "shape": "rect",
+              "w": 0.9,
+              "x": -0.75,
+              "y": 0
+            },
+            {
+              "drill": null,
+              "h": 0.95,
+              "name": "2",
+              "net": "",
+              "shape": "rect",
+              "w": 0.9,
+              "x": 0.75,
+              "y": 0
+            }
+          ]
+        },
+        "nets": {
+          "1": "VCC",
+          "2": "LED_A"
+        },
+        "ref": "R1",
+        "rot": 0.0,
+        "side": "top",
+        "value": "330R",
+        "x": 13,
+        "y": 12
+      },
+      {
+        "footprint": {
+          "courtyard": [
+            2.4,
+            1.4
+          ],
+          "name": "LED0603",
+          "pads": [
+            {
+              "drill": null,
+              "h": 0.95,
+              "name": "A",
+              "net": "",
+              "shape": "rect",
+              "w": 0.9,
+              "x": -0.75,
+              "y": 0
+            },
+            {
+              "drill": null,
+              "h": 0.95,
+              "name": "K",
+              "net": "",
+              "shape": "rect",
+              "w": 0.9,
+              "x": 0.75,
+              "y": 0
+            }
+          ]
+        },
+        "nets": {
+          "A": "LED_A",
+          "K": "GND"
+        },
+        "ref": "D1",
+        "rot": 0.0,
+        "side": "top",
+        "value": "RED",
+        "x": 21,
+        "y": 12
+      }
+    ],
+    "mask_expansion": 0.05,
+    "name": "blinky",
+    "outline": [
+      [
+        0,
+        0
+      ],
+      [
+        30,
+        0
+      ],
+      [
+        30,
+        20
+      ],
+      [
+        0,
+        20
+      ]
+    ],
+    "tracks": [
+      {
+        "layer": "top",
+        "net": "VCC",
+        "width": 0.5,
+        "x1": 4,
+        "x2": 4,
+        "y1": 11.27,
+        "y2": 14
+      },
+      {
+        "layer": "top",
+        "net": "VCC",
+        "width": 0.5,
+        "x1": 4,
+        "x2": 12.25,
+        "y1": 14,
+        "y2": 12
+      },
+      {
+        "layer": "top",
+        "net": "LED_A",
+        "width": 0.4,
+        "x1": 13.75,
+        "x2": 20.25,
+        "y1": 12,
+        "y2": 12
+      },
+      {
+        "layer": "top",
+        "net": "GND",
+        "width": 0.4,
+        "x1": 21.75,
+        "x2": 26,
+        "y1": 12,
+        "y2": 12
+      },
+      {
+        "layer": "top",
+        "net": "GND",
+        "width": 0.5,
+        "x1": 4,
+        "x2": 4,
+        "y1": 8.73,
+        "y2": 6
+      },
+      {
+        "layer": "bottom",
+        "net": "GND",
+        "width": 0.5,
+        "x1": 26,
+        "x2": 26,
+        "y1": 12,
+        "y2": 6
+      },
+      {
+        "layer": "bottom",
+        "net": "GND",
+        "width": 0.6,
+        "x1": 26,
+        "x2": 4,
+        "y1": 6,
+        "y2": 6
+      }
+    ],
+    "vias": [
+      {
+        "diameter": 0.8,
+        "drill": 0.4,
+        "net": "GND",
+        "x": 26,
+        "y": 12
+      },
+      {
+        "diameter": 0.8,
+        "drill": 0.4,
+        "net": "GND",
+        "x": 26,
+        "y": 6
+      }
+    ]
+  },
+  "schema": "gitcad/board@1"
+}

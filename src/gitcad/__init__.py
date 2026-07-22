@@ -13,7 +13,7 @@ from gitcad.errors import (
 )
 from gitcad.identity import EntityId, IdentityService
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"
 
 __all__ = [
     "Document",

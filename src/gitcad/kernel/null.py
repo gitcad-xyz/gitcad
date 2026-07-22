@@ -35,9 +35,11 @@ class NullShape:
             return self.params["dx"] * self.params["dy"] * self.params["dz"]
         if self.kind == "cylinder":
             return math.pi * self.params["radius"] ** 2 * self.params["height"]
-        if self.kind == "fillet":
-            return self.children[0].volume()  # small perturbation ignored
-        return None  # boolean: unknown analytically
+        if self.kind == "sphere":
+            return 4.0 / 3.0 * math.pi * self.params["radius"] ** 3
+        if self.kind in ("fillet", "transform"):
+            return self.children[0].volume()  # rigid / small perturbation
+        return None  # boolean/cone: unknown analytically here
 
 
 class NullKernel:
@@ -52,6 +54,27 @@ class NullKernel:
     def cylinder(self, radius: float, height: float) -> Shape:
         _require_positive(radius=radius, height=height)
         return NullShape("cylinder", {"radius": radius, "height": height})
+
+    def sphere(self, radius: float) -> Shape:
+        _require_positive(radius=radius)
+        return NullShape("sphere", {"radius": radius})
+
+    def cone(self, r1: float, r2: float, height: float) -> Shape:
+        _require_positive(r1=r1, height=height)
+        return NullShape("cone", {"r1": r1, "r2": r2, "height": height})
+
+    def transform(self, shape: Shape, *, translate: tuple[float, float, float] = (0, 0, 0),
+                  rotate_axis: tuple[float, float, float] = (0, 0, 1), rotate_deg: float = 0.0) -> Shape:
+        # Rigid transforms preserve volume; track symbolically.
+        return NullShape("transform", {"translate": list(translate),
+                                       "rotate_axis": list(rotate_axis),
+                                       "rotate_deg": rotate_deg}, (shape,))
+
+    def export_step(self, shape: Shape, path: str) -> None:
+        raise NotImplementedError("STEP export requires the OCCT backend (pip install 'gitcad[occt]')")
+
+    def export_stl(self, shape: Shape, path: str, *, deflection: float = 0.1) -> None:
+        raise NotImplementedError("STL export requires the OCCT backend (pip install 'gitcad[occt]')")
 
     def boolean(self, op: str, a: Shape, b: Shape) -> Shape:
         if op not in {"union", "cut", "intersect"}:

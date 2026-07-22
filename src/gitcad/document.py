@@ -158,6 +158,17 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape]) -> Shape:
         return kernel.box(p["dx"], p["dy"], p["dz"])
     if f.op == "cylinder":
         return kernel.cylinder(p["radius"], p["height"])
+    if f.op == "sphere":
+        return kernel.sphere(p["radius"])
+    if f.op == "cone":
+        return kernel.cone(p["r1"], p["r2"], p["height"])
+    if f.op == "move":
+        return kernel.transform(
+            ins[0],
+            translate=tuple(p.get("translate", (0, 0, 0))),
+            rotate_axis=tuple(p.get("rotate_axis", (0, 0, 1))),
+            rotate_deg=p.get("rotate_deg", 0.0),
+        )
     if f.op == "boolean":
         return kernel.boolean(p["kind"], ins[0], ins[1])
     if f.op == "fillet":
