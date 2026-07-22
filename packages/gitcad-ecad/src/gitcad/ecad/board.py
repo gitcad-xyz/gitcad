@@ -85,6 +85,16 @@ class Via:
 
 
 @dataclass
+class Zone:
+    """A copper pour: closed polygon on one layer, tied to a net. The real
+    Altair board is routed almost entirely with zones — first-class, not an
+    import drop (learned from the real design, 2026-07-22)."""
+    net: str
+    layer: str                          # top | bottom
+    polygon: list[tuple[float, float]]  # closed (first != last is fine)
+
+
+@dataclass
 class MountingHole:
     """A non-plated mounting hole — and, equally, a published mech interface:
     every mounting hole becomes a `mech.bolt` port in the board's part.json
@@ -105,6 +115,7 @@ class Board:
     components: list[Component] = field(default_factory=list)
     tracks: list[Track] = field(default_factory=list)
     vias: list[Via] = field(default_factory=list)
+    zones: list[Zone] = field(default_factory=list)
     mounting_holes: list[MountingHole] = field(default_factory=list)
     thickness: float = 1.6               # mm — board stack height
     mask_expansion: float = 0.05         # mm per side
@@ -141,6 +152,9 @@ class Board:
             ],
             tracks=[Track(**t) for t in b["tracks"]],
             vias=[Via(**v) for v in b["vias"]],
+            zones=[Zone(net=z["net"], layer=z["layer"],
+                        polygon=[tuple(p) for p in z["polygon"]])
+                   for z in b.get("zones", [])],
             mounting_holes=[MountingHole(**m) for m in b.get("mounting_holes", [])],
             thickness=b.get("thickness", 1.6),
             mask_expansion=b.get("mask_expansion", 0.05),
@@ -189,6 +203,11 @@ class Board:
                 violations.append(f"track-degenerate:{i}")
             if t.layer not in ("top", "bottom"):
                 violations.append(f"track-bad-layer:{i}")
+        for i, z in enumerate(self.zones):
+            if len(z.polygon) < 3:
+                violations.append(f"zone-degenerate:{i}")
+            if z.layer not in ("top", "bottom"):
+                violations.append(f"zone-bad-layer:{i}")
         hole_names = [m.name for m in self.mounting_holes]
         if len(hole_names) != len(set(hole_names)):
             violations.append("mounting-holes-duplicate-names")
@@ -200,7 +219,8 @@ class Board:
         return ValidationReport(
             ok=not violations,
             checks={"components": len(self.components), "tracks": len(self.tracks),
-                    "vias": len(self.vias), "mounting_holes": len(self.mounting_holes)},
+                    "vias": len(self.vias), "zones": len(self.zones),
+                    "mounting_holes": len(self.mounting_holes)},
             violations=violations,
         )
 

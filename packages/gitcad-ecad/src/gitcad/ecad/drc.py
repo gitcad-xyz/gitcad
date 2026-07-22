@@ -134,12 +134,14 @@ def _seg_aabb_dist(s1, s2, box) -> float:
 
 @dataclass
 class _Item:
-    kind: str          # track | pad | via
+    kind: str          # track | pad | via | zone
     net: str
     layer: str         # top | bottom | both
     label: str         # for violation detail
     seg: tuple | None = None      # ((x1,y1),(x2,y2), half_width) for tracks
     box: tuple | None = None      # (minx,miny,maxx,maxy) for pads/vias
+    poly: list | None = None      # closed polygon for zones
+    owner: str = ""               # component ref for pads (intra-footprint skip)
 
     def on(self, layer: str) -> bool:
         return self.layer in (layer, "both")
@@ -155,17 +157,59 @@ def _items(board: Board) -> list[_Item]:
             w, h = (pad.h, pad.w) if round(rot) % 180 == 90 else (pad.w, pad.h)
             layer = "both" if pad.drill is not None else comp.side
             net = comp.nets.get(pad.name, "")
-            out.append(_Item("pad", net, layer, f"{comp.ref}.{pad.name}",
-                             box=(bx - w / 2, by - h / 2, bx + w / 2, by + h / 2)))
+            it = _Item("pad", net, layer, f"{comp.ref}.{pad.name}",
+                       box=(bx - w / 2, by - h / 2, bx + w / 2, by + h / 2))
+            it.owner = comp.ref
+            out.append(it)
     for i, v in enumerate(board.vias):
         r = v.diameter / 2
         out.append(_Item("via", v.net, "both", f"via[{i}]",
                          box=(v.x - r, v.y - r, v.x + r, v.y + r)))
+    for i, z in enumerate(board.zones):
+        pts = list(z.polygon)
+        if pts[0] != pts[-1]:
+            pts.append(pts[0])
+        out.append(_Item("zone", z.net, z.layer, f"zone[{i}]", poly=pts))
     return out
+
+
+def _pt_in_poly(x: float, y: float, poly) -> bool:
+    inside = False
+    for (x1, y1), (x2, y2) in zip(poly, poly[1:]):
+        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
+            inside = not inside
+    return inside
+
+
+def _poly_dist(item: "_Item", poly) -> float:
+    """Copper distance from a seg/box item to a zone polygon (0 = touch/in)."""
+    edges = list(zip(poly, poly[1:]))
+    if item.seg:
+        (a, b, hw) = item.seg
+        if _pt_in_poly(a[0], a[1], poly) or _pt_in_poly(b[0], b[1], poly):
+            return 0.0
+        return max(min(_seg_seg_dist(a, b, e1, e2) for e1, e2 in edges) - hw, 0.0)
+    x1, y1, x2, y2 = item.box
+    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+    if _pt_in_poly(cx, cy, poly):
+        return 0.0
+    corners = [(x1, y1), (x2, y1), (x2, y2), (x1, y2), (x1, y1)]
+    return min(_seg_seg_dist(c1, c2, e1, e2)
+               for c1, c2 in zip(corners, corners[1:]) for e1, e2 in edges)
 
 
 def _copper_dist(a: _Item, b: _Item) -> float:
     """Copper-to-copper clearance between two items (0 = touching/overlap)."""
+    if a.poly or b.poly:
+        if a.poly and b.poly:
+            # zone-zone: any vertex of one inside the other, or edge distance
+            if any(_pt_in_poly(x, y, b.poly) for x, y in a.poly) or                     any(_pt_in_poly(x, y, a.poly) for x, y in b.poly):
+                return 0.0
+            return min(_seg_seg_dist(e1, e2, f1, f2)
+                       for e1, e2 in zip(a.poly, a.poly[1:])
+                       for f1, f2 in zip(b.poly, b.poly[1:]))
+        zone, other = (a, b) if a.poly else (b, a)
+        return _poly_dist(other, zone.poly)
     if a.seg and b.seg:
         d = _seg_seg_dist(a.seg[0], a.seg[1], b.seg[0], b.seg[1]) - a.seg[2] - b.seg[2]
     elif a.seg and b.box:
@@ -205,6 +249,8 @@ def run_drc(board: Board, pack: RulePack | None = None) -> ValidationReport:
             for b in items[i + 1:]:
                 if a.net == b.net and (a.net or b.net):
                     continue
+                if a.net == b.net == "" and a.owner and a.owner == b.owner:
+                    continue   # unnetted pads of one footprint: its own geometry
                 if not any(a.on(layer) and b.on(layer) for layer in ("top", "bottom")):
                     continue
                 need = max(filter(None, (limit("clearance", a.net, "min"),

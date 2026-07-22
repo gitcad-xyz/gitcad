@@ -75,6 +75,7 @@ def check_connectivity(board: Board) -> ValidationReport:
     return ValidationReport(
         ok=not violations,
         checks={"copper_items": len(items), "nets": len(net_pads),
+                "pads_with_nets": sum(len(v) for v in net_pads.values()),
                 "method": "geometric-touch-graph"},
         violations=violations,
     )

@@ -15,7 +15,7 @@ Honesty rules (ImportReport):
 
 from __future__ import annotations
 
-from gitcad.ecad.board import Board, Component, Footprint, MountingHole, Pad, Track, Via
+from gitcad.ecad.board import Board, Component, Footprint, MountingHole, Pad, Track, Via, Zone
 from gitcad.errors import GitcadError
 from gitcad.importers.report import ImportReport
 from gitcad.importers.sexp import find_all, find_one, parse, value_of
@@ -167,10 +167,22 @@ def import_kicad_pcb(path: str) -> tuple[Board, ImportReport]:
             net=net_names.get(value_of(via_node, "net", default=-1.0), "")))
         report.count("vias", 1)
 
-    # -- honesty: what did not survive ----------------------------------------
-    zones = find_all(root, "zone")
-    if zones:
-        report.dropped.append(f"{len(zones)} copper zone(s)/pour(s) — v0.1 board model has no pours")
+    # -- zones: the real routing strategy of pour-based boards ----------------
+    for zn in find_all(root, "zone"):
+        layer = value_of(zn, "layer", default="F.Cu")
+        if layer not in ("F.Cu", "B.Cu"):
+            report.dropped.append(f"zone on unsupported layer {layer}")
+            continue
+        poly = find_one(zn, "polygon")
+        pts_node = find_one(poly, "pts") if poly else None
+        if not pts_node:
+            report.dropped.append("zone without polygon")
+            continue
+        polygon = [(cx(float(p[1])), cy(float(p[2]))) for p in find_all(pts_node, "xy")]
+        net = net_names.get(value_of(zn, "net", default=-1.0), "")
+        board.zones.append(Zone(net=net, layer="top" if layer == "F.Cu" else "bottom",
+                                polygon=polygon))
+        report.count("zones", 1)
     arcs = find_all(root, "arc")
     if arcs:
         report.dropped.append(f"{len(arcs)} track arc(s) — v0.1 tracks are straight segments")

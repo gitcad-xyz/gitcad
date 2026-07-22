@@ -102,3 +102,24 @@ def test_rulepack_roundtrips_canonically() -> None:
 def test_unknown_rule_type_rejected() -> None:
     with pytest.raises(GitcadError):
         Rule("bad", "levitation", {"min": 1})
+
+
+def test_zone_is_copper_for_clearance_and_pours_gerber() -> None:
+    from gitcad.ecad import Zone
+    from gitcad.ecad import gerber
+
+    b = _clean_board()
+    b.zones.append(Zone(net="GND", layer="top", polygon=[(0, 0), (30, 0), (30, 4), (0, 4)]))
+    # A net-A track dipping into the GND pour's clearance.
+    b.tracks.append(Track(5, 4.05, 10, 4.05, 0.3, "top", "A"))
+    r = run_drc(b)
+    assert any("zone[0]" in v for v in r.violations)
+    g = gerber.copper(b, "top")
+    assert "G36*" in g and "G37*" in g            # pour as a filled region
+
+
+def test_unnetted_same_footprint_pads_not_self_flagged() -> None:
+    fp = Footprint("FINE", pads=[Pad("1", -0.3, 0, 0.4, 0.8), Pad("2", 0.3, 0, 0.4, 0.8)])
+    b = Board(name="t", outline=[(0, 0), (10, 0), (10, 10), (0, 10)])
+    b.components.append(Component("U1", fp, x=5, y=5))   # no nets at all
+    assert run_drc(b).ok, run_drc(b).violations

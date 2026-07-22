@@ -67,8 +67,9 @@ def test_kicad_import_maps_the_board(kicad_file) -> None:
     # Track + via with nets.
     assert len(board.tracks) == 1 and board.tracks[0].net == "VCC"
     assert len(board.vias) == 1 and board.vias[0].net == "GND"
-    # Honesty: the zone was dropped LOUDLY.
-    assert any("zone" in d for d in report.dropped)
+    # Zones import as first-class pours now (the real Altair board's routing).
+    assert report.imported.get("zones") == 1
+    assert board.zones[0].net == "GND" and board.zones[0].layer == "bottom"
     # Imported board passes fab validation and regenerates gerbers.
     board.name = "imported-test"
     assert board.validate().ok, board.validate().violations

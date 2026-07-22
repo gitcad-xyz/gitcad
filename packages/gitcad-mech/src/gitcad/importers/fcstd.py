@@ -33,7 +33,8 @@ def import_fcstd(path: str, kernel: Kernel, assets_dir: str) -> tuple[Document, 
 
     with zipfile.ZipFile(path) as zf:
         names = zf.namelist()
-        brep_members = [n for n in names if n.lower().endswith(".brep")]
+        # FreeCAD writes both extensions: .brep (older) and .brp (current)
+        brep_members = [n for n in names if n.lower().endswith((".brep", ".brp"))]
         if not brep_members:
             raise GitcadError(f"{path!r} contains no .brep geometry (empty or unsupported document)")
 

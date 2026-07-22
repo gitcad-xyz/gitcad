@@ -33,6 +33,7 @@ class _GerberFile:
         ]
         self._apertures: dict[str, int] = {}
         self._ops: list[tuple[int, list[str]]] = []  # (aperture, commands)
+        self._regions: list[list[str]] = []
 
     def aperture(self, spec: str) -> int:
         """Register an aperture template (e.g. 'C,0.800000') and return its D-code."""
@@ -49,6 +50,16 @@ class _GerberFile:
     def _op(self, spec: str, commands: list[str]) -> None:
         self.aperture(spec)
         self._ops.append((spec, commands))  # type: ignore[arg-type]
+
+    def region(self, polygon) -> None:
+        """Filled polygon (G36/G37 region) — copper pours."""
+        pts = list(polygon)
+        if pts[0] != pts[-1]:
+            pts.append(pts[0])
+        cmds = ["G36*", f"X{_c(pts[0][0])}Y{_c(pts[0][1])}D02*"]
+        cmds += [f"X{_c(x)}Y{_c(y)}D01*" for x, y in pts[1:]]
+        cmds.append("G37*")
+        self._regions.append(cmds)
 
     def render(self) -> str:
         # Deterministic aperture numbering: sorted specs, D10 upward.
@@ -90,6 +101,9 @@ def copper(board: Board, side: str) -> str:
             g.line(f"C,{t.width:.6f}", t.x1, t.y1, t.x2, t.y2)
     for v in board.vias:
         g.flash(f"C,{v.diameter:.6f}", v.x, v.y)
+    for z in board.zones:
+        if z.layer == side:
+            g.region(z.polygon)
     return g.render()
 
 
