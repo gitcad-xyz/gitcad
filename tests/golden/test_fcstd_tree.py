@@ -70,7 +70,7 @@ def _make_fcstd(tmp_path, kernel, xml: str, shape) -> str:
 
 
 def test_parametric_tree_imports_and_proves(kernel, tmp_path) -> None:
-    from gitcad.importers import import_fcstd_tree
+    from gitcad.importers.fcstd_tree import import_fcstd_tree
 
     expected = kernel.boolean("cut", kernel.box(60, 40, 8),
                               kernel.transform(kernel.cylinder(3.2, 8), translate=(15, 20, 0)))
@@ -92,7 +92,7 @@ def test_parametric_tree_imports_and_proves(kernel, tmp_path) -> None:
 def test_geometry_mismatch_falls_back_honestly(kernel, tmp_path) -> None:
     """Tree says one thing, embedded geometry another (corrupt/edited file) —
     the proof fails and the import falls back to geometry with the reason."""
-    from gitcad.importers import import_fcstd_tree
+    from gitcad.importers.fcstd_tree import import_fcstd_tree
 
     wrong_geometry = kernel.box(10, 10, 10)   # NOT what the tree builds
     path = _make_fcstd(tmp_path, kernel, DOC_XML, wrong_geometry)
@@ -108,7 +108,7 @@ def test_geometry_mismatch_falls_back_honestly(kernel, tmp_path) -> None:
 def test_unmapped_types_fall_back_honestly(kernel, tmp_path) -> None:
     """A PartDesign (sketch-based) object is out of v1 scope — fall back with
     the unmapped type named, never guess."""
-    from gitcad.importers import import_fcstd_tree
+    from gitcad.importers.fcstd_tree import import_fcstd_tree
 
     xml = DOC_XML.replace('type="Part::Cut"', 'type="PartDesign::Pad"')
     shape = kernel.box(60, 40, 8)

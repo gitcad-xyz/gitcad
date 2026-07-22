@@ -214,8 +214,7 @@ an agent edit it) and the view updates in a second.
 
 
 def gen_mcp_reference() -> str:
-    sys.path.insert(0, str(ROOT / "src"))
-    from gitcad.mcp.server import REGISTRY
+    from gitcad.mcp.server import REGISTRY  # installed package (CI installs the workspace)
 
     body = ["<h1>MCP tool reference</h1>",
             "<p>The primary interface. Generated from the live registry — "

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gitcad"
+version = "0.2.0"
+description = "Agent-first, headless, git-native CAD (metapackage: core + mech + ecad + MCP + viewer + release)"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+keywords = ["cad", "brep", "occt", "mcp", "agent", "headless", "git", "eda"]
+dependencies = ["gitcad-core==0.2.0", "gitcad-mech==0.2.0", "gitcad-ecad==0.2.0"]
+
+[project.optional-dependencies]
+occt = ["gitcad-mech[occt]==0.2.0"]
+mcp = ["mcp>=1.0"]
+
+[project.urls]
+Homepage = "https://gitcad.xyz"
+
+[project.scripts]
+gitcad-mcp = "gitcad.mcp.server:main"
+gitcad-view = "gitcad.viewer.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gitcad"]

@@ -68,9 +68,9 @@ tests/
 ## Quick start
 
 ```bash
-pip install -e ".[dev]"        # core + pytest, no kernel needed
+pip install --no-deps -e packages/gitcad-core -e packages/gitcad-mech -e packages/gitcad-ecad -e packages/gitcad && pip install pytest
 pytest                          # runs against the pure-Python null kernel
-pip install -e ".[occt]"        # add the real OCCT kernel (~large wheel)
+pip install cadquery-ocp        # add the real OCCT kernel (~large wheel)
 ```
 
 The test suite runs with **no geometry kernel installed** — the null backend
@@ -95,7 +95,7 @@ outputs (same source → identical Gerbers).
 Try it:
 
 ```bash
-pip install -e ".[dev,occt]"
+pip install cadquery-ocp   # after the editable installs above
 python examples/bracket.py   # → bracket.step, bracket.pdf, bracket.svg, bracket.stl
 python examples/blinky.py    # → full Gerber/drill/PnP fab package
 ```

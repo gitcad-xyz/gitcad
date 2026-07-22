@@ -26,7 +26,7 @@ from gitcad.errors import GitcadError
 from gitcad.kernel import get_kernel
 from gitcad.seams import Kernel
 
-import gitcad
+from gitcad._version import __version__ as _gitcad_version
 
 
 def _kind(text: str) -> str:
@@ -210,7 +210,7 @@ def release(sources: list[str], outdir: str, version: str) -> ReleaseResult:
                 result.artifacts[f"{stem}-fab/{fp.name}"] = _sha(fp)
 
     manifest = {
-        "generator": f"gitcad {gitcad.__version__}",
+        "generator": f"gitcad {_gitcad_version}",
         "version": version,
         "sources": {p.name: hashlib.sha256(t.encode()).hexdigest() for p, _, t in docs},
         "checks": result.checks,

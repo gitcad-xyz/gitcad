@@ -20,7 +20,7 @@ def kernel():
 
 
 def test_step_to_parameterized_model_with_proof(kernel, tmp_path_factory) -> None:
-    from gitcad.importers import import_step_file
+    from gitcad.importers.step import import_step_file
     from gitcad.importers.recognize import recognize
 
     # A plate with two mounting holes — built parametrically, then flattened

@@ -192,13 +192,13 @@ def model_import(path: str, fmt: str = "auto", assets_dir: str = ".") -> dict[st
     if fmt == "auto":
         fmt = "fcstd" if lower.endswith(".fcstd") else "step"
     if fmt == "step":
-        from gitcad.importers import import_step_file
+        from gitcad.importers.step import import_step_file
 
         doc, report = import_step_file(path, kernel)
     elif fmt == "fcstd":
         # Parametric-first: recover the FreeCAD feature tree when it maps and
         # proves out; fall back to geometry-only with the reason reported.
-        from gitcad.importers import import_fcstd_tree
+        from gitcad.importers.fcstd_tree import import_fcstd_tree
 
         doc, report = import_fcstd_tree(path, kernel, assets_dir)
     else:
@@ -231,7 +231,7 @@ def board_import(path: str) -> dict[str, Any]:
     """Import an existing KiCad board (.kicad_pcb) into a gitcad board.
     Pure Python — no kernel needed. The report lists every approximation and
     drop (zones, arcs, complex outlines); nothing is lost silently."""
-    from gitcad.importers import import_kicad_pcb
+    from gitcad.importers.kicad import import_kicad_pcb
 
     board, report = import_kicad_pcb(path)
     validation = board.validate()

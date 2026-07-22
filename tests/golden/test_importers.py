@@ -47,7 +47,7 @@ def kicad_file(tmp_path):
 
 
 def test_kicad_import_maps_the_board(kicad_file) -> None:
-    from gitcad.importers import import_kicad_pcb
+    from gitcad.importers.kicad import import_kicad_pcb
 
     board, report = import_kicad_pcb(kicad_file)
     # Outline: 30x20 normalized to origin.
@@ -75,7 +75,7 @@ def test_kicad_import_maps_the_board(kicad_file) -> None:
 
 
 def test_kicad_import_refuses_inner_layer_copper(tmp_path) -> None:
-    from gitcad.importers import import_kicad_pcb
+    from gitcad.importers.kicad import import_kicad_pcb
 
     text = KICAD_FIXTURE.replace('(segment (start 104 110) (end 112.25 108) (width 0.4) (layer "F.Cu") (net 1))',
                                  '(segment (start 104 110) (end 112.25 108) (width 0.4) (layer "In1.Cu") (net 1))')
@@ -100,7 +100,7 @@ def test_sexp_parser_handles_quotes_and_numbers() -> None:
 
 @pytest.mark.occt
 def test_step_roundtrip_preserves_geometry(tmp_path) -> None:
-    from gitcad.importers import import_step_file
+    from gitcad.importers.step import import_step_file
     from gitcad.kernel.occt import OcctKernel
 
     k = OcctKernel()
@@ -119,7 +119,7 @@ def test_step_roundtrip_preserves_geometry(tmp_path) -> None:
 
 @pytest.mark.occt
 def test_import_integrity_pin_detects_file_swap(tmp_path) -> None:
-    from gitcad.importers import import_step_file
+    from gitcad.importers.step import import_step_file
     from gitcad.kernel.occt import OcctKernel
 
     k = OcctKernel()
@@ -134,7 +134,7 @@ def test_import_integrity_pin_detects_file_swap(tmp_path) -> None:
 
 @pytest.mark.occt
 def test_fcstd_import_reads_embedded_breps(tmp_path) -> None:
-    from gitcad.importers import import_fcstd
+    from gitcad.importers.fcstd import import_fcstd
     from gitcad.kernel.occt import OcctKernel
 
     k = OcctKernel()

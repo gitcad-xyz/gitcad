@@ -11,7 +11,7 @@ v0.1 layers: top/bottom copper, top/bottom solder mask, top silkscreen
 
 from __future__ import annotations
 
-import gitcad
+from gitcad._version import __version__ as _gitcad_version
 from gitcad.ecad.board import Board
 
 _SCALE = 1_000_000  # 4.6 format: mm * 1e6
@@ -24,7 +24,7 @@ def _c(v: float) -> int:
 class _GerberFile:
     def __init__(self, function: str, polarity: str = "Positive") -> None:
         self.head = [
-            f"%TF.GenerationSoftware,gitcad,gitcad,{gitcad.__version__}*%",
+            f"%TF.GenerationSoftware,gitcad,gitcad,{_gitcad_version}*%",
             f"%TF.FileFunction,{function}*%",
             f"%TF.FilePolarity,{polarity}*%",
             "%FSLAX46Y46*%",

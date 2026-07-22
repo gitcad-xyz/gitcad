@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gitcad-mech"
+version = "0.2.0"
+description = "gitcad mechanical: document model, OCCT kernel, sketches, drawings, mech importers"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+dependencies = ["gitcad-core==0.2.0"]
+
+[project.optional-dependencies]
+occt = ["cadquery-ocp>=7.7"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gitcad"]

@@ -13,7 +13,7 @@ import io
 import json
 from pathlib import Path
 
-import gitcad
+from gitcad._version import __version__ as _gitcad_version
 from gitcad.ecad import excellon, gerber
 from gitcad.ecad.board import Board
 from gitcad.errors import GitcadError
@@ -58,7 +58,7 @@ def export_fab(board: Board, outdir: str) -> dict[str, str]:
 
     manifest = {
         "board": n,
-        "generator": f"gitcad {gitcad.__version__}",
+        "generator": f"gitcad {_gitcad_version}",
         "layers": 2,
         "files": {k: Path(v).name for k, v in written.items()},
         "checks": report.checks,
