@@ -45,6 +45,28 @@ class SyncReport:
                 "conflicts": self.conflicts, "clean": self.clean}
 
 
+def back_annotate(sch: Schematic, board: Board) -> dict:
+    """Board -> schematic value sync (the reverse ECO path, KiCad-map
+    tier 2): a value edited during layout ("changed R5 to 22R on the
+    bench") flows back to the electrical source. Refs are matched by
+    designator; values differing are written to the schematic and
+    reported; board-only refs are reported, never invented into the
+    schematic (adding a component is design work, not annotation)."""
+    sch_by_ref = {c.ref: c for c in sch.components}
+    changed: dict[str, dict] = {}
+    board_only: list[str] = []
+    for comp in board.components:
+        target = sch_by_ref.get(comp.ref)
+        if target is None:
+            board_only.append(comp.ref)
+            continue
+        if comp.value and comp.value != target.value:
+            changed[comp.ref] = {"old": target.value, "new": comp.value}
+            target.value = comp.value
+    return {"values_changed": changed, "board_only_refs": sorted(board_only),
+            "ok": not board_only}
+
+
 def annotate_board(board: Board, sch: Schematic, *,
                    overwrite_conflicts: bool = False) -> SyncReport:
     """Write schematic net names onto board pads, matched by ref + pin number.
