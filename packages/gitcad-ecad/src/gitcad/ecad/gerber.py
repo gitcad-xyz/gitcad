@@ -122,20 +122,36 @@ def mask(board: Board, side: str) -> str:
     return g.render()
 
 
-def silkscreen(board: Board, side: str = "top") -> str:
-    """Component courtyard outlines. Reference text lands in a later release."""
+def silkscreen(board: Board, side: str = "top", *,
+               text_height: float = 1.0) -> str:
+    """Component courtyard outlines + reference designators (KiCad-map P3):
+    every ref is drawn with the stroke font, centered above its courtyard
+    (or its pads' extent when no courtyard is declared)."""
+    from gitcad.ecad.strokefont import text_strokes, text_width
+
     g = _GerberFile(f"Legend,{'Top' if side == 'top' else 'Bot'}")
     pen = "C,0.150000"
+    text_pen = "C,0.120000"
     for comp in board.components:
-        if comp.side != side or comp.footprint.courtyard is None:
+        if comp.side != side:
             continue
-        cw, ch = comp.footprint.courtyard
-        if round(comp.rot) % 180 == 90:   # courtyard follows the rotation
-            cw, ch = ch, cw
-        x0, y0 = comp.x - cw / 2, comp.y - ch / 2
-        corners = [(x0, y0), (x0 + cw, y0), (x0 + cw, y0 + ch), (x0, y0 + ch), (x0, y0)]
-        for (x1, y1), (x2, y2) in zip(corners, corners[1:]):
-            g.line(pen, x1, y1, x2, y2)
+        if comp.footprint.courtyard is not None:
+            cw, ch = comp.footprint.courtyard
+            if round(comp.rot) % 180 == 90:   # courtyard follows the rotation
+                cw, ch = ch, cw
+            x0, y0 = comp.x - cw / 2, comp.y - ch / 2
+            corners = [(x0, y0), (x0 + cw, y0), (x0 + cw, y0 + ch),
+                       (x0, y0 + ch), (x0, y0)]
+            for (x1, y1), (x2, y2) in zip(corners, corners[1:]):
+                g.line(pen, x1, y1, x2, y2)
+            top = y0 + ch
+        else:
+            top = comp.y + max((abs(by - comp.y) + p.h / 2
+                                for p, _bx, by, _r in comp.placed_pads()),
+                               default=0.5)
+        tx = comp.x - text_width(comp.ref, text_height) / 2
+        for x1, y1, x2, y2 in text_strokes(comp.ref, tx, top + 0.3, text_height):
+            g.line(text_pen, x1, y1, x2, y2)
     return g.render()
 
 
