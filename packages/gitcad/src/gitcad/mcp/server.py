@@ -392,6 +392,25 @@ def schematic_author(name: str, ops: list[list]) -> dict[str, Any]:
             "parity_ok": parity.ok, "sheet_svg": sheet_to_svg(sch)}
 
 
+@tool("design_review")
+def design_review(repo: str, base: str, head: str = "HEAD") -> dict[str, Any]:
+    """Review the design changes between two git refs: per-file semantic
+    diff (features/components/volume/interface-semver), the CHECK DELTA
+    (violations introduced / fixed / pre-existing — ERC, envelopes, board
+    validation, DRC), and before/after SVG renders. gate_ok fails on any
+    INTRODUCED violation; pre-existing reds don't block (not this PR's
+    fault). The markdown field is ready to post as a PR comment."""
+    from gitcad.review import review_range, to_markdown
+
+    report = review_range(repo, base, head)
+    # renders are large; agents get the verdict + markdown, HTML via CLI
+    slim = {**report, "files": [
+        {k: v for k, v in f.items() if not k.startswith("render_")}
+        for f in report["files"]]}
+    slim["markdown"] = to_markdown(report)
+    return slim
+
+
 @tool("schematic_envelope")
 def schematic_envelope(schematic: str) -> dict[str, Any]:
     """The hardware type system, electrical v1 (ADR-0015): net voltages

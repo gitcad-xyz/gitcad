@@ -21,6 +21,7 @@ Homepage = "https://gitcad.xyz"
 [project.scripts]
 gitcad-mcp = "gitcad.mcp.server:main"
 gitcad-view = "gitcad.viewer.server:main"
+gitcad-review = "gitcad.review:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gitcad"]
