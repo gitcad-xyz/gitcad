@@ -274,6 +274,29 @@ def schematic_board_parity(schematic: str, board: str) -> dict[str, Any]:
     return {"ok": r.ok, "checks": r.checks, "violations": r.violations}
 
 
+@tool("project_release")
+def project_release(sources: list[str], outdir: str, version: str) -> dict[str, Any]:
+    """Project-Releaser-as-code: run EVERY check (validate/ERC/parity/DRC/fab)
+    across the given model/board/schematic documents; only on all-green write
+    the full artifact set + sha256 manifest. Red checks = no release."""
+    from gitcad.release import release
+
+    r = release(sources, outdir, version)
+    return {"ok": r.ok, "version": r.version, "checks": r.checks,
+            "failures": r.failures, "artifacts": r.artifacts,
+            "manifest": r.manifest_path}
+
+
+@tool("semantic_diff")
+def semantic_diff_tool(old: str, new: str) -> dict[str, Any]:
+    """Meaning-level diff between two revisions of the same document text:
+    features added/removed/changed by stable id, volume delta, board deltas,
+    or interface-semver classification for parts. The PR review surface."""
+    from gitcad.release import semantic_diff
+
+    return semantic_diff(old, new)
+
+
 @tool("part_check_release")
 def part_check_release(old_part: str, new_part: str) -> dict[str, Any]:
     """Interface-semver release gate (ADR-0009): given old and new part.json
