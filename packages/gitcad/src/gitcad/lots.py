@@ -68,7 +68,8 @@ def record_lot(release_dir: str, lot_id: str, *, vendor: str = "",
             "contains exactly what was sent to the fab")
 
     artifacts = {p.name: _sha(p) for p in sorted(rel.iterdir())
-                 if p.is_file() and not p.name.startswith("lot-")}
+                 if p.is_file() and p.suffix != ".lot"
+                 and not p.name.startswith("lot-")}
     doc = {"schema": SCHEMA, "lot": {
         "id": lot_id, "vendor": vendor, "date": date,
         **({"quantity": quantity} if quantity is not None else {}),
@@ -77,7 +78,7 @@ def record_lot(release_dir: str, lot_id: str, *, vendor: str = "",
         "manifest": manifest.name,
         "artifacts": artifacts,
     }}
-    out = rel / f"lot-{lot_id}.json"
+    out = rel / f"{lot_id}.lot"
     if out.exists():
         raise GitcadError(f"lot {lot_id!r} already recorded — lots are immutable; "
                           "record a new lot id for a re-run")

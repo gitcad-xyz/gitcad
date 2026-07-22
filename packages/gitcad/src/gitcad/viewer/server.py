@@ -79,7 +79,7 @@ def assembly_mesh_payload(manifest_path: Path, kernel: Kernel) -> dict:
     root = manifest_path.parent
 
     by_id: dict[str, tuple[PartManifest, Path]] = {}
-    for pj in sorted(root.rglob("*part.json")):
+    for pj in sorted(list(root.rglob("*part.json")) + list(root.rglob("*.part"))):
         if pj == manifest_path:
             continue
         try:
@@ -160,7 +160,9 @@ def discover_schematics(root: Path, limit: int = 12) -> list[dict]:
     out: list[dict] = []
     sources = (sorted(root.rglob("*.kicad_sch"))
                + sorted(root.rglob("*.schematic.json"))
-               + sorted(root.rglob("*.sch.json")))
+               + sorted(root.rglob("*.sch.json"))
+               + sorted(p for p in root.rglob("*.sch")
+                        if not p.name.endswith(".kicad_sch")))
     for src in sources[:limit]:
         try:
             if src.suffix == ".kicad_sch":

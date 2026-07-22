@@ -19,9 +19,10 @@ def test_assembly_mesh_payload(tmp_path) -> None:
     def publish(name: str, part_id: str, dims) -> PartManifest:
         doc = Document()
         doc.add(Feature(op="box", params={"dx": dims[0], "dy": dims[1], "dz": dims[2]}))
-        (tmp_path / f"{name}.gitcad.json").write_text(doc.dumps(), newline="\n")
+        # ADR-0017 naming: models are .model, referenced from the part body
+        (tmp_path / f"{name}.model").write_text(doc.dumps(), newline="\n")
         part = model_to_part(doc, kernel, part_id=part_id, name=name)
-        (tmp_path / f"{name}.part.json").write_text(part.dumps(), newline="\n")
+        (tmp_path / f"{name}.part").write_text(part.dumps(), newline="\n")
         return part
 
     base = publish("base", "prt_0000000000000001", (60, 40, 8))

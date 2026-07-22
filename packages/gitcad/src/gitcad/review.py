@@ -27,12 +27,20 @@ def _git_show(repo: Path, ref: str, relpath: str) -> str | None:
     return proc.stdout if proc.returncode == 0 else None
 
 
+# Design-document extensions: the json-free names are canonical (directory
+# legibility); .json variants stay accepted forever — kind detection is by
+# CONTENT (the schema field), extensions only scope the scan.
+DESIGN_EXTENSIONS = (".json", ".gitcad", ".model", ".sch", ".board", ".part",
+                     ".reqs")
+
+
 def _changed_files(repo: Path, base: str, head: str) -> list[str]:
     proc = subprocess.run(
         ["git", "-C", str(repo), "diff", "--name-only", f"{base}...{head}"],
         capture_output=True, text=True, check=True)
     return [ln.strip().replace("\\", "/") for ln in proc.stdout.splitlines()
-            if ln.strip().endswith(".json")]
+            if ln.strip().endswith(DESIGN_EXTENSIONS)
+            and not ln.strip().endswith(".kicad_sch")]
 
 
 def _checks(kind: str, text: str) -> list[str]:

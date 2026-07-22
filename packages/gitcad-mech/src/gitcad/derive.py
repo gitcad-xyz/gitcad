@@ -56,5 +56,5 @@ def model_to_part(
             ports=dict(ports or {}),
             properties=props,
         ),
-        body={"model": f"{name}.gitcad.json"},
+        body={"model": f"{name}.model"},
     )
