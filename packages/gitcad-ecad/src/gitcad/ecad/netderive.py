@@ -38,6 +38,24 @@ def key(x: float, y: float) -> tuple[int, int]:
     return (round(x * 100), round(y * 100))
 
 
+def pin_abs(px: float, py: float, sx: float, sy: float, rot: float,
+            mirror: str | None = None) -> tuple[float, float]:
+    """Symbol-library point (y-up) -> sheet coords (y-down) with rotation and
+    mirror — the one transform for pins AND body graphics, shared by the
+    .kicad_sch importer and the sheet editor."""
+    import math
+
+    x, y = px, -py                      # library y-up -> sheet y-down
+    if mirror == "x":
+        y = -y
+    elif mirror == "y":
+        x = -x
+    rad = math.radians(rot)
+    rx = x * math.cos(rad) + y * math.sin(rad)
+    ry = -x * math.sin(rad) + y * math.cos(rad)
+    return (round(sx + rx, 4), round(sy + ry, 4))
+
+
 def _on_segment(pk, a, b) -> bool:
     (px, py), (ax, ay), (bx, by) = pk, a, b
     if min(ax, bx) - 1 <= px <= max(ax, bx) + 1 and min(ay, by) - 1 <= py <= max(ay, by) + 1:

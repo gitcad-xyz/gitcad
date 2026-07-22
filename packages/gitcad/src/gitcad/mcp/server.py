@@ -350,6 +350,48 @@ def schematic_import(path: str) -> dict[str, Any]:
     return out
 
 
+@tool("schematic_author")
+def schematic_author(name: str, ops: list[list]) -> dict[str, Any]:
+    """Author a DRAWN schematic sheet — symbols placed, wires routed, labels
+    and power flags set — and get back the netlist derived from the drawing
+    (same engine as the KiCad importer), ERC, sheet parity, and a KiCad-style
+    SVG. ops is a sequence of:
+      ["place", ref, kind, x, y, {value, rot, footprint, pin_types, left,
+       right, n}]  (kinds: resistor|capacitor|led|diode|ic|header)
+      ["connect", refA, pinA, refB, pinB, [via points...]]
+      ["wire", [[x, y], ...]]   ["junction", x, y]
+      ["label", net, x, y]      ["power", net, x, y]"""
+    from gitcad.ecad.netderive import sheet_parity
+    from gitcad.ecad.schsvg import sheet_to_svg
+    from gitcad.ecad.sheetedit import SheetEditor
+
+    e = SheetEditor(name)
+    for op in ops:
+        kind, args = op[0], op[1:]
+        if kind == "place":
+            kw = args[4] if len(args) > 4 else {}
+            e.place(args[0], args[1], args[2], args[3], **kw)
+        elif kind == "connect":
+            via = [tuple(p) for p in (args[4] if len(args) > 4 else [])]
+            e.connect((args[0], args[1]), (args[2], args[3]), *via)
+        elif kind == "wire":
+            e.wire(*[tuple(p) for p in args[0]])
+        elif kind == "junction":
+            e.junction(args[0], args[1])
+        elif kind == "label":
+            e.label(args[0], args[1], args[2])
+        elif kind == "power":
+            e.power(args[0], args[1], args[2])
+        else:
+            raise GitcadError(f"unknown sheet op {kind!r}")
+    sch = e.finish()
+    erc = sch.erc()
+    parity = sheet_parity(sch)
+    return {"schematic": sch.dumps(), "nets": sch.nets,
+            "erc_ok": erc.ok, "erc_violations": erc.violations,
+            "parity_ok": parity.ok, "sheet_svg": sheet_to_svg(sch)}
+
+
 @tool("schematic_system_erc")
 def schematic_system_erc(schematics: list[str]) -> dict[str, Any]:
     """Merge multiple board schematics (canonical gitcad text) into one

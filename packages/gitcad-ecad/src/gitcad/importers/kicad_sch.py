@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import math
 
-from gitcad.ecad.netderive import derive_nets, key as _key, wire_end_hit_rate
+from gitcad.ecad.netderive import (derive_nets, key as _key,
+                                   pin_abs as _pin_abs, wire_end_hit_rate)
 from gitcad.ecad.schematic import Pin, SchComponent, Schematic
 from gitcad.errors import GitcadError
 from gitcad.importers.report import ImportReport
@@ -83,20 +84,6 @@ def _lib_symbols(lib_symbols) -> dict[str, dict]:
                                            [float(e[1]), float(e[2])]]})
         out[lib_id] = {"pins": pins, "shapes": shapes}
     return out
-
-
-def _pin_abs(px: float, py: float, sx: float, sy: float, rot: float,
-             mirror: str | None) -> tuple[float, float]:
-    """Library pin (y-up) -> sheet coords (y-down) with rotation + mirror."""
-    x, y = px, -py                      # library y-up -> sheet y-down
-    if mirror == "x":
-        y = -y
-    elif mirror == "y":
-        x = -x
-    rad = math.radians(rot)
-    rx = x * math.cos(rad) + y * math.sin(rad)
-    ry = -x * math.sin(rad) + y * math.cos(rad)
-    return (round(sx + rx, 4), round(sy + ry, 4))
 
 
 def import_kicad_sch(path: str) -> tuple[Schematic, ImportReport]:
