@@ -293,7 +293,16 @@ class RefKernel:
         _nope("shell", "arrives at K4 (offsets)")
 
     def draft(self, shape, faces, angle_deg, pull=(0, 0, 1), neutral_z=0.0):
-        _nope("draft", _K2)
+        from forgekernel.brep import Solid
+        from forgekernel.kernel import draft as fk_draft
+
+        if not isinstance(shape, Solid) or tuple(pull) != (0, 0, 1):
+            _nope("draft(non-planar or tilted pull)", "K2.3")
+        try:
+            return fk_draft(shape, angle_deg, neutral_z)
+        except ValueError as exc:
+            raise KernelError(str(exc), FailureSignature(
+                op="draft", diagnostic="NotYetImplemented", kernel="ref"))
 
     def helix(self, radius, pitch, turns, ccw=True):
         _nope("helix", _K3)

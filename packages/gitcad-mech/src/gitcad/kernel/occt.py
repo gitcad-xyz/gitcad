@@ -302,6 +302,19 @@ class OcctKernel:
         all_faces = _unique_shapes(shape, TopAbs_FACE)
         neutral = gp_Pln(gp_Pnt(0, 0, neutral_z), gp_Dir(0, 0, 1))
         mk = BRepOffsetAPI_DraftAngle(shape)
+        # convention (shared with the ref kernel): empty selection drafts
+        # every face whose normal is perpendicular to the pull direction —
+        # i.e. all "vertical" side faces of a prism.
+        if not faces:
+            faces = []
+            pd = gp_Dir(*pull)
+            for i, f in enumerate(all_faces):
+                surf = BRepAdaptor_Surface(TopoDS.Face_s(f))
+                if surf.GetType() != 0:            # plane only
+                    continue
+                fn = surf.Plane().Axis().Direction()
+                if abs(fn.Dot(pd)) < 1e-9:
+                    faces.append(i)
         for idx in faces:
             if idx >= len(all_faces):
                 raise KernelError(
