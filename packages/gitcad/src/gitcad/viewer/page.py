@@ -77,10 +77,18 @@ void main(){ vPos = pos; vCol = col; gl_Position = mvp * vec4(pos, 1.0);
   gl_PointSize = 9.0; }`;
 const FS = `#version 300 es
 precision highp float; in vec3 vPos; in vec3 vCol; out vec4 color;
-uniform bool flat_col;
+uniform bool flat_col; uniform bool zebra;
 void main(){
   if(flat_col){ color = vec4(vCol, 1.0); return; }
   vec3 n = normalize(cross(dFdx(vPos), dFdy(vPos)));
+  if(zebra){
+    // surface-quality inspection: iso-normal bands (Gauss-map stripes).
+    // Smooth surfaces show smoothly flowing stripes; tangency breaks and
+    // creases show as stripe kinks. Per-facet at tessellation density.
+    float s = fract(6.0 * dot(n, normalize(vec3(1.0, 0.7, 0.4))));
+    float band = s < 0.5 ? 0.2 : 1.0;
+    color = vec4(vec3(0.85, 0.9, 1.0) * band, 1.0); return;
+  }
   float l = 0.25 + 0.65 * max(dot(n, normalize(vec3(0.5, 0.4, 0.8))), 0.0)
                  + 0.18 * max(dot(n, normalize(vec3(-0.6, -0.3, 0.2))), 0.0);
   color = vec4(vCol * l, 1.0);
@@ -98,7 +106,10 @@ gl.bindAttribLocation(prog, 0, "pos"); gl.bindAttribLocation(prog, 1, "col");
 gl.linkProgram(prog); gl.useProgram(prog);
 const uMvp = gl.getUniformLocation(prog, "mvp");
 const uFlat = gl.getUniformLocation(prog, "flat_col");
+const uZebra = gl.getUniformLocation(prog, "zebra");
 gl.enable(gl.DEPTH_TEST);
+let zebraOn = location.hash.includes("zebra");
+gl.uniform1i(uZebra, zebraOn ? 1 : 0);
 
 let nIndices = 0, center = [0,0,0], radius = 50;
 let yaw = 0.7, pitch = 0.5, dist = 3;   // dist in units of radius
@@ -390,7 +401,10 @@ addEventListener("pointermove", e => {
   px = e.clientX; py = e.clientY;
 });
 addEventListener("wheel", e => { dist = Math.max(1.2, Math.min(12, dist * (e.deltaY > 0 ? 1.1 : 0.9))); });
-addEventListener("keydown", e => { if(e.key === "Escape"){ picks = []; updateMeasure(); } });
+addEventListener("keydown", e => {
+  if(e.key === "Escape"){ picks = []; updateMeasure(); }
+  if(e.key === "z"){ zebraOn = !zebraOn; gl.uniform1i(uZebra, zebraOn ? 1 : 0); draw(); }
+});
 
 // -- tabs ---------------------------------------------------------------------
 const tabsEl = document.getElementById("tabs");
