@@ -97,6 +97,27 @@ class Kernel(Protocol):
         translate. The primitive every positioned feature builds on."""
         ...
 
+    def scale(self, shape: Shape, fx: float, fy: float | None = None,
+              fz: float | None = None) -> Shape:
+        """Uniform (one factor) or anisotropic (three) scale about the origin."""
+        ...
+
+    def draft(self, shape: Shape, faces: list[int], angle_deg: float,
+              pull: tuple[float, float, float] = (0, 0, 1),
+              neutral_z: float = 0.0) -> Shape:
+        """Molding draft: tilt the listed faces (empty = all faces normal to
+        pull) by ``angle_deg`` about the neutral plane z=``neutral_z``."""
+        ...
+
+    def helix(self, radius: float, pitch: float, turns: float,
+              ccw: bool = True) -> Shape:
+        """A 3D helical wire about +z — the spine of springs and threads."""
+        ...
+
+    def pipe(self, spine: Shape, profile_diameter: float) -> Shape:
+        """Sweep a circular section along a wire spine (springs, wire runs)."""
+        ...
+
     def validate(self, shape: Shape) -> ValidationReport:
         """Machine-readable geometric checks (watertight, self-intersection,
         continuity). The core of the agent verification loop."""
