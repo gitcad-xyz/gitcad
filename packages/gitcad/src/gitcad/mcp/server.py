@@ -998,6 +998,41 @@ def assembly_validate(assembly_body: dict[str, Any], parts: list[str]) -> dict[s
     return {"ok": r.ok, "checks": r.checks, "violations": r.violations}
 
 
+@tool("assembly_fasteners")
+def assembly_fasteners(assembly_body: dict[str, Any], parts: list[str],
+                       default_length: float = 8.0) -> dict[str, Any]:
+    """Toolbox, agent-first (SW-map P6): populate every unmated mech.bolt
+    port with a correctly sized ISO 4762 bolt instance + mate, then run
+    the standard assembly validation as the proof. Sizing comes from the
+    port's spec (thread "M3", optional length); specless ports are
+    reported, never guessed. Returns the additions, skips, the updated
+    assembly body, and the post-populate validation."""
+    from gitcad.fasteners import generate_fasteners
+    from gitcad.part import Assembly, PartManifest
+
+    by_id = {m.id: m for m in (PartManifest.loads(p) for p in parts)}
+    asm = Assembly(assembly_body.get("name", "assembly"))
+    for name, inst in assembly_body["instances"].items():
+        part = by_id.get(inst["part"])
+        if part is None:
+            raise ValueError(f"instance {name!r} references unknown part {inst['part']!r}")
+        asm.add(name, part, translate=tuple(inst.get("translate", (0, 0, 0))),
+                rotate_z_deg=inst.get("rotate_z_deg", 0.0))
+    for m in assembly_body.get("mates", []):
+        asm.mate(m["a"], m["b"])
+    result = generate_fasteners(asm, default_length=default_length)
+    r = asm.validate()
+    body = {"name": asm.name,
+            "instances": {n: {"part": i.part.id, "translate": list(i.translate),
+                              "rotate_z_deg": i.rotate_z_deg}
+                          for n, i in asm.instances.items()},
+            "mates": [{"a": m.a, "b": m.b} for m in asm.mates]}
+    return {**result, "assembly": body,
+            "bolt_sizes": sorted({f"{a['thread']}x{a['length']:g}"
+                                  for a in result["added"]}),
+            "ok": r.ok, "violations": r.violations}
+
+
 def main() -> None:  # pragma: no cover - process entrypoint
     """Serve the registry over MCP (requires the optional ``mcp`` dependency)."""
     try:

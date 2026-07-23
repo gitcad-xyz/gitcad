@@ -143,7 +143,7 @@ play. Mold tools (parting lines, core/cavity) ❌ defer; draft analysis
 | Exploded views | exploded-view feature + GUI | ✅ |
 | BOM | assembly BOM + balloons + MPN-atomic parts | ✅ |
 | Toolbox (hardware library) | registry + bought parts, content-addressed | ✅ (beyond) |
-| **Smart fasteners** | fastener generator at `mech.bolt` ports (ports already exist on every mounting hole) | ❌ P6 |
+| **Smart fasteners** | ✅ `generate_fasteners`: sizes ISO 4762 bolts from port thread specs, places + MATES each one; assembly validation is the proof; specless ports reported, never guessed | ✅ |
 | Large-assembly modes | — not the bottleneck at our scale | — |
 
 ## 8. Drawing environment
@@ -190,8 +190,8 @@ What actually converts a SolidWorks user, in order of leverage:
 5. ~~P5 Helix + springs + thread specs~~ — SHIPPED (helix/pipe kernel
    ops, spring feature, thread-as-data on holes in callouts); modeled
    thread cuts and general 3D sketch paths remain open.
-6. **P6 Fastener generator** — Toolbox, agent-first: every `mech.bolt`
-   port can grow a correct bolt stack automatically.
+6. ~~P6 Fastener generator~~ — SHIPPED: `gitcad.fasteners` (parametric
+   bolt family via P1+P2; populate + mate + validate; assembly_fasteners MCP).
 7. **P7 Tolerances/GD&T as data** — the QA handshake.
 8. **P8 Detail views + sketch text** — drawing completeness, engraving.
 
