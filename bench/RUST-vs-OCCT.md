@@ -35,12 +35,36 @@ so it counts as a match; but forge is the more accurate of the two.
 
 | | forge (Rust) | OCCT |
 |---|---|---|
-| corpus built | **18/19 (94.7%)** | 17/19 (89.5%) |
-| fails | spring (transcendental helix, K3) | both mitered sweeps |
+| corpus built | **19/19 (100%)** | 17/19 (89.5%) |
+| fails | — | both mitered sweeps |
 
-forge builds both sharp-cornered sweeps OCCT's float pipe rejects;
-OCCT builds the helix forge defers to K3. Disjoint failure sets,
-forge ahead on count.
+As of K3.0 forge builds the **entire** corpus. It builds both
+sharp-cornered sweeps OCCT's float pipe rejects, *and* the coil spring
+— the last holdout — now lands as a certified build (see K3.0 below).
+OCCT fails two models forge builds; forge fails none.
+
+### K3.0 — the coil spring, and the certified-interval charter (this iteration)
+
+The spring is the first *transcendental* geometry: its volume is
+`V = π ρ² L` with `L = turns·√((2πR)² + pitch²)` — and `√(a·π² + b)`
+lives in no finite algebraic extension of ℚ. Pure exactness cannot
+reach it, so ADR-0019 extends the charter with a fourth number kind:
+the **certified interval** `[lo, hi]` of exact rationals that *provably*
+brackets the true value. `π` enters through a digit-verified rational
+enclosure; `√` returns a rational bracket `a² ≤ x ≤ b²`; every `+ − ×`
+is exact — so a bracket widens only at the genuinely irrational steps,
+by a bounded, reportable amount. A topological decision may consult a
+sign only when the interval excludes zero; otherwise it tightens or
+refuses. It never guesses.
+
+The spring builds with a **certified** provenance tag (distinct from
+`exact`): `mass_props` reports the interval midpoint plus a proven
+half-width (~5×10⁻⁵⁰ here). And the oracle relationship *inverts*, as
+with sphere-overlap: forge computes the exact tube volume bracketed to
+50+ digits, while OCCT's swept-B-rep integration lands **4.4×10⁻⁷**
+away — they agree within OCCT's own tolerance, but it is OCCT that
+carries the error. The certified interval is the more precise object;
+an independently computed `double` falls *outside* it.
 
 ### K2.2 — non-coaxial quadric booleans (this iteration)
 

@@ -21,14 +21,35 @@ def test_ref_builds_planar_documents_exactly() -> None:
     assert k.validate(result.final(d)).ok
 
 
+def test_ref_builds_spring_with_certified_volume() -> None:
+    # K3.0 (ADR-0019): helix + pipe = coil spring, the first transcendental
+    # geometry — built as a *certified* solid, volume π ρ² L bracketed.
+    import math
+
+    from gitcad.bench.corpus import spring
+
+    k = RefKernel()
+    d = spring()
+    shape = d.build(k).final(d)
+    mp = k.mass_props(shape)
+    rho, L = 0.75, 6 * math.sqrt((2 * math.pi * 8) ** 2 + 16)
+    want = math.pi * rho * rho * L
+    assert abs(mp["volume"] - want) < 1e-6           # matches analytic value
+    assert mp["volume_halfwidth"] < 1e-30            # certified, very tight
+    v = k.validate(shape)
+    assert v.ok and v.checks["provenance"] == "certified"
+
+
 def test_ref_refuses_unearned_ops_with_stage() -> None:
     from gitcad.errors import KernelError
 
     k = RefKernel()
     with pytest.raises(KernelError, match="K3"):
         k.loft([], ruled=False)          # cylinder K2.0, sphere/cone K2.1
+    # helix/pipe/spring GRADUATED to K3.0 (certified intervals, ADR-0019);
+    # STEP curve import still holds the K3 line.
     with pytest.raises(KernelError, match="K3"):
-        k.helix(5, 2, 3)                 # helix/spring hold the K3 line
+        k.import_step("nonexistent.step")
 
 
 def test_ref_drills_holes_exactly() -> None:

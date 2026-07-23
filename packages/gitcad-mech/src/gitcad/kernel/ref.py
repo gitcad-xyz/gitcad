@@ -10,6 +10,7 @@ else refuses honestly, naming the stage that brings it. The scorecard
 
 from __future__ import annotations
 
+from fractions import Fraction
 from typing import Any
 
 from gitcad.errors import FailureSignature, KernelError, ValidationReport
@@ -70,7 +71,12 @@ class RefKernel:
     def transform(self, shape, *, translate=(0, 0, 0),
                   rotate_axis=(0, 0, 1), rotate_deg: float = 0.0):
         from forgekernel.quadric import AxisStack, Cone, Cyl, Sphere
+        from forgekernel.curve import TubeSolid
 
+        if isinstance(shape, TubeSolid):
+            if rotate_deg:
+                _nope("transform(rotate a certified tube)", "K3.1")
+            return shape.translated(*translate)
         if isinstance(shape, (Cyl, Cone, Sphere)):
             if rotate_deg and (tuple(rotate_axis) != (0, 0, 1)):
                 _nope("transform(tilt a quadric)", "K2.2 (general axes)")
@@ -163,10 +169,18 @@ class RefKernel:
 
     def mass_props(self, shape) -> dict[str, float]:
         from forgekernel.quadric import Cyl, DrilledSolid
+        from forgekernel.curve import TubeSolid
 
         from forgekernel.quadric import (AxisStack, Cone, DisjointUnion,
                                          MiteredSweep, RevolveSolid, RoundedBox, Sphere, SphereOverlap)
 
+        if isinstance(shape, TubeSolid):
+            # certified provenance (ADR-0019): volume is an interval; report
+            # the midpoint plus the proven half-width bracketing the truth.
+            v = shape.volume()
+            cx, cy, cz = shape.centroid_f()
+            return {"volume": v.to_float(), "cx": cx, "cy": cy, "cz": cz,
+                    "volume_halfwidth": float(v.width) / 2}
         if isinstance(shape, (Cone, Sphere)):
             shape = AxisStack(shape.cx, shape.cy, [shape])
         if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap)):
@@ -185,8 +199,11 @@ class RefKernel:
 
     def bbox(self, shape):
         from forgekernel.quadric import AxisStack, Cone, Sphere
+        from forgekernel.curve import TubeSolid
 
         from forgekernel.quadric import RoundedBox
+        if isinstance(shape, TubeSolid):
+            return shape.bbox_f()
         if isinstance(shape, (Cone, Sphere)):
             shape = AxisStack(shape.cx, shape.cy, [shape])
         lo, hi = shape.bbox()
@@ -210,6 +227,11 @@ class RefKernel:
         if kind != "face":
             raise NotImplementedError("ref enumerates faces only")
         from forgekernel.quadric import MiteredSweep, RoundedBox, SphereOverlap
+        from forgekernel.curve import TubeSolid
+        if isinstance(shape, TubeSolid):
+            # swept lateral surface + two round end caps
+            return [{"surface": "swept-tube"}, {"surface": "plane"},
+                    {"surface": "plane"}]
         if isinstance(shape, SphereOverlap):
             return [{"surface": "sphere-lens"}]
         if isinstance(shape, RoundedBox):
@@ -246,7 +268,16 @@ class RefKernel:
 
         from forgekernel.quadric import (AxisStack, Cone, DisjointUnion,
                                          MiteredSweep, RevolveSolid, RoundedBox, Sphere, SphereOverlap)
+        from forgekernel.curve import TubeSolid
 
+        if isinstance(shape, TubeSolid):
+            # watertight by construction (closed section, non-self-overlapping
+            # sweep — both preconditions checked at build); volume certified >0
+            return ValidationReport(
+                ok=True,
+                checks={"method": "certified-tube",
+                        "provenance": shape.provenance},
+                violations=[])
         if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap)):
             return ValidationReport(ok=True, checks={"method": "analytic"},
                                     violations=[])
@@ -397,10 +428,28 @@ class RefKernel:
                 op="draft", diagnostic="NotYetImplemented", kernel="ref"))
 
     def helix(self, radius, pitch, turns, ccw=True):
-        _nope("helix", _K3)
+        # K3.0: the first transcendental curve — carried as certified
+        # geometry (ADR-0019), not an exact field element.
+        from forgekernel.curve import Helix
+
+        try:
+            return Helix(radius, pitch, turns, ccw)
+        except ValueError as exc:
+            raise KernelError(str(exc), FailureSignature(
+                op="helix", diagnostic="BadInput", kernel="ref"))
 
     def pipe(self, spine, profile_diameter):
-        _nope("pipe", _K3)
+        # K3.0: round section swept along a helix → coil spring. Volume is
+        # exact (π ρ² L) evaluated as a certified interval.
+        from forgekernel.curve import Helix, TubeSolid
+
+        if not isinstance(spine, Helix):
+            _nope("pipe(non-helix spine)", "K3.1 (general path pipe)")
+        try:
+            return TubeSolid(spine, Fraction(profile_diameter) / 2)
+        except ValueError as exc:
+            raise KernelError(str(exc), FailureSignature(
+                op="pipe", diagnostic="NotYetImplemented", kernel="ref"))
 
     def hlr_project(self, shape, direction, up=None):
         _nope("hlr_project", _K2)
