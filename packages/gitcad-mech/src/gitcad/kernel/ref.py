@@ -159,11 +159,11 @@ class RefKernel:
         from forgekernel.quadric import Cyl, DrilledSolid
 
         from forgekernel.quadric import (AxisStack, Cone, DisjointUnion,
-                                         RevolveSolid, RoundedBox, Sphere)
+                                         MiteredSweep, RevolveSolid, RoundedBox, Sphere)
 
         if isinstance(shape, (Cone, Sphere)):
             shape = AxisStack(shape.cx, shape.cy, [shape])
-        if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion, RoundedBox)):
+        if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep)):
             cx, cy, cz = shape.centroid_f()
             return {"volume": float(shape.volume()),
                     "cx": cx, "cy": cy, "cz": cz}
@@ -203,9 +203,11 @@ class RefKernel:
 
         if kind != "face":
             raise NotImplementedError("ref enumerates faces only")
-        from forgekernel.quadric import RoundedBox
+        from forgekernel.quadric import MiteredSweep, RoundedBox
         if isinstance(shape, RoundedBox):
             return [{"surface": "rounded-box"}]
+        if isinstance(shape, MiteredSweep):
+            return [{"surface": "swept"}]
         if isinstance(shape, DisjointUnion):
             out = []
             for m in shape.members:
@@ -235,9 +237,9 @@ class RefKernel:
         from forgekernel.quadric import Cyl, DrilledSolid
 
         from forgekernel.quadric import (AxisStack, Cone, DisjointUnion,
-                                         RevolveSolid, RoundedBox, Sphere)
+                                         MiteredSweep, RevolveSolid, RoundedBox, Sphere)
 
-        if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion, RoundedBox)):
+        if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep)):
             return ValidationReport(ok=True, checks={"method": "analytic"},
                                     violations=[])
         if isinstance(shape, DrilledSolid):
@@ -299,7 +301,29 @@ class RefKernel:
                 op="loft", diagnostic="NotYetImplemented", kernel="ref"))
 
     def sweep(self, profile, path):
-        _nope("sweep", _K3)
+        # mitered sweep of a convex profile — exact volume in Q[sqrt d].
+        # (the model OCCT fails on: 45-degree cornered path.)
+        from forgekernel.kernel import sweep as fk_sweep
+
+        segs = profile.get("segments", [])
+        if any(s.get("kind") != "line" for s in segs):
+            _nope("sweep(arc profile)", "K3.1")
+        pts = [tuple(profile["start"])] + [tuple(s["to"]) for s in segs]
+        loop = pts[:-1] if pts[0] == pts[-1] else pts
+        # shoelace area (exact)
+        from fractions import Fraction as _Fr
+        area = _Fr(0)
+        n = len(loop)
+        for i in range(n):
+            x1, y1 = loop[i]
+            x2, y2 = loop[(i + 1) % n]
+            area += _Fr(x1) * _Fr(y2) - _Fr(x2) * _Fr(y1)
+        area = abs(area) / 2
+        try:
+            return fk_sweep(area, path)
+        except ValueError as exc:
+            raise KernelError(str(exc), FailureSignature(
+                op="sweep", diagnostic="NotYetImplemented", kernel="ref"))
 
     def fillet(self, shape, edges, radius):
         from forgekernel.brep import Solid
