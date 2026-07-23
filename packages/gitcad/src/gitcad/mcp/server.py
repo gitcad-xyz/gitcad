@@ -56,6 +56,34 @@ def model_new() -> dict[str, Any]:
     return {"model": Document().dumps()}
 
 
+@tool("sheetmetal_author")
+def sheetmetal_author(spec: dict[str, Any]) -> dict[str, Any]:
+    """Sheet metal (SW-map P3) — the mech Gerber. ``spec`` declares the
+    part: {name, width, height, thickness, k_factor, bend_radius,
+    flanges: [{edge: n|e|s|w, length, angle, direction, radius, holes:
+    [{u, v, diameter}], children: [...same, edge: "end"]}], base_holes}.
+    Returns the canonical text, DFM validation (hole-to-bend, setback,
+    radius rules), the exact K-factor flat pattern, the shop DXF (layers
+    CUT/BEND_UP/BEND_DOWN/HOLES), the bend table, and the folded solid
+    as an ordinary model document (viewer/STEP/interference all apply;
+    sharp-corner bends — the flat pattern is the manufacturing truth)."""
+    import json as _json
+
+    from gitcad.sheetmetal import SheetMetal
+
+    sm = SheetMetal.loads(_json.dumps({"schema": SheetMetal.SCHEMA,
+                                       "sheetmetal": spec}))
+    report = sm.validate()
+    out: dict[str, Any] = {"sheetmetal": sm.dumps(), "ok": report.ok,
+                           "violations": report.violations}
+    if report.ok:
+        out["flat"] = sm.flat_pattern()
+        out["dxf"] = sm.flat_dxf()
+        out["bend_table"] = sm.bend_table()
+        out["model"] = sm.to_document().dumps()
+    return out
+
+
 @tool("model_parameters")
 def model_parameters(model: str, set: dict[str, Any] | None = None) -> dict[str, Any]:
     """Named parameters + equations (SW-map P1): read or update the model's

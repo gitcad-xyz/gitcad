@@ -92,14 +92,14 @@ suite (offset, knit, trim, thicken, fill, ruled surface) is ❌ deferred:
 OCCT supports all of it, demand should pull it in. Industrial-design
 surfacing is explicitly not the v1 fight.
 
-## 4. Sheet metal — ❌ the highest-value gap (P3)
+## 4. Sheet metal — ✅ shipped (P3)
 
 | SolidWorks | agent-first form | status |
 |---|---|---|
-| Base flange / edge flange / tab | bend-aware wall ops | ❌ P3 |
-| Bend allowance (K-factor/bend table) | material spec + K-factor data | ❌ P3 |
+| Base flange / edge flange / tab | ✅ declarative base + full-width flange chains (angle/radius/direction, holes per wall) | ✅ |
+| Bend allowance (K-factor/bend table) | ✅ BA=θ(R+K·t), OSSB=(R+t)tan(θ/2); machine-readable bend table | ✅ |
 | Hem / jog / closed corner | later stages | ❌ |
-| **Flat pattern** | unfold → **DXF the laser/brake shop consumes** | ❌ **P3** |
+| **Flat pattern** | ✅ analytic unfold, hand-calc-exact; DXF R12 layers CUT/BEND_UP/BEND_DOWN/HOLES | ✅ |
 | Forming tools | — | ❌ defer |
 
 Sheet metal is "the mech Gerber": the flat-pattern DXF + bend lines is a
@@ -182,8 +182,9 @@ What actually converts a SolidWorks user, in order of leverage:
    `Document.parameters` + build-time resolution + `model_parameters` MCP.
 2. ~~P2 Configurations / design tables~~ — SHIPPED: `Document.configurations`
    + per-variant build + `model_configurations` MCP.
-3. **P3 Sheet metal + flat pattern DXF** — the missing manufacturing
-   handoff; enclosures are the co-design centerpiece.
+3. ~~P3 Sheet metal + flat pattern DXF~~ — SHIPPED: `gitcad.sheetmetal`
+   (declarative flanges, exact K-factor unfold, shop DXF, DFM checks,
+   folded solid via the ordinary Document pipeline).
 4. **P4 Draft + rib + scale + split (+ draft/thickness analysis)** —
    the everyday plastic-part verbs.
 5. **P5 Helix + 3D curves** — unlocks modeled threads, springs, and
