@@ -117,6 +117,18 @@ torture cases, at K× the runtime" with the receipts in git history.
 OCCT's own baseline is measured, not assumed — improvement claims are
 always relative to a number in the repo.
 
+**The gauntlet (acid tests).** No public industry standard exists for
+B-rep robustness (vendors' real acid suites are proprietary), so the
+corpus carries our own, staged to the roadmap: K1 planar killers
+(Menger sponge level-1 — five chained booleans, coincident internal
+faces, exact answer 20/27·cube; coincident-face unions; float-precision
+slivers), K2 quadric killers (tangent cylinders, cone-apex-on-face,
+sphere-tangent-plane), K3 SSI killers (near-tangent surface pairs,
+ABC-dataset imports), K5 blend corners. Public resources adopted at
+their stages: NAS 979/ANC-101 (feature coverage), NIST MBE PMI CTC/FTC
+(STEP/PMI gates), CAx-IF round-robin files, ABC dataset slices (bulk
+robustness at K3).
+
 Fuzz lane: random CSG programs (bounded depth) with invariant checks
 (volume additivity, boolean algebra identities, watertightness) — runs
 nightly against whichever backends exist.

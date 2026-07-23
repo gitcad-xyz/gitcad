@@ -170,6 +170,26 @@ def torture_tangent_sphere_plane() -> Document:
     return d
 
 
+def torture_menger_1() -> Document:
+    """The K1 acid test: Menger sponge level 1 — a 27mm cube minus three
+    orthogonal 9mm square rods through the center. Five chained booleans
+    with coincident internal faces everywhere; exact volume is KNOWN:
+    20/27 of the cube = 14580 mm^3. A kernel that smears tolerances gets
+    this wrong; an exact kernel gets it to the last bit."""
+    d = Document()
+    cube = d.add(Feature(op="box", params={"dx": 27, "dy": 27, "dz": 27}))
+    rz = d.add(Feature(op="box", params={"dx": 9, "dy": 9, "dz": 27}))
+    rzm = d.add(Feature(op="move", params={"translate": [9, 9, 0]}, inputs=[rz]))
+    rx = d.add(Feature(op="box", params={"dx": 27, "dy": 9, "dz": 9}))
+    rxm = d.add(Feature(op="move", params={"translate": [0, 9, 9]}, inputs=[rx]))
+    ry = d.add(Feature(op="box", params={"dx": 9, "dy": 27, "dz": 9}))
+    rym = d.add(Feature(op="move", params={"translate": [9, 0, 9]}, inputs=[ry]))
+    u1 = d.add(Feature(op="boolean", params={"kind": "union"}, inputs=[rzm, rxm]))
+    u2 = d.add(Feature(op="boolean", params={"kind": "union"}, inputs=[u1, rym]))
+    d.add(Feature(op="boolean", params={"kind": "cut"}, inputs=[cube, u2]))
+    return d
+
+
 CORPUS: list[tuple[str, tuple[str, ...], Callable[[], Document]]] = [
     ("plate_with_holes", ("planar", "boolean", "hole"), plate_with_holes),
     ("quadric_boss", ("quadric", "boolean"), quadric_boss),
@@ -191,4 +211,5 @@ CORPUS: list[tuple[str, tuple[str, ...], Callable[[], Document]]] = [
      torture_sliver_cut),
     ("torture_tangent_sphere_plane", ("torture", "quadric", "boolean"),
      torture_tangent_sphere_plane),
+    ("torture_menger_1", ("torture", "planar", "boolean"), torture_menger_1),
 ]
