@@ -141,10 +141,17 @@ def thickness_analysis(kernel, shape, min_wall: float = 1.0) -> dict[str, Any]:
             # projected-bbox overlap onto the plane's two in-plane axes
             if not _proj_overlap(ni, pi, pj):
                 continue
-            t = abs(di + dj)                  # plane separation (nj = −ni)
-            if 0 < t < min_t:
+            # nj = −ni. In the nᵢ coordinate face i sits at di and face j at
+            # −dj; SOLID lies between them only when di + dj > 0 (that IS the
+            # wall thickness). di + dj < 0 is an EMPTY slot/pocket — not a
+            # wall — so the sign must NOT be discarded with abs() (that
+            # flagged open slots as thin material, a false DFM failure).
+            t = di + dj
+            if t <= 1e-12:
+                continue
+            if t < min_t:
                 min_t = t
-            if 0 < t < min_wall:
+            if t < min_wall:
                 thin.append({"faces": [i, j], "thickness": round(t, 6)})
     return {"min_wall_target": min_wall,
             "min_thickness": None if min_t == float("inf") else round(min_t, 6),

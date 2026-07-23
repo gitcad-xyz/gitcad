@@ -54,6 +54,7 @@ class Flange:
     direction: str = "up"
     holes: list[SmHole] = field(default_factory=list)
     children: list["Flange"] = field(default_factory=list)
+    hem: bool = False              # 180° fold-back (closed/open hem)
 
 
 @dataclass
@@ -128,6 +129,18 @@ class SheetMetal:
                 violations.append(f"flange-duplicate-edge:{f.edge}")
             else:
                 seen_edges.add(f.edge)
+            if f.hem:
+                # a hem is a 180° fold-back; OSSB diverges at 180° so the
+                # general leg check doesn't apply — just need a real return.
+                if f.length <= 0:
+                    violations.append(f"hem-return-nonpositive:{label}")
+                if self._r(f) < self.thickness:
+                    violations.append(f"bend-radius-below-thickness:{label}")
+                if f.direction not in ("up", "down"):
+                    violations.append(f"flange-bad-direction:{label}")
+                for c in f.children:
+                    walk(c, label, chained=True)
+                return
             if not (0 < f.angle < 180):
                 violations.append(f"bend-angle-out-of-range:{label}:{f.angle}")
                 return
@@ -180,6 +193,23 @@ class SheetMetal:
             spans [apex-OSSB, apex-OSSB+BA], so every leg between two bends
             loses OSSB at BOTH ends (classic L1-OSSB+BA+L2-OSSB layout).
             Returns the chain's total flat extent."""
+            if f.hem:
+                # 180° fold-back: BA = π(R + K·t); no OSSB setback. The bend
+                # strip lays [apex, apex+BA], the return leg extends past it.
+                ba = math.pi * (self._r(f) + self.k_factor * self.thickness)
+                start = apex
+                strip_end = start + ba
+                bends.append({"edge": edge, "at": start + ba / 2, "angle": 180.0,
+                              "radius": self._r(f), "direction": f.direction,
+                              "width_span": ba, "hem": True})
+                for h in f.holes:
+                    holes.append(_edge_xy(edge, self.width, self.height,
+                                          h.u, strip_end + h.v) + (h.diameter,))
+                next_apex = strip_end + f.length
+                extent = next_apex
+                for c in f.children:
+                    extent = max(extent, unfold(c, edge, next_apex))
+                return extent
             ossb, ba = self._ossb(f), self._ba(f)
             start = apex - ossb
             strip_end = start + ba

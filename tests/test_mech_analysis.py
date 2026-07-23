@@ -58,3 +58,18 @@ def test_thickness_analysis_min_wall() -> None:
     assert ta["min_thickness"] == 5.0
     assert not ta["ok"] and len(ta["thin_regions"]) == 1
     assert thickness_analysis(k, k.box(20, 5, 30), min_wall=4.0)["ok"]
+
+
+def test_thickness_analysis_ignores_empty_slots() -> None:
+    # REGRESSION (review finding): a U-channel's open slot is empty space,
+    # NOT thin material — the sign of di+dj distinguishes wall from pocket.
+    from gitcad.analysis import thickness_analysis
+
+    k = RefKernel()
+    base = k.box(5, 2, 3)
+    left = k.transform(k.box(2, 4, 3), translate=(0, 2, 0))
+    right = k.transform(k.box(2.5, 4, 3), translate=(2.5, 2, 0))
+    u = k.boolean("union", k.boolean("union", base, left), right)
+    ta = thickness_analysis(k, u, min_wall=1.0)
+    assert ta["min_thickness"] == 2.0        # the real walls, not the 0.5 slot
+    assert ta["ok"]
