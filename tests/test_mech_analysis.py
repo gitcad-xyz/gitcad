@@ -47,3 +47,14 @@ def test_draft_analysis_passes_a_drafted_block() -> None:
     drafted = k.draft(k.box(30, 30, 15), [], 3.0, pull=(0, 0, 1), neutral_z=0.0)
     assert draft_analysis(k, drafted, min_angle_deg=1.0)["ok"]      # 3° > 1°
     assert not draft_analysis(k, drafted, min_angle_deg=5.0)["ok"]  # 3° < 5°
+
+
+def test_thickness_analysis_min_wall() -> None:
+    from gitcad.analysis import thickness_analysis
+
+    k = RefKernel()
+    # a 20×5×30 slab: the thin dimension is 5
+    ta = thickness_analysis(k, k.box(20, 5, 30), min_wall=6.0)
+    assert ta["min_thickness"] == 5.0
+    assert not ta["ok"] and len(ta["thin_regions"]) == 1
+    assert thickness_analysis(k, k.box(20, 5, 30), min_wall=4.0)["ok"]

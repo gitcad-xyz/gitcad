@@ -104,3 +104,69 @@ def draft_analysis(kernel, shape, pull=(0, 0, 1),
 def _unit(v):
     m = math.sqrt(sum(float(c) ** 2 for c in v)) or 1.0
     return tuple(float(c) / m for c in v)
+
+
+def thickness_analysis(kernel, shape, min_wall: float = 1.0) -> dict[str, Any]:
+    """Min-wall (moldability/printability) estimate for a planar forge
+    solid: the smallest separation between an anti-parallel pair of faces
+    whose projections overlap. Exact for prismatic parts (a box reports
+    min(dx,dy,dz)); a first-order estimate elsewhere (not a full medial
+    axis). Raises for non-forge shapes."""
+    try:
+        from forgekernel.brep import Solid as _Solid
+    except ImportError:                      # pragma: no cover
+        _Solid = ()
+    if not isinstance(shape, _Solid):
+        raise NotImplementedError(
+            "thickness_analysis: planar forge solids only")
+    # group polygons by (unit normal, plane offset)
+    faces = []
+    for poly in shape.polys:
+        n = _unit(poly.plane.n)
+        # a point on the plane → signed offset d = n·p
+        v0 = poly.verts[0]
+        d = sum(n[c] * float(v0[c]) for c in range(3))
+        pts = [tuple(float(x) for x in v) for v in poly.verts]
+        faces.append((n, d, pts))
+    thin = []
+    min_t = float("inf")
+    for i in range(len(faces)):
+        ni, di, pi = faces[i]
+        for j in range(i + 1, len(faces)):
+            nj, dj, pj = faces[j]
+            # anti-parallel?
+            if abs(ni[0] + nj[0]) > 1e-9 or abs(ni[1] + nj[1]) > 1e-9 \
+                    or abs(ni[2] + nj[2]) > 1e-9:
+                continue
+            # projected-bbox overlap onto the plane's two in-plane axes
+            if not _proj_overlap(ni, pi, pj):
+                continue
+            t = abs(di + dj)                  # plane separation (nj = −ni)
+            if 0 < t < min_t:
+                min_t = t
+            if 0 < t < min_wall:
+                thin.append({"faces": [i, j], "thickness": round(t, 6)})
+    return {"min_wall_target": min_wall,
+            "min_thickness": None if min_t == float("inf") else round(min_t, 6),
+            "thin_regions": thin, "ok": min_t >= min_wall}
+
+
+def _proj_overlap(n, pa, pb) -> bool:
+    """Do two planar point-sets overlap when projected onto the plane ⟂ n?"""
+    # two in-plane basis vectors
+    ref = (1.0, 0.0, 0.0) if abs(n[0]) < 0.9 else (0.0, 1.0, 0.0)
+    dot = sum(ref[c] * n[c] for c in range(3))
+    u = tuple(ref[c] - dot * n[c] for c in range(3))
+    um = math.sqrt(sum(c * c for c in u)) or 1.0
+    u = tuple(c / um for c in u)
+    w = (n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2],
+         n[0] * u[1] - n[1] * u[0])
+
+    def box(pts):
+        us = [sum(p[c] * u[c] for c in range(3)) for p in pts]
+        ws = [sum(p[c] * w[c] for c in range(3)) for p in pts]
+        return min(us), max(us), min(ws), max(ws)
+
+    au0, au1, aw0, aw1 = box(pa)
+    bu0, bu1, bw0, bw1 = box(pb)
+    return au0 <= bu1 and bu0 <= au1 and aw0 <= bw1 and bw0 <= aw1
