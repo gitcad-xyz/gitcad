@@ -4,6 +4,8 @@ Regenerated from bench/*.json — every improvement claim has a snapshot behind it
 
 | snapshot | backend | capability % | torture ok | models ok | total s |
 |---|---|---|---|---|---|
+| 2026-07-23-auto | auto | 100.0 | 5/5 | 20/20 | 0.24 |
+| 2026-07-23-auto | occt | 90.0 | 5/5 | 18/20 | 0.18 |
 | 2026-07-23-calib | occt | 93.8 | 4/4 | 15/16 | 0.12 |
 | 2026-07-23-k1.1 | occt | 94.1 | 5/5 | 16/17 | 0.15 |
 | 2026-07-23-k1.1 | ref | 35.3 | 3/5 | 6/17 | 0.17 |

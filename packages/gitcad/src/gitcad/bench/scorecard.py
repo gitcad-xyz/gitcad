@@ -33,7 +33,10 @@ def _get_kernel(name: str):
     if name == "forge":
         from gitcad.kernel.rustref import RustKernel
         return RustKernel()
-    raise ValueError(f"unknown backend {name!r} (occt|null|ref|forge)")
+    if name == "auto":
+        from gitcad.kernel.auto import AutoKernel
+        return AutoKernel()
+    raise ValueError(f"unknown backend {name!r} (occt|null|ref|forge|auto)")
 
 
 def run_backend(backend: str) -> dict[str, Any]:
