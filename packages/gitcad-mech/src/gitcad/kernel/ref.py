@@ -290,7 +290,16 @@ class RefKernel:
                 op="chamfer", diagnostic="NotYetImplemented", kernel="ref"))
 
     def shell(self, shape, remove_faces, thickness):
-        _nope("shell", "arrives at K4 (offsets)")
+        from forgekernel.brep import Solid
+        from forgekernel.kernel import shell as fk_shell
+
+        if remove_faces or not isinstance(shape, Solid):
+            _nope("shell(open faces or non-box)", "K4 (offsets)")
+        try:
+            return fk_shell(shape, thickness)
+        except ValueError as exc:
+            raise KernelError(str(exc), FailureSignature(
+                op="shell", diagnostic="NotYetImplemented", kernel="ref"))
 
     def draft(self, shape, faces, angle_deg, pull=(0, 0, 1), neutral_z=0.0):
         from forgekernel.brep import Solid

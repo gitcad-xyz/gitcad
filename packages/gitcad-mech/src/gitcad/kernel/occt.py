@@ -199,8 +199,21 @@ class OcctKernel:
     def shell(self, shape: Shape, remove_faces: list[int], thickness: float) -> Shape:
         """Hollow to a wall thickness, removing the listed faces (by face
         enumeration index) to leave openings."""
-        faces = TopTools_ListOfShape()
         all_faces = _unique_shapes(shape, TopAbs_FACE)
+        if not remove_faces:
+            # convention (shared with ref): no removed faces = a fully closed
+            # hollow shell (walls all around) = outer minus the inward offset.
+            inner = BRepOffsetAPI_MakeThickSolid()
+            inner.MakeThickSolidByJoin(shape, TopTools_ListOfShape(),
+                                       -abs(thickness), 1e-3, BRepOffset_Skin,
+                                       False, False, GeomAbs_Arc)
+            if not inner.IsDone():
+                raise KernelError(
+                    f"shell t={thickness} inner offset failed",
+                    FailureSignature(op="shell", diagnostic="MakeThickSolid:NotDone",
+                                     kernel=self.name))
+            return self.boolean("cut", shape, inner.Shape())
+        faces = TopTools_ListOfShape()
         for idx in remove_faces:
             if idx >= len(all_faces):
                 raise KernelError(
