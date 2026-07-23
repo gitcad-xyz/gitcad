@@ -323,14 +323,19 @@ class RefKernel:
         return RevolveSolid(loop)
 
     def loft(self, sections, *, ruled=False):
-        # two same-count line-profile sections -> exact prismatoid; smooth
-        # multi-section lofts need the curve engine (K3)
+        # K3.6: RULED multi-section lofts graduate — a ruled loft through
+        # N line-profile sections is exactly the stack of pairwise
+        # prismatoids (each adjacent pair rules linearly), fused with the
+        # exact boolean engine. SMOOTH (spline-fit) multi-section lofts
+        # remain K3.7 — OCCT fits a B-spline through the sections there,
+        # which is different geometry, not a stack.
         from forgekernel.brep import prismatoid
 
-        if len(sections) != 2:
-            _nope("loft(>2 sections)", "K3 (curve lofting)")
-        (pa, za), (pb, zb) = sections
-        for prof in (pa, pb):
+        if len(sections) > 2 and not ruled:
+            _nope("loft(>2 sections, smooth spline fit)", "K3.7")
+        if len(sections) < 2:
+            _nope("loft(<2 sections)", "K3")
+        for prof, _ in sections:
             if any(s.get("kind") != "line" for s in prof.get("segments", [])):
                 _nope("loft(arc profile)", "K3")
 
@@ -338,11 +343,17 @@ class RefKernel:
             pts = [tuple(prof["start"])] + [tuple(s["to"]) for s in prof["segments"]]
             return pts[:-1] if pts[0] == pts[-1] else pts
 
-        la, lb = loop(pa), loop(pb)
-        if len(la) != len(lb):
-            _nope("loft(unequal section vertex counts)", "K3")
+        loops = [(loop(p), z) for p, z in sections]
+        counts = {len(lp) for lp, _ in loops}
+        if len(counts) != 1:
+            _nope("loft(unequal section vertex counts)", "K3.7")
         try:
-            return prismatoid(la, za, lb, zb)
+            out = None
+            for (la, za), (lb, zb) in zip(loops, loops[1:]):
+                piece = prismatoid(la, za, lb, zb)
+                out = piece if out is None else self._fk.boolean(
+                    "union", out, piece)
+            return out
         except ValueError as exc:
             raise KernelError(str(exc), FailureSignature(
                 op="loft", diagnostic="NotYetImplemented", kernel="ref"))
@@ -470,7 +481,20 @@ class RefKernel:
             f.write(io.dumps(shape))
 
     def import_step(self, path):
-        _nope("import_step", _K3)
+        # K3.6: planar-faced STEP solids import as EXACT Solids — STEP
+        # reals are decimal text, decimal→Fraction is lossless, and face
+        # loops orient by exact Newell-vs-plane-normal comparison.
+        # Freeform faces / holes refuse with their stage (K3.7).
+        from forgekernel.stepio import read_step_planar_solid
+
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+        try:
+            return read_step_planar_solid(text)
+        except ValueError as exc:
+            raise KernelError(str(exc), FailureSignature(
+                op="import_step", diagnostic="NotYetImplemented",
+                kernel="ref"))
 
     def import_brep(self, path):
         from forgekernel import io

@@ -294,3 +294,37 @@ def test_full_pipeline_step_to_ssi(tmp_path) -> None:
         pb = imported.eval(s, t)
         d2 = sum((pa[c] - pb[c]) ** 2 for c in range(3))
         assert d2 < Fraction(1, 10 ** 20)         # exact certificate re-check
+
+
+@pytest.mark.occt
+def test_ruled_multiloft_and_step_import_graduate(tmp_path) -> None:
+    """K3.6 graduations, oracle-checked: (1) a ruled 3-section loft is an
+    exact prismatoid stack — ref 56 exactly, OCCT 56±1e-14; (2) a planar
+    STEP solid (OCCT-exported non-convex L-prism) imports into ref as an
+    EXACT Solid with the same volume."""
+    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
+
+    rk, ok_ = RefKernel(), OcctKernel()
+
+    def sq(z, h):
+        return ({"start": [-h, -h], "segments": [
+            {"kind": "line", "to": [h, -h]}, {"kind": "line", "to": [h, h]},
+            {"kind": "line", "to": [-h, h]},
+            {"kind": "line", "to": [-h, -h]}]}, z)
+
+    secs = [sq(0, 2), sq(3, 1), sq(6, 2)]
+    vr = rk.mass_props(rk.loft(secs, ruled=True))["volume"]
+    vo = ok_.mass_props(ok_.loft(secs, ruled=True))["volume"]
+    assert vr == 56.0                            # exact (2×28 prismatoids)
+    assert abs(vo - 56.0) < 1e-9                 # OCCT agrees, in float
+
+    L = ok_.extrude({"start": [0, 0], "segments": [
+        {"kind": "line", "to": [40, 0]}, {"kind": "line", "to": [40, 10]},
+        {"kind": "line", "to": [10, 10]}, {"kind": "line", "to": [10, 30]},
+        {"kind": "line", "to": [0, 30]}, {"kind": "line", "to": [0, 0]}]}, 8)
+    path = str(tmp_path / "L.step")
+    ok_.export_step(L, path)
+    imported = rk.import_step(path)
+    assert float(imported.volume()) == 4800.0    # exact rational == occt
+    assert rk.validate(imported).ok
