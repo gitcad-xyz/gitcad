@@ -107,7 +107,7 @@ surfacing is explicitly not the v1 fight.
 |---|---|---|
 | Base flange / edge flange / tab | ✅ declarative base + full-width flange chains (angle/radius/direction, holes per wall) | ✅ |
 | Bend allowance (K-factor/bend table) | ✅ BA=θ(R+K·t), OSSB=(R+t)tan(θ/2); machine-readable bend table | ✅ |
-| Hem / jog / closed corner | later stages | ❌ |
+| Hem / jog / closed corner | hem (180° fold) + jog (Z-offset) helpers, flat-pattern+bend-table; closed corner later | 🟡 |
 | **Flat pattern** | ✅ analytic unfold, hand-calc-exact; DXF R12 layers CUT/BEND_UP/BEND_DOWN/HOLES | ✅ |
 | Forming tools | — | ❌ defer |
 

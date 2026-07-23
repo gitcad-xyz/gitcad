@@ -88,7 +88,8 @@ class SheetMetal:
                           angle=f.get("angle", 90.0), radius=f.get("radius"),
                           direction=f.get("direction", "up"),
                           holes=[SmHole(**h) for h in f.get("holes", [])],
-                          children=[fl(c) for c in f.get("children", [])])
+                          children=[fl(c) for c in f.get("children", [])],
+                          hem=f.get("hem", False))
 
         return cls(name=d["name"], width=d["width"], height=d["height"],
                    thickness=d.get("thickness", 1.5),
@@ -274,6 +275,36 @@ class SheetMetal:
         return [{"seq": i + 1, "edge": b["edge"], "angle": b["angle"],
                  "radius": b["radius"], "direction": b["direction"]}
                 for i, b in enumerate(fp["bends"])]
+
+    # -- hem / jog convenience constructors ------------------------------------
+
+    def hem(self, edge: str, length: float, *, radius: float | None = None,
+            direction: str = "up") -> "SheetMetal":
+        """A 180° fold-back on ``edge`` (closed hem). ``length`` is the flat
+        return; ``radius`` (default part radius) sets closed vs open —
+        r≈thickness is a closed hem, larger leaves a gap. Flat-pattern
+        allowance BA = π(R + K·t)."""
+        self.flanges.append(Flange(edge=edge, length=length, angle=180.0,
+                                   radius=radius, direction=direction,
+                                   hem=True))
+        return self
+
+    def jog(self, edge: str, offset: float, run: float, *,
+            angle: float = 90.0, radius: float | None = None,
+            direction: str = "up") -> "SheetMetal":
+        """A jog (Z-offset) on ``edge``: bend up by ``angle``, step the wall
+        out by ``offset`` (measured ⟂ to the base), bend back, then continue
+        ``run``. Built as the two-bend flange chain the unfolder already
+        handles; the riser length is offset/sin(angle)."""
+        theta = math.radians(angle)
+        riser = offset / math.sin(theta) if math.sin(theta) else offset
+        opp = "down" if direction == "up" else "up"
+        self.flanges.append(Flange(
+            edge=edge, length=riser, angle=angle, radius=radius,
+            direction=direction,
+            children=[Flange(edge="end", length=run, angle=angle,
+                             radius=radius, direction=opp)]))
+        return self
 
     # -- 3D solid (via the ordinary Document pipeline) -------------------------
 
