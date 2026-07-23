@@ -16,3 +16,5 @@ Regenerated from bench/*.json — every improvement claim has a snapshot behind it
 | 2026-07-23 | occt | 93.8 | 4/4 | 15/16 | 0.19 |
 | 2026-07-23-ref-k1 | occt | 93.8 | 4/4 | 15/16 | 0.13 |
 | 2026-07-23-ref-k1 | ref | 25.0 | 2/4 | 4/16 | 0.03 |
+| 2026-07-23-wa | occt | 94.1 | 5/5 | 16/17 | 0.16 |
+| 2026-07-23-wa | ref | 64.7 | 5/5 | 11/17 | 0.16 |

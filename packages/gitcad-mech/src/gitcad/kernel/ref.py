@@ -105,13 +105,25 @@ class RefKernel:
         from forgekernel.quadric import (AxisStack, Cone, Cyl, DrilledSolid,
                                          Sphere)
 
+        from forgekernel.quadric import DisjointUnion
+
         axis_prims = (Cyl, Cone, Sphere)
-        if op == "union" and isinstance(b, axis_prims):
+        curved = (Cyl, Cone, Sphere, AxisStack, DisjointUnion)
+        if op == "union" and (isinstance(a, curved) or isinstance(b, curved)):
+            # planar Solid+Solid never reaches here — it stays on the exact
+            # BSP engine below. Curved operands: coaxial quadrics fuse into
+            # an AxisStack; anything meeting only tangentially unions exactly
+            # by measure-zero (DisjointUnion). Genuine overlap refuses (K2.3).
+            if isinstance(b, axis_prims) and isinstance(a, (axis_prims, AxisStack)):
+                try:
+                    stack = a if isinstance(a, AxisStack) else AxisStack(a.cx, a.cy, [a])
+                    return stack.fuse(b)
+                except ValueError:
+                    pass                       # non-coaxial: try DisjointUnion
             try:
-                if isinstance(a, axis_prims):
-                    return AxisStack(a.cx, a.cy, [a]).fuse(b)
-                if isinstance(a, AxisStack):
-                    return a.fuse(b)
+                members = a.members if isinstance(a, DisjointUnion) else [a]
+                other = b.members if isinstance(b, DisjointUnion) else [b]
+                return DisjointUnion(members + other)
             except ValueError as exc:
                 raise KernelError(str(exc), FailureSignature(
                     op="boolean.union", diagnostic="NotYetImplemented",
@@ -146,11 +158,12 @@ class RefKernel:
     def mass_props(self, shape) -> dict[str, float]:
         from forgekernel.quadric import Cyl, DrilledSolid
 
-        from forgekernel.quadric import AxisStack, Cone, RevolveSolid, Sphere
+        from forgekernel.quadric import (AxisStack, Cone, DisjointUnion,
+                                         RevolveSolid, Sphere)
 
         if isinstance(shape, (Cone, Sphere)):
             shape = AxisStack(shape.cx, shape.cy, [shape])
-        if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid)):
+        if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion)):
             cx, cy, cz = shape.centroid_f()
             return {"volume": float(shape.volume()),
                     "cx": cx, "cy": cy, "cz": cz}
@@ -172,6 +185,10 @@ class RefKernel:
         lo, hi = shape.bbox()
         return (tuple(float(v) for v in lo), tuple(float(v) for v in hi))
 
+    def _bbox_unused(self, shape):
+        lo, hi = shape.bbox()
+        return (tuple(float(v) for v in lo), tuple(float(v) for v in hi))
+
     def _is_composite(self, shape) -> bool:
         from forgekernel.quadric import Cyl, DrilledSolid
 
@@ -180,13 +197,17 @@ class RefKernel:
     def entities(self, shape, kind: str) -> list[dict[str, Any]]:
         from forgekernel.quadric import Cyl, DrilledSolid
 
-        from forgekernel.quadric import AxisStack, Cone, RevolveSolid, Sphere
+        from forgekernel.quadric import (AxisStack, Cone, DisjointUnion,
+                                         RevolveSolid, Sphere)
 
         if kind != "face":
             raise NotImplementedError("ref enumerates faces only")
+        if isinstance(shape, DisjointUnion):
+            out = []
+            for m in shape.members:
+                out += self.entities(m, "face")
+            return out
         if isinstance(shape, (Cone, Sphere, AxisStack, RevolveSolid)):
-            # analytic composites: one descriptor per primitive (per-patch
-            # enumeration arrives at K2.2)
             prims = getattr(shape, "prims", [shape])
             return [{"surface": type(p).__name__.lower()} for p in prims]
         if isinstance(shape, Cyl):
@@ -209,9 +230,10 @@ class RefKernel:
     def validate(self, shape) -> ValidationReport:
         from forgekernel.quadric import Cyl, DrilledSolid
 
-        from forgekernel.quadric import AxisStack, Cone, RevolveSolid, Sphere
+        from forgekernel.quadric import (AxisStack, Cone, DisjointUnion,
+                                         RevolveSolid, Sphere)
 
-        if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid)):
+        if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion)):
             return ValidationReport(ok=True, checks={"method": "analytic"},
                                     violations=[])
         if isinstance(shape, DrilledSolid):
