@@ -174,6 +174,10 @@ class RefKernel:
         from forgekernel.quadric import (AxisStack, Cone, DisjointUnion,
                                          MiteredSweep, RevolveSolid, RoundedBox, Sphere, SphereOverlap)
 
+        from forgekernel.loft import LoftSolid
+        if isinstance(shape, LoftSolid):
+            cx, cy, cz = shape.centroid_f()
+            return {"volume": float(shape.volume()), "cx": cx, "cy": cy, "cz": cz}
         if isinstance(shape, TubeSolid):
             # certified provenance (ADR-0019): volume is an interval; report
             # the midpoint plus the proven half-width bracketing the truth.
@@ -203,7 +207,8 @@ class RefKernel:
         from forgekernel.curve import TubeSolid
 
         from forgekernel.quadric import RoundedBox
-        if isinstance(shape, TubeSolid):
+        from forgekernel.loft import LoftSolid
+        if isinstance(shape, (TubeSolid, LoftSolid)):
             return shape.bbox_f()
         if isinstance(shape, (Cone, Sphere)):
             shape = AxisStack(shape.cx, shape.cy, [shape])
@@ -237,6 +242,10 @@ class RefKernel:
             raise NotImplementedError("ref enumerates faces and edges only")
         from forgekernel.quadric import MiteredSweep, RoundedBox, SphereOverlap
         from forgekernel.curve import TubeSolid
+        from forgekernel.loft import LoftSolid
+        if isinstance(shape, LoftSolid):
+            return [{"surface": "spline-loft"}, {"surface": "plane"},
+                    {"surface": "plane"}]
         if isinstance(shape, TubeSolid):
             # swept lateral surface + two round end caps
             return [{"surface": "swept-tube"}, {"surface": "plane"},
@@ -279,6 +288,11 @@ class RefKernel:
                                          MiteredSweep, RevolveSolid, RoundedBox, Sphere, SphereOverlap)
         from forgekernel.curve import TubeSolid
 
+        from forgekernel.loft import LoftSolid
+        if isinstance(shape, LoftSolid):
+            return ValidationReport(ok=shape.volume() > 0,
+                                    checks={"method": "exact-loft-spline"},
+                                    violations=[])
         if isinstance(shape, TubeSolid):
             # watertight by construction (closed section, non-self-overlapping
             # sweep — both preconditions checked at build); volume certified >0
@@ -341,8 +355,6 @@ class RefKernel:
         # which is different geometry, not a stack.
         from forgekernel.brep import prismatoid
 
-        if len(sections) > 2 and not ruled:
-            _nope("loft(>2 sections, smooth spline fit)", "K3.7")
         if len(sections) < 2:
             _nope("loft(<2 sections)", "K3")
         for prof, _ in sections:
@@ -352,6 +364,19 @@ class RefKernel:
         def loop(prof):
             pts = [tuple(prof["start"])] + [tuple(s["to"]) for s in prof["segments"]]
             return pts[:-1] if pts[0] == pts[-1] else pts
+
+        if len(sections) > 2 and not ruled:
+            # K3.7: SMOOTH multi-section loft — natural cubic spline through
+            # the sections (forge's documented smoothing choice), volume
+            # EXACT rational via ∫A(v)z'(v)dv. Distinct geometry from a
+            # ruled stack and from OCCT's own B-spline fit.
+            from forgekernel.loft import LoftSolid
+
+            try:
+                return LoftSolid([(loop(p), z) for p, z in sections])
+            except ValueError as exc:
+                raise KernelError(str(exc), FailureSignature(
+                    op="loft", diagnostic="NotYetImplemented", kernel="ref"))
 
         loops = [(loop(p), z) for p, z in sections]
         counts = {len(lp) for lp, _ in loops}

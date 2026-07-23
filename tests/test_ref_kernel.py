@@ -46,14 +46,13 @@ def test_ref_refuses_unearned_ops_with_stage() -> None:
     k = RefKernel()
     with pytest.raises(KernelError, match="K3"):
         k.loft([], ruled=False)          # cylinder K2.0, sphere/cone K2.1
-    # helix/pipe GRADUATED at K3.0; planar import_step at K3.6; ruled
-    # multi-loft at K3.6. SMOOTH (spline-fit) multi-section lofts hold
-    # the K3.7 line.
-    sq = {"start": [0, 0], "segments": [
-        {"kind": "line", "to": [1, 0]}, {"kind": "line", "to": [1, 1]},
-        {"kind": "line", "to": [0, 1]}, {"kind": "line", "to": [0, 0]}]}
-    with pytest.raises(KernelError, match="K3.7"):
-        k.loft([(sq, 0), (sq, 1), (sq, 2)], ruled=False)
+    # helix/pipe GRADUATED at K3.0; planar import_step + ruled multi-loft
+    # at K3.6; SMOOTH natural-cubic multi-loft at K3.7. An arc-profile
+    # loft section still needs the curve engine (K3).
+    arc_sec = {"start": [0, 0], "segments": [
+        {"kind": "arc", "to": [1, 1], "via": [1, 0]}]}
+    with pytest.raises(KernelError, match="K3"):
+        k.loft([(arc_sec, 0), (arc_sec, 1)], ruled=False)
 
 
 def test_ref_drills_holes_exactly() -> None:
