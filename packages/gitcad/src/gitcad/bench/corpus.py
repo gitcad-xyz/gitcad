@@ -170,6 +170,19 @@ def torture_tangent_sphere_plane() -> Document:
     return d
 
 
+def quadric_sphere_overlap() -> Document:
+    """Two GENUINELY OVERLAPPING spheres unioned — a non-coaxial quadric
+    boolean OCCT builds and ref does EXACTLY in ℚ[π] (cap/lens): r=5
+    spheres 6 apart -> union = 896/3 π. The K2.2 exact case (parallel-
+    cylinder overlap stays transcendental / refused)."""
+    d = Document()
+    a = d.add(Feature(op="sphere", params={"radius": 5}))
+    b = d.add(Feature(op="sphere", params={"radius": 5}))
+    bm = d.add(Feature(op="move", params={"translate": [6, 0, 0]}, inputs=[b]))
+    d.add(Feature(op="boolean", params={"kind": "union"}, inputs=[a, bm]))
+    return d
+
+
 def sweep_rightangle() -> Document:
     """A square profile swept along a 90-degree-cornered axis-aligned path
     — all segment lengths RATIONAL, so ref builds it in plain Q (no surd
@@ -227,4 +240,5 @@ CORPUS: list[tuple[str, tuple[str, ...], Callable[[], Document]]] = [
      torture_tangent_sphere_plane),
     ("torture_menger_1", ("torture", "planar", "boolean"), torture_menger_1),
     ("sweep_rightangle", ("sweep",), sweep_rightangle),
+    ("quadric_sphere_overlap", ("quadric", "boolean"), quadric_sphere_overlap),
 ]

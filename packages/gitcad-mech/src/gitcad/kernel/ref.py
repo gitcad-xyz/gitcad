@@ -105,8 +105,14 @@ class RefKernel:
         from forgekernel.quadric import (AxisStack, Cone, Cyl, DrilledSolid,
                                          Sphere)
 
-        from forgekernel.quadric import DisjointUnion
+        from forgekernel.quadric import DisjointUnion, SphereOverlap
 
+        # two overlapping spheres: exact ℚ[π] cap/lens booleans (K2.2)
+        if isinstance(a, Sphere) and isinstance(b, Sphere) and op in ("union", "cut", "intersect"):
+            try:
+                return SphereOverlap(a, b, op)
+            except ValueError:
+                pass  # not overlapping / nested / irrational → fall through
         axis_prims = (Cyl, Cone, Sphere)
         curved = (Cyl, Cone, Sphere, AxisStack, DisjointUnion)
         if op == "union" and (isinstance(a, curved) or isinstance(b, curved)):
@@ -159,11 +165,11 @@ class RefKernel:
         from forgekernel.quadric import Cyl, DrilledSolid
 
         from forgekernel.quadric import (AxisStack, Cone, DisjointUnion,
-                                         MiteredSweep, RevolveSolid, RoundedBox, Sphere)
+                                         MiteredSweep, RevolveSolid, RoundedBox, Sphere, SphereOverlap)
 
         if isinstance(shape, (Cone, Sphere)):
             shape = AxisStack(shape.cx, shape.cy, [shape])
-        if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep)):
+        if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap)):
             cx, cy, cz = shape.centroid_f()
             return {"volume": float(shape.volume()),
                     "cx": cx, "cy": cy, "cz": cz}
@@ -203,7 +209,9 @@ class RefKernel:
 
         if kind != "face":
             raise NotImplementedError("ref enumerates faces only")
-        from forgekernel.quadric import MiteredSweep, RoundedBox
+        from forgekernel.quadric import MiteredSweep, RoundedBox, SphereOverlap
+        if isinstance(shape, SphereOverlap):
+            return [{"surface": "sphere-lens"}]
         if isinstance(shape, RoundedBox):
             return [{"surface": "rounded-box"}]
         if isinstance(shape, MiteredSweep):
@@ -237,9 +245,9 @@ class RefKernel:
         from forgekernel.quadric import Cyl, DrilledSolid
 
         from forgekernel.quadric import (AxisStack, Cone, DisjointUnion,
-                                         MiteredSweep, RevolveSolid, RoundedBox, Sphere)
+                                         MiteredSweep, RevolveSolid, RoundedBox, Sphere, SphereOverlap)
 
-        if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep)):
+        if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap)):
             return ValidationReport(ok=True, checks={"method": "analytic"},
                                     violations=[])
         if isinstance(shape, DrilledSolid):
