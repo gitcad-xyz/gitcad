@@ -183,7 +183,8 @@ class RefKernel:
                     "volume_halfwidth": float(v.width) / 2}
         if isinstance(shape, (Cone, Sphere)):
             shape = AxisStack(shape.cx, shape.cy, [shape])
-        if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap)):
+        from forgekernel.quadric import FilletedBox
+        if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, FilletedBox)):
             cx, cy, cz = shape.centroid_f()
             return {"volume": float(shape.volume()),
                     "cx": cx, "cy": cy, "cz": cz}
@@ -224,8 +225,16 @@ class RefKernel:
         from forgekernel.quadric import (AxisStack, Cone, DisjointUnion,
                                          RevolveSolid, Sphere)
 
+        from forgekernel.brep import Solid as _Solid
+        if kind == "edge" and isinstance(shape, _Solid):
+            # K5.0: deterministic straight-edge enumeration for planar
+            # solids (fillet/chamfer selection targets)
+            return [{"curve": "line",
+                     "dir": [float(v) for v in e["dir"]],
+                     "point": [float(v) for v in e["point"]]}
+                    for e in self._sorted_edges(shape)]
         if kind != "face":
-            raise NotImplementedError("ref enumerates faces only")
+            raise NotImplementedError("ref enumerates faces and edges only")
         from forgekernel.quadric import MiteredSweep, RoundedBox, SphereOverlap
         from forgekernel.curve import TubeSolid
         if isinstance(shape, TubeSolid):
@@ -278,7 +287,8 @@ class RefKernel:
                 checks={"method": "certified-tube",
                         "provenance": shape.provenance},
                 violations=[])
-        if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap)):
+        from forgekernel.quadric import FilletedBox as _FB
+        if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, _FB)):
             return ValidationReport(ok=True, checks={"method": "analytic"},
                                     violations=[])
         if isinstance(shape, DrilledSolid):
@@ -383,22 +393,72 @@ class RefKernel:
             raise KernelError(str(exc), FailureSignature(
                 op="sweep", diagnostic="NotYetImplemented", kernel="ref"))
 
-    def fillet(self, shape, edges, radius):
-        from forgekernel.brep import Solid
-        from forgekernel.kernel import fillet_box
-
-        if edges or not isinstance(shape, Solid):
-            _nope("fillet(selected edges or non-box)", "K5 (general blends)")
+    def _box_check(self, shape):
         lo, hi = shape.bbox()
-        # box-only fillet: all edges rounded (the rounded-box Steiner form)
         corners = {(lo[0], lo[1]), (hi[0], lo[1]), (hi[0], hi[1]), (lo[0], hi[1])}
         for pp in shape.polys:
             for vx, vy, vz in pp.verts:
                 if (vx, vy) not in corners or vz not in (lo[2], hi[2]):
-                    _nope("fillet(non-box)", "K5 (general blends)")
+                    return None
+        return lo, hi
+
+    def _sorted_edges(self, shape):
+        from forgekernel.brep import logical_edges
+
+        return sorted(logical_edges(shape), key=lambda e: (
+            tuple(e["dir"]), tuple(e["point"]), e["tmin"]))
+
+    def fillet(self, shape, edges, radius):
+        from forgekernel.brep import Solid
+        from forgekernel.kernel import fillet_box
+        from forgekernel.quadric import FilletedBox
+
+        if not isinstance(shape, Solid):
+            _nope("fillet(non-planar base)", "K5 (general blends)")
+        box = self._box_check(shape)
+        if box is None:
+            _nope("fillet(non-box)", "K5.2 (general blends)")
+        lo, hi = box
+        if not edges:
+            # all edges rounded: the rounded-box Steiner form (K2-era)
+            try:
+                return fillet_box(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2],
+                                  radius, (lo[0], lo[1], lo[2]))
+            except ValueError as exc:
+                raise KernelError(str(exc), FailureSignature(
+                    op="fillet", diagnostic="NotYetImplemented", kernel="ref"))
+        # K5.0: constant-radius rolling-ball fillet on SELECTED straight
+        # edges — exact in ℚ[π]. Adjacent selections (shared vertex →
+        # spherical corner patch) refuse inside FilletedBox with K5.1.
+        all_edges = self._sorted_edges(shape)
+        axis_name = {0: "x", 1: "y", 2: "z"}
+        specs = []
+        for idx in edges:
+            if idx >= len(all_edges):
+                raise KernelError(
+                    f"fillet: edge index {idx} out of range",
+                    FailureSignature(op="fillet",
+                                     diagnostic="EdgeIndexOutOfRange",
+                                     kernel="ref"))
+            e = all_edges[idx]
+            d = e["dir"]
+            nz = [c for c in range(3) if d[c] != 0]
+            if len(nz) != 1:
+                _nope("fillet(diagonal edge)", "K5.2")
+            a = nz[0]
+            o1, o2 = [c for c in range(3) if c != a]
+            p = e["point"]
+            side = []
+            for o in (o1, o2):
+                if p[o] == lo[o]:
+                    side.append("min")
+                elif p[o] == hi[o]:
+                    side.append("max")
+                else:
+                    _nope("fillet(interior edge)", "K5.2")
+            specs.append((axis_name[a], side[0], side[1]))
         try:
-            return fillet_box(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2],
-                              radius, (lo[0], lo[1], lo[2]))
+            return FilletedBox(lo, hi, specs, radius)
         except ValueError as exc:
             raise KernelError(str(exc), FailureSignature(
                 op="fillet", diagnostic="NotYetImplemented", kernel="ref"))
@@ -418,13 +478,58 @@ class RefKernel:
         from forgekernel.brep import Solid
         from forgekernel.kernel import shell as fk_shell
 
-        if remove_faces or not isinstance(shape, Solid):
-            _nope("shell(open faces or non-box)", "K4 (offsets)")
-        try:
-            return fk_shell(shape, thickness)
-        except ValueError as exc:
-            raise KernelError(str(exc), FailureSignature(
-                op="shell", diagnostic="NotYetImplemented", kernel="ref"))
+        if not isinstance(shape, Solid):
+            _nope("shell(non-planar base)", "K4.1 (offset surfaces)")
+        if not remove_faces:
+            try:
+                return fk_shell(shape, thickness)
+            except ValueError as exc:
+                raise KernelError(str(exc), FailureSignature(
+                    op="shell", diagnostic="NotYetImplemented", kernel="ref"))
+        # K4: OPEN shell on a box — the void is the inward-inset box
+        # EXTENDED through each removed face to the outer surface, then
+        # one exact boolean cut. Face indices are indices into THIS
+        # kernel's entities(shape, "face") enumeration (the Document
+        # layer maps stable ids to them — never ordinal at doc level).
+        t = Fraction(thickness)
+        lo, hi = shape.bbox()
+        dims = [hi[c] - lo[c] for c in range(3)]
+        if t <= 0 or any(2 * t >= d for d in dims):
+            raise KernelError(
+                f"shell t={thickness} too thick for the base",
+                FailureSignature(op="shell", diagnostic="BadInput",
+                                 kernel="ref"))
+        # walk the SAME sorted logical-face ordering entities() uses, but
+        # decide each face's side from its fragments' actual coordinates —
+        # the canonical plane key's sign convention makes opposite faces
+        # share a normal, so the normal alone cannot tell min from max.
+        ordered = sorted(shape.logical_faces().items(),
+                         key=lambda kv: (kv[0][1], kv[0][0]))
+        void_lo = [lo[c] + t for c in range(3)]
+        void_hi = [hi[c] - t for c in range(3)]
+        for idx in remove_faces:
+            if idx >= len(ordered):
+                raise KernelError(
+                    f"shell: face index {idx} out of range",
+                    FailureSignature(op="shell",
+                                     diagnostic="FaceIndexOutOfRange",
+                                     kernel="ref"))
+            (plane_key, _), frags = ordered[idx]
+            n = plane_key[:3]
+            axis = max(range(3), key=lambda c: abs(n[c]))
+            if any(n[c] != 0 for c in range(3) if c != axis):
+                _nope("shell(open non-axis-aligned face)", "K4.1")
+            coord = frags[0].verts[0][axis]     # all verts share it (planar)
+            if coord == hi[axis]:
+                void_hi[axis] = hi[axis]        # extend through max side
+            elif coord == lo[axis]:
+                void_lo[axis] = lo[axis]        # extend through min side
+            else:
+                _nope("shell(open interior face)", "K4.1")
+        void = Solid.box(void_hi[0] - void_lo[0], void_hi[1] - void_lo[1],
+                         void_hi[2] - void_lo[2], "shellvoid").translated(
+            (void_lo[0], void_lo[1], void_lo[2]))
+        return self._fk.boolean("cut", shape, void)
 
     def draft(self, shape, faces, angle_deg, pull=(0, 0, 1), neutral_z=0.0):
         from forgekernel.brep import Solid
