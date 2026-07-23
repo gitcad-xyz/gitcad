@@ -36,6 +36,7 @@ class Footprint:
     name: str
     pads: list[Pad] = field(default_factory=list)
     courtyard: tuple[float, float] | None = None   # (w, h) centered on origin
+    height: float | None = None    # body height mm (IDF-style envelope; None = unknown)
 
 
 @dataclass
@@ -155,6 +156,7 @@ class Board:
                         name=c["footprint"]["name"],
                         pads=[Pad(**p) for p in c["footprint"]["pads"]],
                         courtyard=tuple(c["footprint"]["courtyard"]) if c["footprint"]["courtyard"] else None,
+                        height=c["footprint"].get("height"),
                     ),
                     value=c["value"], x=c["x"], y=c["y"], rot=c["rot"], side=c["side"],
                     nets=dict(c["nets"]),

@@ -40,6 +40,13 @@ def find_browser() -> str | None:
 
 
 def _svg_for(path: Path) -> str:
+    if path.suffix == ".kicad_sch":
+        # imported sheets render EXACTLY as drawn (fidelity renderer)
+        from gitcad.ecad.schsvg import sheet_to_svg
+        from gitcad.importers.kicad_sch import import_kicad_sch
+
+        sch, _report = import_kicad_sch(str(path))
+        return sheet_to_svg(sch)
     text = path.read_text(encoding="utf-8")
     from gitcad.viewer.server import detect_kind
 
@@ -86,14 +93,20 @@ def _shoot(browser: str, url: str, out: Path, width: int, height: int) -> None:
 
 
 def render(file: str, out: str, *, width: int = 1400, height: int = 900,
-           explode: float = 0.0) -> str:
-    """Render a design file to ``out`` (.svg or .png). Returns the path."""
+           explode: float = 0.0, three: bool = False) -> str:
+    """Render a design file to ``out`` (.svg or .png). ``three`` forces a 3D
+    render for boards (the '3d iso' deliverable — board extruded through the
+    bridge). Returns the path."""
     src = Path(file)
     dst = Path(out)
-    text = src.read_text(encoding="utf-8")
-    from gitcad.viewer.server import detect_kind
+    if src.suffix == ".kicad_sch":
+        kind = "schematic"
+        text = None
+    else:
+        text = src.read_text(encoding="utf-8")
+        from gitcad.viewer.server import detect_kind
 
-    kind = detect_kind(text)
+        kind = detect_kind(text)
 
     if dst.suffix.lower() == ".svg":
         dst.write_text(_svg_for(src), encoding="utf-8")
@@ -107,11 +120,29 @@ def render(file: str, out: str, *, width: int = 1400, height: int = 900,
             "PNG rendering needs a local Chrome/Edge (headless screenshot) — "
             "none found; install one or render .svg instead")
 
+    if kind == "board" and three:
+        # the 3D board deliverable: extrude through the bridge, serve, shoot
+        import tempfile
+
+        from gitcad.bridge import board_to_model
+        from gitcad.ecad import Board
+
+        doc = board_to_model(Board.loads(text))
+        with tempfile.TemporaryDirectory() as td:
+            model = Path(td) / "board3d.model"
+            model.write_text(doc.dumps(), encoding="utf-8")
+            return _serve_and_shoot(model, dst, browser, width, height, explode)
+
     if kind in ("schematic", "board"):
         _png_from_svg(_svg_for(src), dst, browser, width, height)
         return str(dst)
 
     # 3D kinds: serve the viewer briefly, screenshot it
+    return _serve_and_shoot(src, dst, browser, width, height, explode)
+
+
+def _serve_and_shoot(src: Path, dst: Path, browser: str,
+                     width: int, height: int, explode: float) -> str:
     import threading
 
     from gitcad.viewer.server import serve
@@ -139,6 +170,8 @@ def main() -> None:  # pragma: no cover - CLI entrypoint
     ap.add_argument("--height", type=int, default=900)
     ap.add_argument("--explode", type=float, default=0.0,
                     help="exploded-view amount 0..1 (3D kinds)")
+    ap.add_argument("--three", action="store_true",
+                    help="render a board in 3D (extruded) instead of top view")
     args = ap.parse_args()
     print(render(args.file, args.out, width=args.width, height=args.height,
-                 explode=args.explode))
+                 explode=args.explode, three=args.three))

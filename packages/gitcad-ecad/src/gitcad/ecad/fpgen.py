@@ -29,7 +29,8 @@ def chip(size: str) -> Footprint:
     return Footprint(
         name=f"CHIP-{size}",
         pads=[Pad("1", -off, 0, pad_w, pad_h), Pad("2", off, 0, pad_w, pad_h)],
-        courtyard=(round(2 * off + pad_w + 0.4, 2), round(pad_h + 0.4, 2)))
+        courtyard=(round(2 * off + pad_w + 0.4, 2), round(pad_h + 0.4, 2)),
+        height=0.6)
 
 
 def soic(n: int, *, pitch: float = 1.27, row_span: float = 5.4,
@@ -49,7 +50,8 @@ def soic(n: int, *, pitch: float = 1.27, row_span: float = 5.4,
         name=f"SOIC-{n}",
         pads=pads,
         courtyard=(round(row_span + pad_w + 0.5, 2),
-                   round((per_side - 1) * pitch + pad_h + 0.5, 2)))
+                   round((per_side - 1) * pitch + pad_h + 0.5, 2)),
+        height=1.75)
 
 
 def qfn(n: int, *, pitch: float = 0.5, body: float = 4.0,
@@ -77,7 +79,7 @@ def qfn(n: int, *, pitch: float = 0.5, body: float = 4.0,
     if ep:
         pads.append(Pad("EP", 0, 0, ep, ep))
     c = round(body + pad_l + 0.5, 2)
-    return Footprint(name=f"QFN-{n}", pads=pads, courtyard=(c, c))
+    return Footprint(name=f"QFN-{n}", pads=pads, courtyard=(c, c), height=0.9)
 
 
 def header(n: int, *, pitch: float = 2.54, rows: int = 1,
@@ -98,7 +100,8 @@ def header(n: int, *, pitch: float = 2.54, rows: int = 1,
         name=f"HDR-{rows}x{per_col}",
         pads=pads,
         courtyard=(round(rows * pitch + 0.6, 2),
-                   round(per_col * pitch + 0.6, 2)))
+                   round(per_col * pitch + 0.6, 2)),
+        height=8.5)
 
 
 GENERATORS = {"chip": chip, "soic": soic, "qfn": qfn, "header": header}

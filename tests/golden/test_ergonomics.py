@@ -168,7 +168,12 @@ def test_board_to_model_bridge() -> None:
     from gitcad.kernel.occt import OcctKernel
 
     k = OcctKernel()
-    doc = board_to_model(_altair_board())
+    bare_expected = 80 * 50 * 1.6 - 4 * math.pi * 1.35**2 * 1.6
+    doc = board_to_model(_altair_board(), components=False)
     v = k.measure(doc.build(k).final(doc))["volume"]
-    expected = 80 * 50 * 1.6 - 4 * math.pi * 1.35**2 * 1.6
-    assert v == pytest.approx(expected, rel=1e-6)
+    assert v == pytest.approx(bare_expected, rel=1e-6)
+    # populated (default): IDF-style component envelopes ADD volume — the
+    # board's real mechanical shape for enclosure interference checks
+    populated = board_to_model(_altair_board())
+    vp = k.measure(populated.build(k).final(populated))["volume"]
+    assert vp > v
