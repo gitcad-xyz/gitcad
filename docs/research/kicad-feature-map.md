@@ -104,10 +104,13 @@ state — updated statuses for the previously-missing rows:
 | Multi-layer (2–16 copper) | ✅ | top/in1..inN/bottom; per-layer DRC/connectivity/Gerbers |
 | Blind/buried vias | ✅ | `Via.layer_from/layer_to` span; span-aware Gerber flash, per-span drill files, DRC/connectivity, KiCad import, IPC-2581 `<Span>` drill layers (kicad-cli oracle-matched) |
 | IPC-2581 (rev C) | ✅ | conformance-benchmarked element-for-element vs kicad-cli's own export on the real board (holes 58=58, components identical, nets consistent); in the fab package |
-| ODB++ / GenCAD | ⏸ deferred | IPC-2581 covers the modern-exchange need; these on demand |
-| Altium binary import | ⏸ deferred | OLE compound format; route through Altium→KiCad conversion meanwhile |
-| Autorouting / push-and-shove / teardrops | ⏸ deferred | route() covers agent routing; interactive routing is GUI-era work |
-| Schematic PDF plot | ⏸ deferred | SVG ships; PDF wrapper when the drawing PDF engine grows text |
+| ODB++ | ✅ | full job tree (matrix/features/components/span drills/cadnet); structure copied from kicad-cli's ODB++ and census-checked on the real board (bottom/drill exact; top delta = NPTH-as-mech-port modeling + 0.005mm rounding twins) |
+| GenCAD 1.4 | ✅ | $BOARD/$PADS/$PADSTACKS/$SHAPES/$COMPONENTS/$DEVICES/$SIGNALS/$ROUTES, INCH units, deterministic; grammar mirrored from kicad-cli's export |
+| Altium import | 🟡 | ASCII PcbDoc importer (components/pads/tracks/vias/nets, drops reported); binary OLE refused with the working path (KiCad Non-KiCad-Board import → .kicad_pcb) |
+| Autorouting assist | ✅ | grid maze router (Dijkstra, via-cost, clearance-aware obstacle grid, via-size margins); result gated by DRC+connectivity; honest no-path refusal |
+| Teardrops | ✅ | generator: same-net wedges at track→barrel junctions, idempotent, DRC-gated |
+| Push-and-shove (interactive) | — | deliberate non-goal: agents re-route; humans review |
+| Schematic PDF plot | ✅ | vector PDF of the drawn sheet (wires/symbols/labels/subsheet boxes), zero-dep writer, deterministic |
 
 Deferred means: honest refusal or documented workaround today, with the
 design intent recorded here — never a silent gap.

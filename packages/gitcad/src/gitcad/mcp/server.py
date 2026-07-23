@@ -557,6 +557,105 @@ def board_ipc2581(board: str, origination: str = "1970-01-01T00:00:00") -> dict[
     return {"ipc2581": to_ipc2581(Board.loads(board), origination=origination)}
 
 
+@tool("board_odb")
+def board_odb(board: str) -> dict[str, Any]:
+    """ODB++ export — the CAM-exchange directory tree (matrix, per-layer
+    features, components, per-span drills + tools, profile, cadnet).
+    Structure copied from kicad-cli's own ODB++ export and census-checked
+    against it on the real benchmark board. Returns {relpath: content};
+    write with export_odb or any file sink."""
+    from gitcad.ecad import Board
+    from gitcad.ecad.odb import to_odb
+
+    tree = to_odb(Board.loads(board))
+    return {"files": sorted(tree), "tree": tree}
+
+
+@tool("board_gencad")
+def board_gencad(board: str) -> dict[str, Any]:
+    """GenCAD 1.4 export — the test/assembly-machine format ($BOARD,
+    $PADS/$PADSTACKS, $SHAPES, $COMPONENTS, $DEVICES, $SIGNALS, $ROUTES).
+    Section grammar mirrors kicad-cli's GenCAD export; units INCH per the
+    installed-base convention."""
+    from gitcad.ecad import Board
+    from gitcad.ecad.gencad import to_gencad
+
+    return {"gencad": to_gencad(Board.loads(board))}
+
+
+@tool("board_teardrops")
+def board_teardrops(board: str, length_ratio: float = 1.0,
+                    width_ratio: float = 0.9) -> dict[str, Any]:
+    """Generate teardrop copper (same-net wedges) where thin tracks meet
+    wider via/through-pad barrels — drill-breakout insurance. Idempotent;
+    the result is ordinary zones gated by DRC + connectivity like any
+    copper edit. Returns the updated board text."""
+    from gitcad.ecad import Board
+    from gitcad.ecad.drc import run_drc
+    from gitcad.ecad.teardrop import generate_teardrops
+
+    b = Board.loads(board)
+    added = generate_teardrops(b, length_ratio=length_ratio,
+                               width_ratio=width_ratio)
+    drc = run_drc(b)
+    return {"added": added, "board": b.dumps(),
+            "drc_ok": drc.ok, "drc_violations": drc.violations}
+
+
+@tool("board_autoroute")
+def board_autoroute(board: str, net: str, grid: float = 0.25,
+                    width: float = 0.25, clearance: float = 0.2,
+                    layers: list[str] | None = None) -> dict[str, Any]:
+    """Autorouting assist v1: deterministic grid maze router (Lee) for one
+    net — clearance-aware obstacle grid, through-vias on layer change,
+    honest refusal when no path exists. The routed copper is ordinary
+    tracks/vias; DRC + connectivity gate it like hand routing."""
+    from gitcad.ecad import Board
+    from gitcad.ecad.autoroute import autoroute
+    from gitcad.ecad.connectivity import check_connectivity
+    from gitcad.ecad.drc import run_drc
+
+    b = Board.loads(board)
+    stats = autoroute(b, net, grid=grid, width=width, clearance=clearance,
+                      layers=tuple(layers) if layers else None)
+    drc = run_drc(b)
+    conn = check_connectivity(b)
+    return {"routed": stats, "board": b.dumps(),
+            "drc_ok": drc.ok, "drc_violations": drc.violations,
+            "connectivity_ok": conn.ok,
+            "connectivity_violations": conn.violations}
+
+
+@tool("schematic_pdf")
+def schematic_pdf(schematic: str, out: str) -> dict[str, Any]:
+    """Plot a drawn schematic (imported or sheet-authored graphics) to a
+    vector PDF at ``out`` — the print/archive projection. The SVG remains
+    the review-loop rendering; this is the same drawing on paper."""
+    import base64
+    from pathlib import Path as _P
+
+    from gitcad.ecad import Schematic
+    from gitcad.ecad.schpdf import sheet_to_pdf
+
+    sch = Schematic.loads(schematic)
+    pdf = sheet_to_pdf(sch)
+    _P(out).write_bytes(pdf)
+    return {"path": out, "bytes": len(pdf),
+            "sha256_prefix": __import__("hashlib").sha256(pdf).hexdigest()[:16]}
+
+
+@tool("board_import_altium")
+def board_import_altium(path: str) -> dict[str, Any]:
+    """Import an Altium .PcbDoc saved in ASCII form (components/pads/
+    tracks/vias/nets, drops reported). Binary OLE PcbDocs are refused
+    with the working migration path (KiCad's Altium importer -> .kicad_pcb
+    -> board_import)."""
+    from gitcad.importers.altium import import_altium_pcb
+
+    b, report = import_altium_pcb(path)
+    return {"board": b.dumps(), "report": report.to_dict()}
+
+
 @tool("board_ipcd356")
 def board_ipcd356(board: str) -> dict[str, Any]:
     """IPC-D-356 electrical test netlist (flying probe / bed-of-nails):
