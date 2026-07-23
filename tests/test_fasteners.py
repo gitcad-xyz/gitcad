@@ -80,3 +80,27 @@ def test_mcp_assembly_fasteners_tool() -> None:
     assert out["bolt_sizes"] == ["M3x8"]
     assert len(out["assembly"]["mates"]) == 2
     assert bolt_part("M3", 8).interface.ports["seat"].type == "mech.bolt"
+
+
+def test_board_ports_infer_thread_from_clearance_drill() -> None:
+    """Dogfood finding: real boards' mounting holes carry only the drill;
+    standard clearance drills imply the thread (2.7mm -> M2.5), so derived
+    PCBA parts feed the fastener generator with no hand annotation."""
+    from gitcad.ecad import Board, MountingHole
+
+    b = Board(name="b", outline=[(0, 0), (30, 0), (30, 30), (0, 30)])
+    b.mounting_holes.append(MountingHole("mnt_1", 5, 5, 2.7))
+    b.mounting_holes.append(MountingHole("mnt_2", 25, 5, 3.2))
+    b.mounting_holes.append(MountingHole("odd", 25, 25, 3.9))   # nonstandard
+    part = b.to_part("prt_b")
+    ports = part.interface.ports
+    assert ports["mnt_1"].spec["thread"] == "M2.5"
+    assert ports["mnt_2"].spec["thread"] == "M3"
+    assert "thread" not in ports["odd"].spec            # honest: no guess
+
+    asm = Assembly("a")
+    asm.add("pcba", part)
+    result = generate_fasteners(asm)
+    assert {a["thread"] for a in result["added"]} == {"M2.5", "M3"}
+    assert [s["reason"] for s in result["skipped"]] == ["no-thread-spec"]
+    assert asm.validate().ok

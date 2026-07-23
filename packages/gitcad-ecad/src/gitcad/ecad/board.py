@@ -127,6 +127,20 @@ class Zone:
     kind: str = "copper"                # copper | keepout
 
 
+# ISO 273 clearance drills -> thread (medium + close fits). Exact matches
+# only: an unrecognized drill honestly yields no thread spec, and the
+# fastener generator will report it rather than guess (dogfood finding
+# 2026-07-23: the real Altair board's 2.7mm holes are M2.5 clearance).
+_CLEARANCE_THREADS = {
+    2.2: "M2", 2.4: "M2.2", 2.7: "M2.5", 3.2: "M3", 3.4: "M3",
+    4.3: "M4", 4.5: "M4", 5.3: "M5", 5.5: "M5", 6.4: "M6", 6.6: "M6",
+}
+
+
+def _thread_from_clearance(drill: float) -> str | None:
+    return _CLEARANCE_THREADS.get(round(drill, 1))
+
+
 @dataclass
 class MountingHole:
     """A non-plated mounting hole — and, equally, a published mech interface:
@@ -323,8 +337,9 @@ class Board:
         for m in self.mounting_holes:
             frames[m.name] = Frame(origin=(m.x, m.y, 0.0))
             spec: dict = {"drill": m.drill}
-            if m.thread:
-                spec["thread"] = m.thread
+            thread = m.thread or _thread_from_clearance(m.drill)
+            if thread:
+                spec["thread"] = thread
             ports[m.name] = Port(m.name, "mech.bolt", m.name, spec)
         body: dict = {"kind": "pcba", "board": f"{self.name}.board"}
         if schematics:
