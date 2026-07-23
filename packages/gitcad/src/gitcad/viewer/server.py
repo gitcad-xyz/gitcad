@@ -110,7 +110,9 @@ def assembly_mesh_payload(manifest_path: Path, kernel: Kernel) -> dict:
             if not model_file.is_file():
                 raise ValueError(f"instance {name!r}: model file {model_file.name!r} "
                                  f"missing next to {pj_path.name}")
-            doc = Document.loads(model_file.read_text(encoding="utf-8"))
+            doc = resolve_import_paths(
+                Document.loads(model_file.read_text(encoding="utf-8")),
+                model_file.parent)
         elif board_name:
             # board-backed part: extrude the board through the bridge
             from gitcad.bridge import board_to_model
@@ -150,6 +152,17 @@ def assembly_mesh_payload(manifest_path: Path, kernel: Kernel) -> dict:
                   "instances": len(groups), "kernel": kernel.name,
                   "volume_mm3": 0, "features": len(groups)},
     }
+
+
+def resolve_import_paths(doc: Document, base: Path) -> Document:
+    """Import-op file params are project-relative in committed models
+    (portability); builds resolve them against the MODEL's directory."""
+    for f in doc.features:
+        if f.op == "import":
+            p = Path(f.params.get("file", ""))
+            if p and not p.is_absolute():
+                f.params["file"] = str((base / p).resolve())
+    return doc
 
 
 def discover_schematics(root: Path, limit: int = 12) -> list[dict]:
@@ -225,7 +238,10 @@ class _Handler(BaseHTTPRequestHandler):
                     board = Board.loads(src["board"].read_text(encoding="utf-8"))
                     payload = mesh_payload(board_to_model(board), self.kernel)
                 else:
-                    payload = mesh_payload(Document.loads(text), self.kernel)
+                    payload = mesh_payload(
+                        resolve_import_paths(Document.loads(text),
+                                             self.path_watched.parent),
+                        self.kernel)
                 self._send(200, json.dumps(payload).encode(), "application/json")
             elif self.path == "/api/schematics":
                 sheets = discover_schematics(self.path_watched.parent)

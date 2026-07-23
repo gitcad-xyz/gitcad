@@ -51,6 +51,61 @@ def import_fcstd_bodies(path: str, kernel: Kernel) -> list[tuple[str, "object"]]
     return out
 
 
+def fcstd_to_project(path: str, out_dir: str, kernel: Kernel,
+                     *, name: str | None = None) -> dict:
+    """One-command onboarding: a multi-body .FCStd becomes a gitcad project.
+
+    Every body becomes ``<Body>.model`` (import feature pinning a
+    content-addressed .brep in assets/) + ``<Body>.part`` (interface derived
+    from real geometry), and ``<name>.gitcad`` is the product root
+    instancing them all at their as-modeled positions. From there the whole
+    toolchain applies: viewer/explode, interference with clash budgets,
+    review gates, release.
+    """
+    from gitcad.derive import model_to_part
+    from gitcad.part import Assembly, new_part_id
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    assets = out / "assets"
+    assets.mkdir(exist_ok=True)
+    project = name or Path(path).stem
+
+    bodies = import_fcstd_bodies(path, kernel)
+    asm = Assembly(project)
+    written: list[str] = []
+    for body_name, shape in bodies:
+        brep = assets / f"{body_name}.brep"
+        kernel.export_brep(shape, str(brep))
+        digest = hashlib.sha256(brep.read_bytes()).hexdigest()
+        final = assets / f"{body_name}-{digest[:12]}.brep"
+        if final.exists():
+            brep.unlink()
+        else:
+            brep.rename(final)
+        digest = hashlib.sha256(final.read_bytes()).hexdigest()
+        doc = Document()   # project-relative reference (what gets committed)
+        doc.add(Feature(op="import", params={
+            "format": "brep", "file": f"assets/{final.name}", "sha256": digest}))
+        build_doc = Document()   # absolute reference, for derivation here
+        build_doc.add(Feature(op="import", params={
+            "format": "brep", "file": str(final), "sha256": digest}))
+        part = model_to_part(build_doc, kernel,
+                             part_id=new_part_id(), name=body_name)
+        part.body["model"] = f"{body_name}.model"
+        (out / f"{body_name}.model").write_text(doc.dumps(), encoding="utf-8")
+        (out / f"{body_name}.part").write_text(part.dumps(), encoding="utf-8")
+        written += [f"{body_name}.model", f"{body_name}.part",
+                    f"assets/{final.name}"]
+        asm.add(body_name, part)     # bodies are already world-positioned
+
+    root = asm.to_manifest(new_part_id())
+    (out / f"{project}.gitcad").write_text(root.dumps(), encoding="utf-8")
+    written.append(f"{project}.gitcad")
+    return {"project": project, "root": f"{project}.gitcad",
+            "bodies": [n for n, _ in bodies], "written": written}
+
+
 def import_fcstd(path: str, kernel: Kernel, assets_dir: str) -> tuple[Document, ImportReport]:
     """Import an .FCStd file. Extracted geometry is consolidated into one
     content-addressed ``.brep`` in ``assets_dir`` (which becomes source — keep
