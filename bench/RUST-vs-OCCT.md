@@ -92,6 +92,35 @@ is the exactness thesis at its sharpest — on a curved boolean, the
 exact kernel is both **two orders of magnitude faster and strictly
 more correct** than the 30-year float kernel.
 
+### K3.1–K3.4 — curves, surfaces, SSI, STEP (the free-form frontier)
+
+Four bricks landed beyond the corpus scoreboard, each oracle-checked:
+
+- **NURBS curve + surface eval (de Boor / tensor de Boor).** Rational
+  control data at rational parameters evaluates **exactly** — de Boor
+  is only convex combinations, so no irrationality enters. forge
+  returns points in ℚ³ where OCCT carries doubles; they agree to
+  4.4×10⁻¹⁶ on Bézier, interior-knot B-spline, and 49-point surface
+  grids, including partials vs OCCT's `D1`. Irrational weights (the
+  √2/2 of a *true* circular arc) take the certified path: a quarter
+  circle evaluates to points whose `x²+y²` brackets `[1,1]` to width
+  1.4×10⁻⁵⁰ — certifiably *on* the circle.
+- **General SSI with complete branch detection.** Exact de Casteljau
+  subdivision + convex-hull bbox pruning: a pruned pair *provably*
+  cannot intersect, so no branch is ever missed (completeness at
+  resolution 2⁻ᵈ, stated). Points refined by Newton then certified by
+  an **exact rational residual** `|A−B|² < 10⁻²⁰`. **The gate-G3
+  differentiation moment, measured:** `z=(u−½)²` touches `z=0` along a
+  tangential line — OCCT's `GeomAPI_IntSS` returns **zero** lines;
+  forge finds the branch with 128 certified points. Both agree on
+  transversal ground truth (2/1/0 branches); forge's empty answer is a
+  *proof* (bbox disjointness), not a failure to find.
+- **Native STEP reader, exact by construction.** STEP reals are decimal
+  text; decimal text → `Fraction` is lossless. OCCT exports a freeform
+  B-spline face to STEP; forge parses it and evaluates **bitwise
+  identically** (worst delta 0.0), recovering `z = 3/8` as the exact
+  rational where any float kernel reads 53 bits.
+
 ### The BSP optimization passes (three iterations)
 
 The BSP predicates — plane `side()` and polygon degeneracy — are the

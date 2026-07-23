@@ -128,3 +128,108 @@ def test_de_boor_surface_matches_occt() -> None:
     assert abs(float(Su[0]) - d1u.X()) < 1e-12
     assert abs(float(Su[2]) - d1u.Z()) < 1e-12
     assert abs(float(Sv[1]) - d1v.Y()) < 1e-12
+
+
+@pytest.mark.occt
+def test_ssi_finds_tangent_branch_occt_misses() -> None:
+    """The K3 differentiation moment (kernel-coverage-plan gate G3):
+    z=(u-1/2)^2 touches z=0 along the line u=1/2 — a tangential
+    intersection branch. OCCT's GeomAPI_IntSS returns ZERO lines for it;
+    forge's subdivision SSI finds the branch and certifies points on it
+    with exact rational residuals. Also: both agree on the transversal
+    ground-truth cases (2 lines / 1 line / certified-empty)."""
+    from OCP.Geom import Geom_BezierSurface
+    from OCP.GeomAPI import GeomAPI_IntSS
+    from OCP.gp import gp_Pnt
+    from OCP.TColgp import TColgp_Array2OfPnt
+
+    from forgekernel.ssi import BezierPatch, ssi
+
+    def occt_patch(net):
+        arr = TColgp_Array2OfPnt(1, len(net), 1, len(net[0]))
+        for i, row in enumerate(net):
+            for j, (x, y, z) in enumerate(row):
+                arr.SetValue(i + 1, j + 1, gp_Pnt(float(x), float(y), float(z)))
+        return Geom_BezierSurface(arr)
+
+    plane_net = [[(0, 0, 0), (0, 1, 0)], [(1, 0, 0), (1, 1, 0)]]
+
+    def quad(b0, b1, b2):
+        return [[(0, 0, b0), (0, 1, b0)],
+                [(Fraction(1, 2), 0, b1), (Fraction(1, 2), 1, b1)],
+                [(1, 0, b2), (1, 1, b2)]]
+
+    cases = [
+        ("two-lines", quad(Fraction(3, 16), Fraction(-5, 16), Fraction(3, 16)), 2),
+        ("empty", quad(1, 1, 2), 0),
+        ("tangent", quad(Fraction(1, 4), Fraction(-1, 4), Fraction(1, 4)), 1),
+    ]
+    occt_plane = occt_patch(plane_net)
+    for name, net, truth in cases:
+        inter = GeomAPI_IntSS(occt_plane, occt_patch(net), 1e-7)
+        occt_n = inter.NbLines() if inter.IsDone() else -1
+        r = ssi(BezierPatch(plane_net), BezierPatch(net), depth=5)
+        assert r["branches"] == truth, f"forge wrong on {name}"
+        if name == "tangent":
+            assert occt_n == 0          # OCCT misses the tangential branch
+            assert r["uncertified"] == 0
+        else:
+            assert occt_n == truth      # both right on transversal cases
+
+
+@pytest.mark.occt
+def test_step_roundtrip_forge_reads_occt_export_exactly(tmp_path) -> None:
+    """OCCT exports a freeform B-spline face to STEP; forge's native
+    reader parses it and evaluates BITWISE-identically to the original
+    OCCT surface (zero delta) — because STEP reals are decimal text and
+    forge converts decimal text to exact rationals."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+    from OCP.Geom import Geom_BSplineSurface
+    from OCP.gp import gp_Pnt
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+    from OCP.TColgp import TColgp_Array2OfPnt
+    from OCP.TColStd import TColStd_Array1OfInteger, TColStd_Array1OfReal
+
+    from forgekernel.stepio import read_step_geometry
+
+    net = [[(x, y, Fraction(x * y, 4) + Fraction(x, 8)) for y in range(3)]
+           for x in range(4)]
+    poles = TColgp_Array2OfPnt(1, 4, 1, 3)
+    for i in range(4):
+        for j in range(3):
+            x, y, z = net[i][j]
+            poles.SetValue(i + 1, j + 1, gp_Pnt(float(x), float(y), float(z)))
+    uk = TColStd_Array1OfReal(1, 3)
+    for i, v in enumerate((0.0, 1.0, 2.0)):
+        uk.SetValue(i + 1, v)
+    um = TColStd_Array1OfInteger(1, 3)
+    for i, v in enumerate((3, 1, 3)):
+        um.SetValue(i + 1, v)
+    vk = TColStd_Array1OfReal(1, 2)
+    for i, v in enumerate((0.0, 1.0)):
+        vk.SetValue(i + 1, v)
+    vm = TColStd_Array1OfInteger(1, 2)
+    for i, v in enumerate((3, 3)):
+        vm.SetValue(i + 1, v)
+    surf = Geom_BSplineSurface(poles, uk, vk, um, vm, 2, 2)
+    face = BRepBuilderAPI_MakeFace(surf, 1e-7).Face()
+
+    path = str(tmp_path / "freeform.step")
+    w = STEPControl_Writer()
+    w.Transfer(face, STEPControl_StepModelType.STEPControl_AsIs)
+    w.Write(path)
+
+    with open(path, encoding="utf-8", errors="replace") as f:
+        geo = read_step_geometry(f.read())
+    assert len(geo["surfaces"]) == 1
+    s = geo["surfaces"][0]
+    worst = 0.0
+    for a in range(1, 8):
+        for b in range(1, 8):
+            u, v = Fraction(a, 4), Fraction(b, 8)
+            fx = s.eval(u, v)
+            ox = surf.Value(float(u), float(v))
+            worst = max(worst, abs(float(fx[0]) - ox.X()),
+                        abs(float(fx[1]) - ox.Y()), abs(float(fx[2]) - ox.Z()))
+    assert worst == 0.0                        # bitwise, not just close
+    assert s.cp[1][1] == (1, 1, Fraction(3, 8))  # exact rational recovered
