@@ -26,6 +26,7 @@ gitcad-merge = "gitcad.merge3:main"
 gitcad-verify = "gitcad.requirements:main"
 gitcad-lot = "gitcad.lots:main"
 gitcad-init = "gitcad.init:main"
+gitcad-render = "gitcad.render:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gitcad"]

@@ -23,6 +23,34 @@ from gitcad.importers.report import ImportReport
 from gitcad.seams import Kernel
 
 
+def import_fcstd_bodies(path: str, kernel: Kernel) -> list[tuple[str, "object"]]:
+    """Named bodies of a multi-body .FCStd: [(object_name, Shape)].
+
+    FreeCAD stores one ``<Object>.Shape.brp`` per body — the per-part access
+    that multi-part enclosure scripts need (the real Altair case is five
+    enclosure solids + reference internals in ONE document; per-part STEP
+    export and pairwise interference both start here)."""
+    import tempfile
+
+    out: list[tuple[str, object]] = []
+    with zipfile.ZipFile(path) as zf:
+        members = [n for n in zf.namelist()
+                   if n.lower().endswith((".brep", ".brp"))]
+        if not members:
+            raise GitcadError(f"{path!r} contains no .brep geometry")
+        with tempfile.TemporaryDirectory() as td:
+            for member in sorted(members):
+                name = Path(member).name
+                for suffix in (".Shape.brp", ".Shape.brep", ".brp", ".brep"):
+                    if name.endswith(suffix):
+                        name = name[: -len(suffix)]
+                        break
+                tmp = Path(td) / ("b_" + Path(member).name)
+                tmp.write_bytes(zf.read(member))
+                out.append((name, kernel.import_brep(str(tmp))))
+    return out
+
+
 def import_fcstd(path: str, kernel: Kernel, assets_dir: str) -> tuple[Document, ImportReport]:
     """Import an .FCStd file. Extracted geometry is consolidated into one
     content-addressed ``.brep`` in ``assets_dir`` (which becomes source — keep

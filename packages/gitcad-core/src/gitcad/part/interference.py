@@ -21,10 +21,16 @@ def check_interference(
     instances: dict[str, tuple[Shape, tuple[float, float, float], float]],
     *,
     ignore: set[frozenset[str]] | None = None,
+    tol_mm3: float | None = None,
 ) -> ValidationReport:
     """``instances``: name -> (shape, translate, rotate_z_deg). ``ignore``:
-    pairs (as frozensets of names) intentionally in contact/overlap."""
+    pairs (as frozensets of names) intentionally in contact/overlap.
+    ``tol_mm3``: allowed overlap volume per pair (None = exact, the strict
+    default; a clash budget like 1.0 matches common enclosure practice).
+    The pairwise overlap matrix is always reported — a passing check still
+    shows HOW CLOSE it passed."""
     ignore = ignore or set()
+    tol = _VOL_TOL if tol_mm3 is None else tol_mm3
 
     placed: dict[str, Shape] = {}
     boxes: dict[str, tuple] = {}
@@ -39,6 +45,7 @@ def check_interference(
         return all(alo[i] <= bhi[i] and blo[i] <= ahi[i] for i in range(3))
 
     violations: list[str] = []
+    overlaps: dict[str, float] = {}
     names = sorted(placed)
     checked = 0
     for i, na in enumerate(names):
@@ -51,11 +58,14 @@ def check_interference(
             common = kernel.boolean("intersect", placed[na], placed[nb])
             vol = kernel.measure(common).get("volume", 0.0)
             if vol > _VOL_TOL:
+                overlaps[f"{na}<->{nb}"] = round(vol, 4)
+            if vol > tol:
                 violations.append(f"interference:{na}<->{nb}:overlap={vol:.3f}mm3")
 
     return ValidationReport(
         ok=not violations,
         checks={"instances": len(instances), "pairs_intersected": checked,
+                "overlaps_mm3": overlaps, "tol_mm3": tol,
                 "method": "exact-boolean-common", "kernel": kernel.name},
         violations=violations,
     )
