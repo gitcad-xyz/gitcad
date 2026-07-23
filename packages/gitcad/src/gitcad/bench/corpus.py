@@ -81,6 +81,21 @@ def shelled_box() -> Document:
     return d
 
 
+def shelled_prism() -> Document:
+    # K4.1: closed hollow of a non-box prism — a right trapezoid with a
+    # 3-4-5 hypotenuse (Pythagorean edges → the exact inward inset).
+    # ref = exactly 541/6; OCCT's thick-solid offset agrees in float.
+    d = Document()
+    p = d.add(Feature(op="extrude", params={"profile": {
+        "start": [0, 0], "segments": [
+            {"kind": "line", "to": [8, 0]}, {"kind": "line", "to": [8, 3]},
+            {"kind": "line", "to": [4, 6]}, {"kind": "line", "to": [0, 6]},
+            {"kind": "line", "to": [0, 0]}]}, "height": 5}))
+    d.add(Feature(op="shell", params={"faces": [], "thickness": 0.5},
+                  inputs=[p]))
+    return d
+
+
 def drafted_block() -> Document:
     d = Document()
     b = d.add(Feature(op="box", params={"dx": 30, "dy": 30, "dz": 15}))
@@ -225,6 +240,7 @@ CORPUS: list[tuple[str, tuple[str, ...], Callable[[], Document]]] = [
     ("filleted_block", ("blend",), filleted_block),
     ("chamfered_block", ("planar", "blend"), chamfered_block),
     ("shelled_box", ("offset",), shelled_box),
+    ("shelled_prism", ("offset",), shelled_prism),
     ("drafted_block", ("draft",), drafted_block),
     ("spring", ("sweep", "freeform"), spring),
     ("swept_channel", ("sweep",), swept_channel),

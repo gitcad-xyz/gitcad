@@ -5,27 +5,34 @@ floating-point predicate filters, cached-float coordinates, and a
 move-not-clone BSP) against the OCCT wheel (`cadquery-ocp`), same
 gitcad corpus, through the same seam. Timing is best-of-4 wall time per
 model build (construction + mass properties). Generated 2026-07-23,
-after the BSP-allocation pass.
+after the K4/K5 + Rust-K3 pass. The spring —
+formerly forge's one failure — is now its biggest win: the certified
+ℚ-interval tube volume evaluates in 0.13 ms against OCCT's 39.5 ms
+swept-B-rep build, **306× faster and more accurate** (OCCT carries
+4.4×10⁻⁷ relative error). `shelled_prism` exercises the K4.1 exact
+half-plane inset (ref exactly 541/6) at 9.2×.
 
 | model | occt ms | forge ms | speedup | volume match |
 |---|---:|---:|---:|:---:|
-| plate_with_holes | 13.42 | 1.99 | **6.8×** | exact |
-| quadric_boss | 5.78 | 0.34 | **16.9×** | exact |
-| revolve_profile | 1.60 | 0.17 | **9.3×** | exact |
-| extrude_L | 2.05 | 0.23 | **8.7×** | exact |
-| filleted_block | 10.95 | 0.54 | **20.3×** | exact |
-| chamfered_block | 8.60 | 17.12 | **0.5× (2× slower)** | exact |
-| shelled_box | 6.74 | 0.79 | **8.6×** | exact |
-| drafted_block | 1.57 | 0.46 | **3.4×** | exact |
-| loft_transition | 2.74 | 0.21 | **13.2×** | exact |
-| sheetmetal_folded | 18.37 | 2.54 | **7.2×** | exact |
-| quadric_sphere_overlap | 8.31 | 0.10 | **86.9×** | exact* |
-| torture_tangent_cylinders | 5.56 | 0.13 | **42.1×** | exact |
-| torture_coincident_faces | 4.42 | 0.60 | **7.4×** | exact |
-| torture_sliver_cut | 4.63 | 0.78 | **5.9×** | exact |
-| torture_tangent_sphere_plane | 2.74 | 1.02 | **2.7×** | exact |
-| torture_menger_1 | 26.95 | 4.08 | **6.6×** | exact |
-| **TOTAL (buildable on both)** | **124.4** | **31.1** | **4.0×** | all exact |
+| plate_with_holes | 13.55 | 2.01 | **6.7×** | exact |
+| quadric_boss | 5.74 | 0.35 | **16.3×** | exact |
+| revolve_profile | 1.55 | 0.18 | **8.8×** | exact |
+| extrude_L | 2.03 | 0.23 | **8.8×** | exact |
+| filleted_block | 10.40 | 0.52 | **19.8×** | exact |
+| chamfered_block | 7.98 | 16.59 | **0.5× (2× slower)** | exact |
+| shelled_box | 6.55 | 0.79 | **8.3×** | exact |
+| shelled_prism | 11.33 | 1.23 | **9.2×** | exact* |
+| drafted_block | 1.63 | 0.47 | **3.5×** | exact |
+| spring | 39.49 | 0.13 | **306.6×** | certified* |
+| loft_transition | 2.70 | 0.20 | **13.4×** | exact |
+| sheetmetal_folded | 17.64 | 2.50 | **7.0×** | exact |
+| quadric_sphere_overlap | 8.15 | 0.10 | **83.5×** | exact* |
+| torture_tangent_cylinders | 5.52 | 0.13 | **41.2×** | exact |
+| torture_coincident_faces | 4.30 | 0.57 | **7.5×** | exact |
+| torture_sliver_cut | 4.54 | 0.75 | **6.1×** | exact |
+| torture_tangent_sphere_plane | 2.78 | 1.00 | **2.8×** | exact |
+| torture_menger_1 | 27.44 | 4.03 | **6.8×** | exact |
+| **TOTAL (buildable on both)** | **173.3** | **31.8** | **5.5×** | — |
 
 *`quadric_sphere_overlap`: forge is exact (`896/3·π`), OCCT carries
 ~1.4×10⁻⁹ relative error — see below. Within the 1e-6 agreement band,
@@ -35,7 +42,7 @@ so it counts as a match; but forge is the more accurate of the two.
 
 | | forge (Rust) | OCCT |
 |---|---|---|
-| corpus built | **19/19 (100%)** | 17/19 (89.5%) |
+| corpus built | **20/20 (100%)** | 18/20 (90.0%) |
 | fails | — | both mitered sweeps |
 
 As of K3.0 forge builds the **entire** corpus. It builds both
