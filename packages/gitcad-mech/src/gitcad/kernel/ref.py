@@ -258,7 +258,15 @@ class RefKernel:
                                 violations=list(bad))
 
     def tessellate(self, shape, *, deflection: float = 0.2) -> dict[str, list]:
-        return shape.tessellate()
+        # planar solids mesh exactly; analytic composites mesh to a
+        # bounded-error view (deflection = max chord error)
+        if hasattr(shape, "tessellate"):
+            try:
+                return shape.tessellate(deflection)
+            except TypeError:
+                return shape.tessellate()
+        raise NotImplementedError(
+            f"tessellate not implemented for {type(shape).__name__} (K2.x)")
 
     # -- honest refusals (each names its stage) -------------------------------
 
