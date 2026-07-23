@@ -29,7 +29,7 @@ class RefKernel:
     """K1: exact planar solids (box, line-profile extrude, quarter-turn
     rigid transforms, mirror, scale, booleans, exact mass properties)."""
 
-    name = "ref-k1-exact"
+    name = "ref-k2-exact"
 
     def __init__(self) -> None:
         from forgekernel import kernel as fk
@@ -42,7 +42,9 @@ class RefKernel:
         return self._fk.box(dx, dy, dz)
 
     def cylinder(self, radius: float, height: float):
-        _nope("cylinder", _K2)
+        from forgekernel.quadric import Cyl
+
+        return Cyl.make(radius, height)
 
     def sphere(self, radius: float):
         _nope("sphere", _K2)
@@ -63,6 +65,12 @@ class RefKernel:
 
     def transform(self, shape, *, translate=(0, 0, 0),
                   rotate_axis=(0, 0, 1), rotate_deg: float = 0.0):
+        from forgekernel.quadric import Cyl
+
+        if isinstance(shape, Cyl):
+            if rotate_deg and (tuple(rotate_axis) != (0, 0, 1)):
+                _nope("transform(tilt a cylinder)", "K2.1 (general axes)")
+            return shape.translated(*translate)
         out = shape
         if rotate_deg:
             axis = {(1, 0, 0): "x", (0, 1, 0): "y", (0, 0, 1): "z"}.get(
@@ -87,6 +95,21 @@ class RefKernel:
         return self._fk.mirror(shape, axis)
 
     def boolean(self, op: str, a, b):
+        from forgekernel.brep import Solid
+        from forgekernel.quadric import Cyl, DrilledSolid
+
+        if isinstance(b, Cyl) and op == "cut":
+            base = (DrilledSolid(a, []) if isinstance(a, Solid)
+                    else a if isinstance(a, DrilledSolid) else None)
+            if base is not None:
+                try:
+                    return base.cut(b)
+                except ValueError as exc:
+                    raise KernelError(str(exc), FailureSignature(
+                        op="boolean.cut", diagnostic="NotYetImplemented",
+                        kernel="ref"))
+        if isinstance(a, (Cyl, DrilledSolid)) or isinstance(b, (Cyl, DrilledSolid)):
+            _nope(f"boolean.{op} on quadric operands", "K2.1")
         try:
             return self._fk.boolean(op, a, b)
         except ArithmeticError as exc:
@@ -103,6 +126,12 @@ class RefKernel:
     # -- metrics --------------------------------------------------------------
 
     def mass_props(self, shape) -> dict[str, float]:
+        from forgekernel.quadric import Cyl, DrilledSolid
+
+        if isinstance(shape, (Cyl, DrilledSolid)):
+            cx, cy, cz = shape.centroid_f() if isinstance(shape, DrilledSolid)                 else shape.centroid_f()
+            return {"volume": float(shape.volume()),
+                    "cx": cx, "cy": cy, "cz": cz}
         c = shape.centroid()
         return {"volume": float(shape.volume()),
                 "cx": float(c[0]), "cy": float(c[1]), "cz": float(c[2])}
@@ -117,9 +146,24 @@ class RefKernel:
         lo, hi = shape.bbox()
         return (tuple(float(v) for v in lo), tuple(float(v) for v in hi))
 
+    def _is_composite(self, shape) -> bool:
+        from forgekernel.quadric import Cyl, DrilledSolid
+
+        return isinstance(shape, (Cyl, DrilledSolid))
+
     def entities(self, shape, kind: str) -> list[dict[str, Any]]:
+        from forgekernel.quadric import Cyl, DrilledSolid
+
         if kind != "face":
-            raise NotImplementedError("ref-K1 enumerates faces only")
+            raise NotImplementedError("ref enumerates faces only")
+        if isinstance(shape, Cyl):
+            return [{"surface": "cylinder", "radius": float(shape.r),
+                     "axis_dir": [0.0, 0.0, 1.0],
+                     "axis_origin": [float(shape.cx), float(shape.cy),
+                                     float(shape.z0)]}]
+        if isinstance(shape, DrilledSolid):
+            base = self.entities(shape.base, "face")
+            return base + shape.cylinder_faces()
         out = []
         for (plane_key, source), frags in sorted(
                 shape.logical_faces().items(),
@@ -130,6 +174,18 @@ class RefKernel:
         return out
 
     def validate(self, shape) -> ValidationReport:
+        from forgekernel.quadric import Cyl, DrilledSolid
+
+        if isinstance(shape, Cyl):
+            return ValidationReport(ok=True, checks={"method": "analytic"},
+                                    violations=[])
+        if isinstance(shape, DrilledSolid):
+            bad = shape.watertight_violations()
+            return ValidationReport(
+                ok=not bad and float(shape.volume()) > 0,
+                checks={"method": "exact-composite",
+                        "bores": len(shape.bores)},
+                violations=list(bad))
         bad = shape.watertight_violations()
         if shape.volume() <= 0:
             bad = list(bad) + ["nonpositive-volume"]

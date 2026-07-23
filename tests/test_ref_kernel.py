@@ -26,6 +26,25 @@ def test_ref_refuses_unearned_ops_with_stage() -> None:
 
     k = RefKernel()
     with pytest.raises(KernelError, match="K2"):
-        k.cylinder(5, 10)
+        k.sphere(5)                      # cylinder graduated at K2.0
     with pytest.raises(KernelError, match="K5"):
         k.fillet(k.box(1, 1, 1), None, 0.5)
+
+
+def test_ref_drills_holes_exactly() -> None:
+    k = RefKernel()
+    d = Document()
+    base = d.add(Feature(op="box", params={"dx": 60, "dy": 40, "dz": 4}))
+    prev = base
+    for i in range(4):
+        prev = d.add(Feature(op="hole", params={
+            "x": 10 + 13 * i, "y": 20, "top_z": 4, "depth": 4,
+            "diameter": 5}, inputs=[prev]))
+    result = d.build(k)
+    import math
+
+    vol = k.mass_props(result.final(d))["volume"]
+    assert vol == 9600 - 100 * math.pi   # float of the EXACT 9600-100π
+    faces = k.entities(result.final(d), "face")
+    cyls = [f for f in faces if f["surface"] == "cylinder"]
+    assert len(cyls) == 4 and cyls[0]["radius"] == 2.5
