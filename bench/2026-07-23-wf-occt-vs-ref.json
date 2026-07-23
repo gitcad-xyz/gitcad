@@ -1,0 +1,899 @@
+{
+  "compare": {
+    "disagreements": [
+      "spring: ok True vs False"
+    ],
+    "models": {
+      "chamfered_block": {
+        "oracle_ok": true,
+        "subject_ok": true,
+        "volume_rel_delta": 0.0
+      },
+      "drafted_block": {
+        "oracle_ok": true,
+        "subject_ok": true,
+        "volume_rel_delta": 4.261640131386619e-16
+      },
+      "extrude_L": {
+        "oracle_ok": true,
+        "subject_ok": true,
+        "volume_rel_delta": 0.0
+      },
+      "filleted_block": {
+        "faces_diff": [
+          26,
+          1
+        ],
+        "oracle_ok": true,
+        "subject_ok": true,
+        "volume_rel_delta": 0.0
+      },
+      "loft_transition": {
+        "oracle_ok": true,
+        "subject_ok": true,
+        "volume_rel_delta": 1.7490282726402464e-16
+      },
+      "plate_with_holes": {
+        "oracle_ok": true,
+        "subject_ok": true,
+        "volume_rel_delta": 1.9588849900904273e-16
+      },
+      "quadric_boss": {
+        "faces_diff": [
+          6,
+          3
+        ],
+        "oracle_ok": true,
+        "subject_ok": true,
+        "volume_rel_delta": 0.0
+      },
+      "revolve_profile": {
+        "faces_diff": [
+          6,
+          1
+        ],
+        "oracle_ok": true,
+        "subject_ok": true,
+        "volume_rel_delta": 1.6896954572340549e-16
+      },
+      "sheetmetal_folded": {
+        "faces_diff": [
+          22,
+          14
+        ],
+        "oracle_ok": true,
+        "subject_ok": true,
+        "volume_rel_delta": 0.0
+      },
+      "shelled_box": {
+        "oracle_ok": true,
+        "subject_ok": true,
+        "volume_rel_delta": 0.0
+      },
+      "spring": {
+        "oracle_ok": true,
+        "subject_ok": false
+      },
+      "swept_channel": {
+        "oracle_ok": false,
+        "subject_ok": false
+      },
+      "torture_coincident_faces": {
+        "faces_diff": [
+          10,
+          6
+        ],
+        "oracle_ok": true,
+        "subject_ok": true,
+        "volume_rel_delta": 3.410605131648482e-16
+      },
+      "torture_menger_1": {
+        "faces_diff": [
+          30,
+          12
+        ],
+        "oracle_ok": true,
+        "subject_ok": true,
+        "volume_rel_delta": 0.0
+      },
+      "torture_sliver_cut": {
+        "oracle_ok": true,
+        "subject_ok": true,
+        "volume_rel_delta": 0.0
+      },
+      "torture_tangent_cylinders": {
+        "faces_diff": [
+          7,
+          2
+        ],
+        "oracle_ok": true,
+        "subject_ok": true,
+        "volume_rel_delta": 0.0
+      },
+      "torture_tangent_sphere_plane": {
+        "oracle_ok": true,
+        "subject_ok": true,
+        "volume_rel_delta": 0.0
+      }
+    },
+    "oracle": "occt",
+    "subject": "ref"
+  },
+  "runs": {
+    "occt": {
+      "backend": "occt",
+      "by_class": {
+        "blend": {
+          "ok": 2,
+          "total": 2,
+          "valid": 2
+        },
+        "boolean": {
+          "ok": 8,
+          "total": 8,
+          "valid": 8
+        },
+        "draft": {
+          "ok": 1,
+          "total": 1,
+          "valid": 1
+        },
+        "extrude": {
+          "ok": 1,
+          "total": 1,
+          "valid": 1
+        },
+        "freeform": {
+          "ok": 2,
+          "total": 2,
+          "valid": 2
+        },
+        "hole": {
+          "ok": 1,
+          "total": 1,
+          "valid": 1
+        },
+        "loft": {
+          "ok": 1,
+          "total": 1,
+          "valid": 1
+        },
+        "offset": {
+          "ok": 1,
+          "total": 1,
+          "valid": 1
+        },
+        "planar": {
+          "ok": 7,
+          "total": 7,
+          "valid": 7
+        },
+        "quadric": {
+          "ok": 4,
+          "total": 4,
+          "valid": 4
+        },
+        "revolve": {
+          "ok": 1,
+          "total": 1,
+          "valid": 1
+        },
+        "sweep": {
+          "ok": 1,
+          "total": 2,
+          "valid": 1
+        },
+        "torture": {
+          "ok": 5,
+          "total": 5,
+          "valid": 5
+        }
+      },
+      "capability_pct": 94.1,
+      "models": {
+        "chamfered_block": {
+          "bbox": [
+            -0.0,
+            -0.0,
+            -0.0,
+            30.0,
+            20.0,
+            10.0
+          ],
+          "classes": [
+            "planar",
+            "blend"
+          ],
+          "edges": 48,
+          "faces": 26,
+          "ok": true,
+          "seconds": 0.0088,
+          "valid": true,
+          "volume": 5562.666666666667
+        },
+        "drafted_block": {
+          "bbox": [
+            0.0,
+            0.0,
+            0.0,
+            30.0,
+            30.0,
+            15.0
+          ],
+          "classes": [
+            "draft"
+          ],
+          "edges": 12,
+          "faces": 6,
+          "ok": true,
+          "seconds": 0.0018,
+          "valid": true,
+          "volume": 12804.85456866116
+        },
+        "extrude_L": {
+          "bbox": [
+            0.0,
+            0.0,
+            0.0,
+            30.0,
+            25.0,
+            12.0
+          ],
+          "classes": [
+            "planar",
+            "extrude"
+          ],
+          "edges": 18,
+          "faces": 8,
+          "ok": true,
+          "seconds": 0.002,
+          "valid": true,
+          "volume": 4512.0
+        },
+        "filleted_block": {
+          "bbox": [
+            -0.0,
+            -0.0,
+            -0.0,
+            30.0,
+            20.0,
+            10.0
+          ],
+          "classes": [
+            "blend"
+          ],
+          "edges": 56,
+          "faces": 26,
+          "ok": true,
+          "seconds": 0.0118,
+          "valid": true,
+          "volume": 5699.022780771917
+        },
+        "loft_transition": {
+          "bbox": [
+            -10.0,
+            -10.0,
+            0.0,
+            10.0,
+            10.0,
+            25.0
+          ],
+          "classes": [
+            "loft",
+            "freeform"
+          ],
+          "edges": 12,
+          "faces": 6,
+          "ok": true,
+          "seconds": 0.003,
+          "valid": true,
+          "volume": 5200.000000000001
+        },
+        "plate_with_holes": {
+          "bbox": [
+            0.0,
+            0.0,
+            0.0,
+            60.0,
+            40.0,
+            4.0
+          ],
+          "classes": [
+            "planar",
+            "boolean",
+            "hole"
+          ],
+          "edges": 24,
+          "faces": 10,
+          "ok": true,
+          "seconds": 0.0157,
+          "valid": true,
+          "volume": 9285.840734641022
+        },
+        "quadric_boss": {
+          "bbox": [
+            -20.0,
+            -20.0,
+            0.0,
+            20.0,
+            20.0,
+            27.0
+          ],
+          "classes": [
+            "quadric",
+            "boolean"
+          ],
+          "edges": 9,
+          "faces": 6,
+          "ok": true,
+          "seconds": 0.0062,
+          "valid": true,
+          "volume": 12926.606571970802
+        },
+        "revolve_profile": {
+          "bbox": [
+            -15.0,
+            0.0,
+            -15.0,
+            15.0,
+            20.0,
+            15.0
+          ],
+          "classes": [
+            "quadric",
+            "revolve"
+          ],
+          "edges": 10,
+          "faces": 6,
+          "ok": true,
+          "seconds": 0.0016,
+          "valid": true,
+          "volume": 5382.595413150513
+        },
+        "sheetmetal_folded": {
+          "bbox": [
+            0.0,
+            0.0,
+            -11.0,
+            41.0,
+            51.0,
+            21.0
+          ],
+          "classes": [
+            "planar",
+            "boolean"
+          ],
+          "edges": 51,
+          "faces": 22,
+          "ok": true,
+          "seconds": 0.0207,
+          "valid": true,
+          "volume": 6710.0
+        },
+        "shelled_box": {
+          "bbox": [
+            0.0,
+            0.0,
+            0.0,
+            40.0,
+            30.0,
+            20.0
+          ],
+          "classes": [
+            "offset"
+          ],
+          "edges": 24,
+          "faces": 12,
+          "ok": true,
+          "seconds": 0.0073,
+          "valid": true,
+          "volume": 9024.0
+        },
+        "spring": {
+          "bbox": [
+            -13.039746,
+            -13.093771,
+            -2.05534,
+            12.753595,
+            13.087671,
+            26.055082
+          ],
+          "classes": [
+            "sweep",
+            "freeform"
+          ],
+          "edges": 3,
+          "faces": 3,
+          "ok": true,
+          "seconds": 0.03,
+          "valid": true,
+          "volume": 534.6432396936844
+        },
+        "swept_channel": {
+          "classes": [
+            "sweep"
+          ],
+          "error": "GeometryInvalidError: sweep produced invalid geometry: ['brepcheck-invalid']",
+          "ok": false,
+          "seconds": 0.0025
+        },
+        "torture_coincident_faces": {
+          "bbox": [
+            0.0,
+            0.0,
+            0.0,
+            40.0,
+            20.0,
+            10.0
+          ],
+          "classes": [
+            "torture",
+            "planar",
+            "boolean"
+          ],
+          "edges": 20,
+          "faces": 10,
+          "ok": true,
+          "seconds": 0.0044,
+          "valid": true,
+          "volume": 7999.999999999997
+        },
+        "torture_menger_1": {
+          "bbox": [
+            0.0,
+            0.0,
+            0.0,
+            27.0,
+            27.0,
+            27.0
+          ],
+          "classes": [
+            "torture",
+            "planar",
+            "boolean"
+          ],
+          "edges": 72,
+          "faces": 30,
+          "ok": true,
+          "seconds": 0.0267,
+          "valid": true,
+          "volume": 14580.0
+        },
+        "torture_sliver_cut": {
+          "bbox": [
+            0.0,
+            0.0,
+            0.0,
+            29.999,
+            30.0,
+            10.0
+          ],
+          "classes": [
+            "torture",
+            "planar",
+            "boolean"
+          ],
+          "edges": 12,
+          "faces": 6,
+          "ok": true,
+          "seconds": 0.0047,
+          "valid": true,
+          "volume": 8999.699999999999
+        },
+        "torture_tangent_cylinders": {
+          "bbox": [
+            -10.0,
+            -10.0,
+            0.0,
+            30.0,
+            10.0,
+            10.0
+          ],
+          "classes": [
+            "torture",
+            "quadric",
+            "boolean"
+          ],
+          "edges": 8,
+          "faces": 7,
+          "ok": true,
+          "seconds": 0.0059,
+          "valid": true,
+          "volume": 6283.185307179586
+        },
+        "torture_tangent_sphere_plane": {
+          "bbox": [
+            0.0,
+            0.0,
+            0.0,
+            30.0,
+            30.0,
+            20.0
+          ],
+          "classes": [
+            "torture",
+            "quadric",
+            "boolean"
+          ],
+          "edges": 15,
+          "faces": 7,
+          "ok": true,
+          "seconds": 0.0027,
+          "valid": true,
+          "volume": 9523.598775598299
+        }
+      }
+    },
+    "ref": {
+      "backend": "ref",
+      "by_class": {
+        "blend": {
+          "ok": 2,
+          "total": 2,
+          "valid": 2
+        },
+        "boolean": {
+          "ok": 8,
+          "total": 8,
+          "valid": 8
+        },
+        "draft": {
+          "ok": 1,
+          "total": 1,
+          "valid": 1
+        },
+        "extrude": {
+          "ok": 1,
+          "total": 1,
+          "valid": 1
+        },
+        "freeform": {
+          "ok": 1,
+          "total": 2,
+          "valid": 1
+        },
+        "hole": {
+          "ok": 1,
+          "total": 1,
+          "valid": 1
+        },
+        "loft": {
+          "ok": 1,
+          "total": 1,
+          "valid": 1
+        },
+        "offset": {
+          "ok": 1,
+          "total": 1,
+          "valid": 1
+        },
+        "planar": {
+          "ok": 7,
+          "total": 7,
+          "valid": 7
+        },
+        "quadric": {
+          "ok": 4,
+          "total": 4,
+          "valid": 4
+        },
+        "revolve": {
+          "ok": 1,
+          "total": 1,
+          "valid": 1
+        },
+        "sweep": {
+          "ok": 0,
+          "total": 2,
+          "valid": 0
+        },
+        "torture": {
+          "ok": 5,
+          "total": 5,
+          "valid": 5
+        }
+      },
+      "capability_pct": 88.2,
+      "models": {
+        "chamfered_block": {
+          "bbox": [
+            0.0,
+            0.0,
+            0.0,
+            30.0,
+            20.0,
+            10.0
+          ],
+          "classes": [
+            "planar",
+            "blend"
+          ],
+          "faces": 26,
+          "ok": true,
+          "seconds": 0.0955,
+          "valid": true,
+          "volume": 5562.666666666667
+        },
+        "drafted_block": {
+          "bbox": [
+            0.0,
+            0.0,
+            0.0,
+            30.0,
+            30.0,
+            15.0
+          ],
+          "classes": [
+            "draft"
+          ],
+          "faces": 6,
+          "ok": true,
+          "seconds": 0.0011,
+          "valid": true,
+          "volume": 12804.854568661154
+        },
+        "extrude_L": {
+          "bbox": [
+            0.0,
+            0.0,
+            0.0,
+            30.0,
+            25.0,
+            12.0
+          ],
+          "classes": [
+            "planar",
+            "extrude"
+          ],
+          "faces": 8,
+          "ok": true,
+          "seconds": 0.0006,
+          "valid": true,
+          "volume": 4512.0
+        },
+        "filleted_block": {
+          "bbox": [
+            0.0,
+            0.0,
+            0.0,
+            30.0,
+            20.0,
+            10.0
+          ],
+          "classes": [
+            "blend"
+          ],
+          "faces": 1,
+          "ok": true,
+          "seconds": 0.0003,
+          "valid": true,
+          "volume": 5699.022780771917
+        },
+        "loft_transition": {
+          "bbox": [
+            -10.0,
+            -10.0,
+            0.0,
+            10.0,
+            10.0,
+            25.0
+          ],
+          "classes": [
+            "loft",
+            "freeform"
+          ],
+          "faces": 6,
+          "ok": true,
+          "seconds": 0.0005,
+          "valid": true,
+          "volume": 5200.0
+        },
+        "plate_with_holes": {
+          "bbox": [
+            0.0,
+            0.0,
+            0.0,
+            60.0,
+            40.0,
+            4.0
+          ],
+          "classes": [
+            "planar",
+            "boolean",
+            "hole"
+          ],
+          "faces": 10,
+          "ok": true,
+          "seconds": 0.0034,
+          "valid": true,
+          "volume": 9285.84073464102
+        },
+        "quadric_boss": {
+          "bbox": [
+            -20.0,
+            -20.0,
+            0.0,
+            20.0,
+            20.0,
+            27.0
+          ],
+          "classes": [
+            "quadric",
+            "boolean"
+          ],
+          "faces": 3,
+          "ok": true,
+          "seconds": 0.0002,
+          "valid": true,
+          "volume": 12926.606571970802
+        },
+        "revolve_profile": {
+          "bbox": [
+            -15.0,
+            -15.0,
+            0.0,
+            15.0,
+            15.0,
+            20.0
+          ],
+          "classes": [
+            "quadric",
+            "revolve"
+          ],
+          "faces": 1,
+          "ok": true,
+          "seconds": 0.0001,
+          "valid": true,
+          "volume": 5382.595413150512
+        },
+        "sheetmetal_folded": {
+          "bbox": [
+            0.0,
+            0.0,
+            -11.0,
+            41.0,
+            51.0,
+            21.0
+          ],
+          "classes": [
+            "planar",
+            "boolean"
+          ],
+          "faces": 14,
+          "ok": true,
+          "seconds": 0.0164,
+          "valid": true,
+          "volume": 6710.0
+        },
+        "shelled_box": {
+          "bbox": [
+            0.0,
+            0.0,
+            0.0,
+            40.0,
+            30.0,
+            20.0
+          ],
+          "classes": [
+            "offset"
+          ],
+          "faces": 12,
+          "ok": true,
+          "seconds": 0.0042,
+          "valid": true,
+          "volume": 9024.0
+        },
+        "spring": {
+          "classes": [
+            "sweep",
+            "freeform"
+          ],
+          "error": "KernelError: ref kernel does not implement helix yet \u2014 arrives at K3 (NURBS/SSI)",
+          "ok": false,
+          "seconds": 0.0
+        },
+        "swept_channel": {
+          "classes": [
+            "sweep"
+          ],
+          "error": "KernelError: ref kernel does not implement sweep yet \u2014 arrives at K3 (NURBS/SSI)",
+          "ok": false,
+          "seconds": 0.0
+        },
+        "torture_coincident_faces": {
+          "bbox": [
+            0.0,
+            0.0,
+            0.0,
+            40.0,
+            20.0,
+            10.0
+          ],
+          "classes": [
+            "torture",
+            "planar",
+            "boolean"
+          ],
+          "faces": 6,
+          "ok": true,
+          "seconds": 0.0037,
+          "valid": true,
+          "volume": 8000.0
+        },
+        "torture_menger_1": {
+          "bbox": [
+            0.0,
+            0.0,
+            0.0,
+            27.0,
+            27.0,
+            27.0
+          ],
+          "classes": [
+            "torture",
+            "planar",
+            "boolean"
+          ],
+          "faces": 12,
+          "ok": true,
+          "seconds": 0.0315,
+          "valid": true,
+          "volume": 14580.0
+        },
+        "torture_sliver_cut": {
+          "bbox": [
+            0.0,
+            0.0,
+            0.0,
+            29.999,
+            30.0,
+            10.0
+          ],
+          "classes": [
+            "torture",
+            "planar",
+            "boolean"
+          ],
+          "faces": 6,
+          "ok": true,
+          "seconds": 0.0033,
+          "valid": true,
+          "volume": 8999.699999999999
+        },
+        "torture_tangent_cylinders": {
+          "bbox": [
+            -10.0,
+            -10.0,
+            0.0,
+            30.0,
+            10.0,
+            10.0
+          ],
+          "classes": [
+            "torture",
+            "quadric",
+            "boolean"
+          ],
+          "faces": 2,
+          "ok": true,
+          "seconds": 0.0002,
+          "valid": true,
+          "volume": 6283.185307179586
+        },
+        "torture_tangent_sphere_plane": {
+          "classes": [
+            "torture",
+            "quadric",
+            "boolean"
+          ],
+          "faces": 7,
+          "ok": true,
+          "seconds": 0.0004,
+          "valid": true,
+          "volume": 9523.598775598299
+        }
+      }
+    }
+  },
+  "stamp": "2026-07-23-wf"
+}

@@ -274,7 +274,29 @@ class RefKernel:
         return RevolveSolid(loop)
 
     def loft(self, sections, *, ruled=False):
-        _nope("loft", _K3)
+        # two same-count line-profile sections -> exact prismatoid; smooth
+        # multi-section lofts need the curve engine (K3)
+        from forgekernel.brep import prismatoid
+
+        if len(sections) != 2:
+            _nope("loft(>2 sections)", "K3 (curve lofting)")
+        (pa, za), (pb, zb) = sections
+        for prof in (pa, pb):
+            if any(s.get("kind") != "line" for s in prof.get("segments", [])):
+                _nope("loft(arc profile)", "K3")
+
+        def loop(prof):
+            pts = [tuple(prof["start"])] + [tuple(s["to"]) for s in prof["segments"]]
+            return pts[:-1] if pts[0] == pts[-1] else pts
+
+        la, lb = loop(pa), loop(pb)
+        if len(la) != len(lb):
+            _nope("loft(unequal section vertex counts)", "K3")
+        try:
+            return prismatoid(la, za, lb, zb)
+        except ValueError as exc:
+            raise KernelError(str(exc), FailureSignature(
+                op="loft", diagnostic="NotYetImplemented", kernel="ref"))
 
     def sweep(self, profile, path):
         _nope("sweep", _K3)
