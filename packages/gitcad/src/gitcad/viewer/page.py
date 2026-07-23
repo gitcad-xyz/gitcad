@@ -220,12 +220,8 @@ function raycast(px, py){
 
 // -- selection: click a body, see what it is ---------------------------------
 const selHud = document.getElementById("sel");
-function selectAt(px, py){
-  const hit = raycast(px, py);
-  const before = selected;
-  selected = -1;
-  if(hit) selected = groups.findIndex(g => hit.index >= g.i0 && hit.index < g.i1);
-  if(selected === before && hit) selected = -1;   // click again to deselect
+function applySelection(idx){
+  selected = idx;
   const cols = new Float32Array(baseCols);
   if(selected >= 0){
     const g = groups[selected];
@@ -242,7 +238,38 @@ function selectAt(px, py){
   }
   gl.bindBuffer(gl.ARRAY_BUFFER, cb);
   gl.bufferData(gl.ARRAY_BUFFER, cols, gl.STATIC_DRAW);
+  syncSheetHighlight(selected >= 0 ? groups[selected].name : null);
 }
+function selectAt(px, py){
+  const hit = raycast(px, py);
+  let idx = -1;
+  if(hit) idx = groups.findIndex(g => hit.index >= g.i0 && hit.index < g.i1);
+  if(idx === selected && hit) idx = -1;           // click again to deselect
+  applySelection(idx);
+}
+// cross-probe: 3D selection highlights the matching ref on the sheets…
+const probed = [];
+function syncSheetHighlight(name){
+  while(probed.length){ const [el, f, w] = probed.pop();
+    el.setAttribute("fill", f); el.setAttribute("font-weight", w || ""); }
+  if(!name) return;
+  for(const t of document.querySelectorAll("#sheets svg text")){
+    if(t.textContent.trim() === name){
+      probed.push([t, t.getAttribute("fill"), t.getAttribute("font-weight")]);
+      t.setAttribute("fill", "#f85149");
+      t.setAttribute("font-weight", "bold");
+    }
+  }
+}
+// …and clicking a ref on a sheet selects its body in 3D
+document.getElementById("sheets").addEventListener("click", e => {
+  const t = e.target.closest("text");
+  if(!t) return;
+  const idx = groups.findIndex(g => g.name === t.textContent.trim());
+  if(idx < 0) return;
+  activeTab = "3d"; showTab(); renderTabs();
+  applySelection(idx);
+});
 
 // -- exploded view: a display projection, never a model edit (ADR-0014) ------
 function applyExplode(){

@@ -114,3 +114,48 @@ def test_markdown_matrix(design):
     assert "| REQ-001 |" in md and "**pass**" in md
     assert "| REQ-900 |" in md and "**unchecked**" in md
     assert "NOT MET" in md
+
+
+@pytest.mark.occt
+def test_interference_clear_requirement_on_disk_assembly(tmp_path):
+    """The cross-domain fit check as an executable requirement."""
+    from gitcad.derive import model_to_part
+    from gitcad.kernel.occt import OcctKernel
+    from gitcad.part import Assembly, new_part_id
+
+    k = OcctKernel()
+
+    def write_part(name, dx, translate):
+        doc = Document()
+        doc.add(Feature(op="box", params={"dx": dx, "dy": 10, "dz": 10}))
+        part = model_to_part(doc, k, part_id=new_part_id(), name=name)
+        part.body["model"] = f"{name}.model"
+        (tmp_path / f"{name}.model").write_text(doc.dumps(), encoding="utf-8")
+        (tmp_path / f"{name}.part").write_text(part.dumps(), encoding="utf-8")
+        return part, translate
+
+    asm = Assembly("fitcheck")
+    for part, translate in [write_part("left", 10, (0, 0, 0)),
+                            write_part("right", 10, (10.5, 0, 0))]:
+        asm.add(part.name, part, translate=translate)
+    (tmp_path / "fitcheck.gitcad").write_text(
+        asm.to_manifest(new_part_id()).dumps(), encoding="utf-8")
+
+    text = _doc([{"id": "REQ-FIT", "text": "assembly is clash-free",
+                  "check": {"kind": "interference_clear",
+                            "target": "assembly:fitcheck.gitcad",
+                            "tol_mm3": 1.0}}])
+    report = verify(text, str(tmp_path))
+    assert report["ok"], report
+    assert report["requirements"][0]["measured"] == 0
+
+    # move them into overlap: 0.5mm x 10 x 10 = 50mm3 > budget
+    asm2 = Assembly("fitcheck")
+    for part, translate in [write_part("left", 10, (0, 0, 0)),
+                            write_part("right", 10, (9.5, 0, 0))]:
+        asm2.add(part.name, part, translate=translate)
+    (tmp_path / "fitcheck.gitcad").write_text(
+        asm2.to_manifest(new_part_id()).dumps(), encoding="utf-8")
+    report2 = verify(text, str(tmp_path))
+    assert not report2["ok"]
+    assert report2["requirements"][0]["measured"] == pytest.approx(50.0)

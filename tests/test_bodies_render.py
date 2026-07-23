@@ -92,3 +92,28 @@ def test_render_png_without_browser_is_loud(tmp_path, monkeypatch):
 
     with pytest.raises(GitcadError, match="Chrome/Edge"):
         R.render(str(_sch_file(tmp_path)), str(tmp_path / "r.png"))
+
+
+@pytest.mark.occt
+def test_pcba_mesh_has_per_component_groups(tmp_path):
+    from gitcad.ecad import Board, Component, Footprint, Pad
+    from gitcad.kernel.occt import OcctKernel
+    from gitcad.viewer.server import pcba_mesh_payload
+
+    fp = Footprint("R0603", pads=[Pad("1", -0.75, 0, 0.9, 0.95),
+                                  Pad("2", 0.75, 0, 0.9, 0.95)],
+                   courtyard=(2.4, 1.4), height=0.6)
+    b = Board(name="x", outline=[(0, 0), (20, 0), (20, 10), (0, 10)])
+    b.components += [Component("R1", fp, x=5, y=5),
+                     Component("C7", fp, x=15, y=5)]
+    payload = pcba_mesh_payload(b, OcctKernel())
+    names = [g["name"] for g in payload["groups"]]
+    assert names == ["board", "R1", "C7"]      # cross-probe substrate
+
+
+def test_client_ships_cross_probe():
+    from gitcad.viewer.page import PAGE
+
+    assert "syncSheetHighlight" in PAGE        # 3D -> sheet highlight
+    assert 'getElementById("sheets").addEventListener("click"' in PAGE
+    assert "applySelection" in PAGE            # select-by-name entry point

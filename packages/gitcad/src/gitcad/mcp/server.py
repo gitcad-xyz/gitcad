@@ -417,7 +417,9 @@ def requirements_verify(requirements: str, root: str) -> dict[str, Any]:
     """Requirements as code: run a canonical requirements document (named
     limits bound to machine checks — mass_max_g, volume_max_mm3,
     bbox_max_mm, erc_clean, envelope_clean, rail_utilization_max,
-    drc_clean) against the design tree at root. Every requirement reports
+    drc_clean, interference_clear [assembly-wide pairwise fit within a
+    clash budget — mech models AND populated PCBAs]) against the design
+    tree at root. Every requirement reports
     measured-vs-limit; one without a check shows as 'unchecked' — visible
     debt, never silent green. markdown field = the executing traceability
     matrix."""

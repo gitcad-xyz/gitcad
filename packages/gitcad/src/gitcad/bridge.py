@@ -14,6 +14,25 @@ from gitcad.ecad.board import Board
 from gitcad.sketch import Profile
 
 
+def component_envelope(comp, *, default_height: float = 2.0
+                       ) -> tuple[float, float, float] | None:
+    """(w, h, height) of a component's IDF-style envelope, rotation applied:
+    courtyard when declared, pads' extent + margin otherwise, None when the
+    footprint has neither."""
+    cy = comp.footprint.courtyard
+    if cy is not None:
+        cw, ch = cy
+    else:
+        pads = comp.footprint.pads
+        if not pads:
+            return None
+        cw = max(abs(p.x) + p.w / 2 for p in pads) * 2 + 0.4
+        ch = max(abs(p.y) + p.h / 2 for p in pads) * 2 + 0.4
+    if round(comp.rot) % 180 == 90:
+        cw, ch = ch, cw
+    return (cw, ch, comp.footprint.height or default_height)
+
+
 def board_to_model(board: Board, *, components: bool = True,
                    default_height: float = 2.0) -> Document:
     """The board as a 3D body: extruded outline with mounting holes cut,
@@ -36,20 +55,10 @@ def board_to_model(board: Board, *, components: bool = True,
             "diameter": mh.drill, "depth": board.thickness}, inputs=[fid]))
     if components:
         for comp in board.components:
-            cy = comp.footprint.courtyard
-            if cy is not None:
-                cw, ch = cy
-            else:
-                # fallback envelope: the pads' extent (imported footprints
-                # often carry no courtyard) + a small margin
-                pads = comp.footprint.pads
-                if not pads:
-                    continue
-                cw = max(abs(p.x) + p.w / 2 for p in pads) * 2 + 0.4
-                ch = max(abs(p.y) + p.h / 2 for p in pads) * 2 + 0.4
-            if round(comp.rot) % 180 == 90:
-                cw, ch = ch, cw
-            h = comp.footprint.height or default_height
+            env = component_envelope(comp, default_height=default_height)
+            if env is None:
+                continue
+            cw, ch, h = env
             # top: sits on the board surface; bottom: hangs below z=0
             base = board.thickness if comp.side == "top" else -h
             body = Profile((comp.x - cw / 2, comp.y - ch / 2)) \

@@ -89,6 +89,31 @@ def _run_check(check: dict, root: Path) -> dict:
                 "measured": round(mass, 3), "limit": check["limit"],
                 "geometry_verified": not kernel.name.startswith("null")}
 
+    if kind == "interference_clear":
+        # the cross-domain fit check: every instance of an assembly —
+        # mech models AND board-backed PCBAs (populated envelopes) —
+        # pairwise boolean-intersected within a clash budget
+        from gitcad.kernel import get_kernel
+        from gitcad.part.interference import check_interference
+        from gitcad.viewer.server import resolve_assembly_shapes
+
+        kernel = get_kernel()
+        target = check["target"]
+        kind2, _, rel = target.partition(":")
+        if kind2 != "assembly":
+            raise GitcadError("interference_clear target must be 'assembly:<file>'")
+        path = root / rel
+        if not path.is_file():
+            raise GitcadError(f"target file not found: {rel}")
+        resolved = resolve_assembly_shapes(path, kernel)
+        instances = {n: (s, t, r) for n, (s, t, r, _p) in resolved.items()}
+        tol = float(check.get("tol_mm3", 0.0))
+        rep = check_interference(kernel, instances, tol_mm3=tol or None)
+        worst = max(rep.checks["overlaps_mm3"].values(), default=0.0)
+        return {"ok": rep.ok, "measured": worst, "limit": tol,
+                "detail": rep.checks["overlaps_mm3"] or "no overlaps",
+                "geometry_verified": not kernel.name.startswith("null")}
+
     if kind == "erc_clean":
         sch = _load_target(root, check["target"])
         r = sch.erc()

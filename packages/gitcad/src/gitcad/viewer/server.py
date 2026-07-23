@@ -68,13 +68,15 @@ _PALETTE = [(0.35, 0.62, 0.85), (0.85, 0.55, 0.35), (0.45, 0.78, 0.55),
             (0.65, 0.50, 0.85), (0.60, 0.60, 0.60)]
 
 
-def assembly_mesh_payload(manifest_path: Path, kernel: Kernel) -> dict:
-    """Merge every instance's built, placed geometry into one colored mesh.
+def resolve_assembly_shapes(manifest_path: Path, kernel: Kernel
+                            ) -> dict[str, tuple]:
+    """Instance name -> (unplaced Shape, translate, rotate_z_deg, part_name).
 
-    Instances resolve part id -> sibling part.json (scanned from the assembly
-    file's directory tree) -> its body["model"] document, built and placed per
-    the instance transform.
-    """
+    The ONE resolution rule for assemblies on disk (viewer mesh, the
+    interference requirements check, exports): part id -> sibling
+    .part/.pcba/part.json under the assembly's tree; model-backed parts
+    build their .model, board-backed parts extrude POPULATED through the
+    bridge (the PCBA's real mechanical envelope)."""
     from gitcad.part import PartManifest
 
     manifest = PartManifest.loads(manifest_path.read_text(encoding="utf-8"))
@@ -91,17 +93,12 @@ def assembly_mesh_payload(manifest_path: Path, kernel: Kernel) -> dict:
             continue
         by_id.setdefault(m.id, (m, pj))
 
-    positions: list[float] = []
-    colors: list[float] = []
-    indices: list[int] = []
-    groups: list[dict] = []
-    los, his = [], []
-
-    for n, (name, inst) in enumerate(sorted(manifest.body.get("instances", {}).items())):
+    out: dict[str, tuple] = {}
+    for name, inst in sorted(manifest.body.get("instances", {}).items()):
         entry = by_id.get(inst["part"])
         if entry is None:
             raise ValueError(f"instance {name!r}: part {inst['part']!r} not found "
-                             f"next to the assembly (need its part.json + model)")
+                             f"next to the assembly (need its part file + model)")
         part, pj_path = entry
         model_name = part.body.get("model")
         board_name = part.body.get("board")
@@ -114,22 +111,90 @@ def assembly_mesh_payload(manifest_path: Path, kernel: Kernel) -> dict:
                 Document.loads(model_file.read_text(encoding="utf-8")),
                 model_file.parent)
         elif board_name:
-            # board-backed part: extrude the board through the bridge
             from gitcad.bridge import board_to_model
-            from gitcad.ecad.board import Board
+            from gitcad.ecad.board import Board as _Board
 
             board_file = pj_path.parent / board_name
             if not board_file.is_file():
                 raise ValueError(f"instance {name!r}: board file {board_file.name!r} "
                                  f"missing next to {pj_path.name}")
-            doc = board_to_model(Board.loads(board_file.read_text(encoding="utf-8")))
+            doc = board_to_model(_Board.loads(board_file.read_text(encoding="utf-8")))
         else:
             raise ValueError(f"instance {name!r}: part {part.name!r} has neither "
-                             f"body.model nor body.board — nothing to render")
-        shape = kernel.transform(
-            doc.build(kernel).final(doc),
-            translate=tuple(inst.get("translate", (0, 0, 0))),
-            rotate_axis=(0, 0, 1), rotate_deg=inst.get("rotate_z_deg", 0.0))
+                             f"body.model nor body.board — nothing to build")
+        shape = doc.build(kernel).final(doc)
+        out[name] = (shape, tuple(inst.get("translate", (0, 0, 0))),
+                     inst.get("rotate_z_deg", 0.0), part.name)
+    return out
+
+
+def pcba_mesh_payload(board, kernel: Kernel) -> dict:
+    """A board as 3D with PER-COMPONENT groups — the cross-probe substrate:
+    clicking R5 on the schematic selects R5's body here and vice versa.
+    Group 'board' is the bare slab; every placed component is its own
+    group named by ref."""
+    from gitcad.bridge import board_to_model, component_envelope
+
+    positions: list[float] = []
+    colors: list[float] = []
+    indices: list[int] = []
+    groups: list[dict] = []
+    los, his = [], []
+
+    def add_group(name: str, part: str, shape, color) -> None:
+        mesh = kernel.tessellate(shape)
+        lo, hi = kernel.bbox(shape)
+        los.append(lo)
+        his.append(hi)
+        base = len(positions) // 3
+        positions.extend(mesh["positions"])
+        colors.extend(color * (len(mesh["positions"]) // 3))
+        indices.extend(base + i for i in mesh["indices"])
+        groups.append({"name": name, "part": part,
+                       "triangles": len(mesh["indices"]) // 3,
+                       "color": list(color)})
+
+    slab_doc = board_to_model(board, components=False)
+    add_group("board", board.name, slab_doc.build(kernel).final(slab_doc),
+              (0.18, 0.42, 0.24))          # soldermask green
+    for n, comp in enumerate(board.components):
+        env = component_envelope(comp)
+        if env is None:
+            continue
+        cw, ch, h = env
+        base_z = board.thickness if comp.side == "top" else -h
+        body = kernel.transform(
+            kernel.box(cw, ch, h),
+            translate=(comp.x - cw / 2, comp.y - ch / 2, base_z))
+        add_group(comp.ref, comp.footprint.name, body,
+                  _PALETTE[(n + 1) % len(_PALETTE)])
+
+    lo = [min(p[i] for p in los) for i in range(3)] if los else [0, 0, 0]
+    hi = [max(p[i] for p in his) for i in range(3)] if his else [0, 0, 0]
+    return {
+        "kind": "assembly",
+        "positions": positions, "colors": colors, "indices": indices,
+        "bbox": [lo, hi], "groups": groups,
+        "stats": {"vertices": len(positions) // 3, "triangles": len(indices) // 3,
+                  "instances": len(groups), "kernel": kernel.name,
+                  "volume_mm3": 0, "features": len(groups)},
+    }
+
+
+def assembly_mesh_payload(manifest_path: Path, kernel: Kernel) -> dict:
+    """Merge every instance's built, placed geometry into one colored mesh."""
+    resolved = resolve_assembly_shapes(manifest_path, kernel)
+
+    positions: list[float] = []
+    colors: list[float] = []
+    indices: list[int] = []
+    groups: list[dict] = []
+    los, his = [], []
+
+    for n, (name, (shape0, translate, rot_z, part_name)) in enumerate(
+            sorted(resolved.items())):
+        shape = kernel.transform(shape0, translate=translate,
+                                 rotate_axis=(0, 0, 1), rotate_deg=rot_z)
         mesh = kernel.tessellate(shape)
         lo, hi = kernel.bbox(shape)
         los.append(lo)
@@ -139,7 +204,8 @@ def assembly_mesh_payload(manifest_path: Path, kernel: Kernel) -> dict:
         positions.extend(mesh["positions"])
         colors.extend(color * (len(mesh["positions"]) // 3))
         indices.extend(base + i for i in mesh["indices"])
-        groups.append({"name": name, "part": part.name, "triangles": len(mesh["indices"]) // 3,
+        groups.append({"name": name, "part": part_name,
+                       "triangles": len(mesh["indices"]) // 3,
                        "color": list(color)})
 
     lo = [min(p[i] for p in los) for i in range(3)] if los else [0, 0, 0]
@@ -231,12 +297,11 @@ class _Handler(BaseHTTPRequestHandler):
                 if kind == "assembly":
                     payload = assembly_mesh_payload(self.path_watched, self.kernel)
                 elif kind == "pcba":
-                    from gitcad.bridge import board_to_model
                     from gitcad.pcba import pcba_sources
 
                     src = pcba_sources(text, str(self.path_watched.parent))
                     board = Board.loads(src["board"].read_text(encoding="utf-8"))
-                    payload = mesh_payload(board_to_model(board), self.kernel)
+                    payload = pcba_mesh_payload(board, self.kernel)
                 else:
                     payload = mesh_payload(
                         resolve_import_paths(Document.loads(text),
