@@ -328,3 +328,37 @@ def test_ruled_multiloft_and_step_import_graduate(tmp_path) -> None:
     imported = rk.import_step(path)
     assert float(imported.volume()) == 4800.0    # exact rational == occt
     assert rk.validate(imported).ok
+
+
+@pytest.mark.occt
+def test_gaussian_curvature_matches_occt_slprops() -> None:
+    """forge's EXACT rational Gaussian curvature vs OCCT's float
+    GeomLProp_SLProps on the same biquadratic patch — OCCT approximates
+    what forge holds exactly (and forge's developable K is exactly 0)."""
+    from OCP.Geom import Geom_BezierSurface
+    from OCP.GeomLProp import GeomLProp_SLProps
+    from OCP.gp import gp_Pnt
+    from OCP.TColgp import TColgp_Array2OfPnt
+
+    from forgekernel.nurbs import bezier_surface
+    from forgekernel.surfacing import gaussian_curvature
+
+    B = [0, 0, 1]
+    net = [[(Fraction(i, 2), Fraction(j, 2), B[i] + B[j])
+            for j in range(3)] for i in range(3)]
+    ref = bezier_surface(net)
+    arr = TColgp_Array2OfPnt(1, 3, 1, 3)
+    for i in range(3):
+        for j in range(3):
+            x, y, z = net[i][j]
+            arr.SetValue(i + 1, j + 1, gp_Pnt(float(x), float(y), float(z)))
+    occt = Geom_BezierSurface(arr)
+    for (u, v) in ((Fraction(0), Fraction(0)), (Fraction(1, 2), Fraction(1, 2)),
+                   (Fraction(1, 4), Fraction(3, 4))):
+        props = GeomLProp_SLProps(occt, float(u), float(v), 2, 1e-9)
+        k_ref = gaussian_curvature(ref, u, v)
+        assert abs(float(k_ref) - props.GaussianCurvature()) < 1e-9
+    # the exact-zero check no float kernel can make: a developable's K
+    cyl = bezier_surface([[(Fraction(i, 2), j, B[i]) for j in range(2)]
+                          for i in range(3)])
+    assert gaussian_curvature(cyl, Fraction(1, 3), Fraction(2, 7)) == 0
