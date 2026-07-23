@@ -1,30 +1,31 @@
 # forge (Rust) vs OCCT wheel — head-to-head
 
 The final Rust kernel (`forgekernel_rs`, exact BigRational with
-floating-point predicate filters and cached-float coordinates) against
-the OCCT wheel (`cadquery-ocp`), same gitcad corpus, through the same
-seam. Timing is best-of-4 wall time per model build (construction +
-mass properties). Generated 2026-07-23, after the K2.2 pass.
+floating-point predicate filters, cached-float coordinates, and a
+move-not-clone BSP) against the OCCT wheel (`cadquery-ocp`), same
+gitcad corpus, through the same seam. Timing is best-of-4 wall time per
+model build (construction + mass properties). Generated 2026-07-23,
+after the BSP-allocation pass.
 
 | model | occt ms | forge ms | speedup | volume match |
 |---|---:|---:|---:|:---:|
-| plate_with_holes | 13.30 | 2.00 | **6.7×** | exact |
-| quadric_boss | 5.84 | 0.37 | **15.8×** | exact |
-| revolve_profile | 1.61 | 0.17 | **9.4×** | exact |
-| extrude_L | 2.27 | 0.23 | **10.0×** | exact |
-| filleted_block | 10.58 | 0.50 | **21.0×** | exact |
-| chamfered_block | 8.30 | 18.90 | **0.4× (2.3× slower)** | exact |
-| shelled_box | 6.64 | 0.87 | **7.6×** | exact |
-| drafted_block | 1.56 | 0.46 | **3.4×** | exact |
-| loft_transition | 2.92 | 0.21 | **13.8×** | exact |
-| sheetmetal_folded | 18.59 | 2.67 | **7.0×** | exact |
-| quadric_sphere_overlap | 8.22 | 0.10 | **84.5×** | exact* |
-| torture_tangent_cylinders | 5.58 | 0.13 | **42.3×** | exact |
-| torture_coincident_faces | 4.55 | 0.63 | **7.2×** | exact |
-| torture_sliver_cut | 4.75 | 0.82 | **5.8×** | exact |
-| torture_tangent_sphere_plane | 2.80 | 1.00 | **2.8×** | exact |
-| torture_menger_1 | 27.82 | 4.39 | **6.3×** | exact |
-| **TOTAL (buildable on both)** | **125.3** | **33.5** | **3.75×** | all exact |
+| plate_with_holes | 13.42 | 1.99 | **6.8×** | exact |
+| quadric_boss | 5.78 | 0.34 | **16.9×** | exact |
+| revolve_profile | 1.60 | 0.17 | **9.3×** | exact |
+| extrude_L | 2.05 | 0.23 | **8.7×** | exact |
+| filleted_block | 10.95 | 0.54 | **20.3×** | exact |
+| chamfered_block | 8.60 | 17.12 | **0.5× (2× slower)** | exact |
+| shelled_box | 6.74 | 0.79 | **8.6×** | exact |
+| drafted_block | 1.57 | 0.46 | **3.4×** | exact |
+| loft_transition | 2.74 | 0.21 | **13.2×** | exact |
+| sheetmetal_folded | 18.37 | 2.54 | **7.2×** | exact |
+| quadric_sphere_overlap | 8.31 | 0.10 | **86.9×** | exact* |
+| torture_tangent_cylinders | 5.56 | 0.13 | **42.1×** | exact |
+| torture_coincident_faces | 4.42 | 0.60 | **7.4×** | exact |
+| torture_sliver_cut | 4.63 | 0.78 | **5.9×** | exact |
+| torture_tangent_sphere_plane | 2.74 | 1.02 | **2.7×** | exact |
+| torture_menger_1 | 26.95 | 4.08 | **6.6×** | exact |
+| **TOTAL (buildable on both)** | **124.4** | **31.1** | **4.0×** | all exact |
 
 *`quadric_sphere_overlap`: forge is exact (`896/3·π`), OCCT carries
 ~1.4×10⁻⁹ relative error — see below. Within the 1e-6 agreement band,
@@ -67,7 +68,7 @@ is the exactness thesis at its sharpest — on a curved boolean, the
 exact kernel is both **two orders of magnitude faster and strictly
 more correct** than the 30-year float kernel.
 
-### The float-filter + cached-float passes (prior iterations)
+### The BSP optimization passes (three iterations)
 
 The BSP predicates — plane `side()` and polygon degeneracy — are the
 hot loop of every boolean. A **Shewchuk-style static float filter**
@@ -75,21 +76,52 @@ decides the sign in `f64` with a forward-error bound and falls back to
 exact BigRational only when the magnitude is within the bound of zero
 (answer always the exact sign; the oracle suite stays bit-identical).
 Cached-float coordinates then let those filters read a stored `f64`
-per vertex instead of reconverting big rationals. Together: chamfer
-41→18 ms, aggregate 1.8×→3.75×.
+per vertex instead of reconverting big rationals. The latest pass makes
+the BSP **move polygons instead of cloning them**: a polygon entirely
+on one side of a split plane (the common case) is now handed down the
+tree by ownership rather than deep-copying its BigRational vertices —
+only a genuinely straddling polygon is decomposed. Net across all
+three: chamfer 41→17 ms, aggregate 1.8×→4.0×. `torture_menger_1` (the
+pure-BSP stress model) is the biggest single-pass beneficiary of the
+move: 4.4→4.1 ms.
+
+### Diagnosing the chamfer loss (a corrected story)
+
+`chamfered_block` is the one model where forge loses (~2× slower than
+OCCT). The earlier hypothesis was that this came from **large
+intersection-coordinate denominators** growing through a deep boolean
+chain. Profiling refuted that: for a d=2 chamfer of a 10-cube the
+maximum coordinate denominator stays at **1** through all 20 cuts —
+the coordinates are integers, there is *no* denominator growth. So the
+queued "lazy-exact coordinates" refactor (store a float+interval beside
+each rational, recompute exact on demand) **would not have helped
+here** — a useful thing to have learned before building it.
+
+The real cost is structural: the chamfer is **20 sequential boolean
+cuts** (12 edges + 8 corners), each rebuilding the entire accumulating
+solid's BSP. Per-cut time grows linearly with the solid's face count
+(2.8→5.7 ms as faces go 7→26) — an O(n²) total. Two things were tried
+and rejected: cutting the base by the *union* of all 20 tools instead
+of sequentially (correct, but **35× slower** — the overlapping tools
+build enormous intermediate geometry); and the move-not-clone pass
+above (a real general win, but chamfer is rebuild-bound, not
+allocation-bound, so it only shaved ~10%). Closing the chamfer gap
+fully needs **localized/spatially-culled boolean cutting** (only
+re-clip the faces the tool's bbox touches) — a genuine BSP change,
+deferred as low-ROI: it is one model, both kernels finish in
+single-digit-to-teens milliseconds, and the rest of the corpus is
+2.7–87× faster.
 
 ### Where it stands
 
 - **Exactness costs nothing on correctness and wins big on speed:** 15
-  of 16 shared models are 2.8–84× faster than the OCCT wheel, at
+  of 16 shared models are 2.7–87× faster than the OCCT wheel, at
   identical (or more-exact) volumes.
-- **The one loss is honest and understood.** `chamfered_block` is
-  still ~2.3× slower — the corner-facet chamfer is a deep chain of
-  exact boolean cuts producing large-denominator intersection
-  *coordinates* (not just predicates), which the filter can't touch.
-  Closing it fully needs lazy-exact *coordinates* (a bigger refactor,
-  deferred as low-ROI — it's one model).
+- **The one loss is honest and understood** — and now correctly
+  diagnosed: chamfer is O(n²) BSP-rebuild-bound, not
+  denominator-bound.
 - **Bottom line:** the from-scratch exact kernel beats the 30-year
-  OCCT wheel on capability *and* is 3.75× faster in aggregate on this
+  OCCT wheel on capability *and* is 4.0× faster in aggregate on this
   corpus — and on curved booleans it is both faster and more accurate,
-  losing only where exact-coordinate growth is fundamental.
+  losing only on a single deep-boolean model whose cost is a known,
+  targetable algorithmic frontier.
