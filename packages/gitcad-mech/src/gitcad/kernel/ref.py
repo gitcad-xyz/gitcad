@@ -47,10 +47,14 @@ class RefKernel:
         return Cyl.make(radius, height)
 
     def sphere(self, radius: float):
-        _nope("sphere", _K2)
+        from forgekernel.quadric import Sphere
+
+        return Sphere.make(radius)
 
     def cone(self, r1: float, r2: float, height: float):
-        _nope("cone", _K2)
+        from forgekernel.quadric import Cone
+
+        return Cone.make(r1, r2, height)
 
     def extrude(self, profile: dict, height: float):
         segs = profile.get("segments", [])
@@ -65,12 +69,14 @@ class RefKernel:
 
     def transform(self, shape, *, translate=(0, 0, 0),
                   rotate_axis=(0, 0, 1), rotate_deg: float = 0.0):
-        from forgekernel.quadric import Cyl
+        from forgekernel.quadric import AxisStack, Cone, Cyl, Sphere
 
-        if isinstance(shape, Cyl):
+        if isinstance(shape, (Cyl, Cone, Sphere)):
             if rotate_deg and (tuple(rotate_axis) != (0, 0, 1)):
-                _nope("transform(tilt a cylinder)", "K2.1 (general axes)")
+                _nope("transform(tilt a quadric)", "K2.2 (general axes)")
             return shape.translated(*translate)
+        if isinstance(shape, AxisStack):
+            _nope("transform(AxisStack)", "K2.2")
         out = shape
         if rotate_deg:
             axis = {(1, 0, 0): "x", (0, 1, 0): "y", (0, 0, 1): "z"}.get(
@@ -96,8 +102,20 @@ class RefKernel:
 
     def boolean(self, op: str, a, b):
         from forgekernel.brep import Solid
-        from forgekernel.quadric import Cyl, DrilledSolid
+        from forgekernel.quadric import (AxisStack, Cone, Cyl, DrilledSolid,
+                                         Sphere)
 
+        axis_prims = (Cyl, Cone, Sphere)
+        if op == "union" and isinstance(b, axis_prims):
+            try:
+                if isinstance(a, axis_prims):
+                    return AxisStack(a.cx, a.cy, [a]).fuse(b)
+                if isinstance(a, AxisStack):
+                    return a.fuse(b)
+            except ValueError as exc:
+                raise KernelError(str(exc), FailureSignature(
+                    op="boolean.union", diagnostic="NotYetImplemented",
+                    kernel="ref"))
         if isinstance(b, Cyl) and op == "cut":
             base = (DrilledSolid(a, []) if isinstance(a, Solid)
                     else a if isinstance(a, DrilledSolid) else None)
@@ -108,8 +126,8 @@ class RefKernel:
                     raise KernelError(str(exc), FailureSignature(
                         op="boolean.cut", diagnostic="NotYetImplemented",
                         kernel="ref"))
-        if isinstance(a, (Cyl, DrilledSolid)) or isinstance(b, (Cyl, DrilledSolid)):
-            _nope(f"boolean.{op} on quadric operands", "K2.1")
+        if isinstance(a, (AxisStack, *axis_prims, DrilledSolid)) or                 isinstance(b, (AxisStack, *axis_prims, DrilledSolid)):
+            _nope(f"boolean.{op} on quadric operands", "K2.2")
         try:
             return self._fk.boolean(op, a, b)
         except ArithmeticError as exc:
@@ -128,8 +146,12 @@ class RefKernel:
     def mass_props(self, shape) -> dict[str, float]:
         from forgekernel.quadric import Cyl, DrilledSolid
 
-        if isinstance(shape, (Cyl, DrilledSolid)):
-            cx, cy, cz = shape.centroid_f() if isinstance(shape, DrilledSolid)                 else shape.centroid_f()
+        from forgekernel.quadric import AxisStack, Cone, RevolveSolid, Sphere
+
+        if isinstance(shape, (Cone, Sphere)):
+            shape = AxisStack(shape.cx, shape.cy, [shape])
+        if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid)):
+            cx, cy, cz = shape.centroid_f()
             return {"volume": float(shape.volume()),
                     "cx": cx, "cy": cy, "cz": cz}
         c = shape.centroid()
@@ -143,6 +165,10 @@ class RefKernel:
                 "dz": float(z1 - z0)}
 
     def bbox(self, shape):
+        from forgekernel.quadric import AxisStack, Cone, Sphere
+
+        if isinstance(shape, (Cone, Sphere)):
+            shape = AxisStack(shape.cx, shape.cy, [shape])
         lo, hi = shape.bbox()
         return (tuple(float(v) for v in lo), tuple(float(v) for v in hi))
 
@@ -154,8 +180,15 @@ class RefKernel:
     def entities(self, shape, kind: str) -> list[dict[str, Any]]:
         from forgekernel.quadric import Cyl, DrilledSolid
 
+        from forgekernel.quadric import AxisStack, Cone, RevolveSolid, Sphere
+
         if kind != "face":
             raise NotImplementedError("ref enumerates faces only")
+        if isinstance(shape, (Cone, Sphere, AxisStack, RevolveSolid)):
+            # analytic composites: one descriptor per primitive (per-patch
+            # enumeration arrives at K2.2)
+            prims = getattr(shape, "prims", [shape])
+            return [{"surface": type(p).__name__.lower()} for p in prims]
         if isinstance(shape, Cyl):
             return [{"surface": "cylinder", "radius": float(shape.r),
                      "axis_dir": [0.0, 0.0, 1.0],
@@ -176,7 +209,9 @@ class RefKernel:
     def validate(self, shape) -> ValidationReport:
         from forgekernel.quadric import Cyl, DrilledSolid
 
-        if isinstance(shape, Cyl):
+        from forgekernel.quadric import AxisStack, Cone, RevolveSolid, Sphere
+
+        if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid)):
             return ValidationReport(ok=True, checks={"method": "analytic"},
                                     violations=[])
         if isinstance(shape, DrilledSolid):
@@ -200,7 +235,17 @@ class RefKernel:
     # -- honest refusals (each names its stage) -------------------------------
 
     def revolve(self, profile, angle_deg=360.0):
-        _nope("revolve", _K2)
+        from forgekernel.quadric import RevolveSolid
+
+        if angle_deg != 360.0:
+            _nope("revolve(partial angle)", "K2.2")
+        segs = profile.get("segments", [])
+        if any(s.get("kind") != "line" for s in segs):
+            _nope("revolve(arc profile)", "K2.2")
+        loop = [tuple(profile["start"])] + [tuple(s["to"]) for s in segs]
+        if loop[0] == loop[-1]:
+            loop = loop[:-1]
+        return RevolveSolid(loop)
 
     def loft(self, sections, *, ruled=False):
         _nope("loft", _K3)
