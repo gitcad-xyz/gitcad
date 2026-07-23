@@ -97,6 +97,75 @@ class Assembly:
     def mate(self, a: str, b: str) -> None:
         self.mates.append(Mate(a, b))
 
+    # -- component patterns (SW "linear/circular component pattern") -----------
+
+    def pattern_linear(self, seed: str, *, direction, spacing: float,
+                       count: int) -> list[Instance]:
+        """Replicate an existing instance ``count`` times along ``direction``
+        at ``spacing`` apart (count includes the seed). The seed keeps its
+        place; copies are named ``{seed}#1``, ``{seed}#2``, …. Returns the
+        newly created instances (excluding the seed)."""
+        if seed not in self.instances:
+            raise GitcadError(f"pattern_linear: no seed instance {seed!r}")
+        if count < 1:
+            raise GitcadError("pattern_linear: count must be >= 1")
+        base = self.instances[seed]
+        dx, dy, dz = (float(direction[0]), float(direction[1]),
+                      float(direction[2]) if len(direction) > 2 else 0.0)
+        length = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if length < _TOL:
+            raise GitcadError("pattern_linear: zero-length direction")
+        ux, uy, uz = dx / length, dy / length, dz / length
+        made: list[Instance] = []
+        tx, ty, tz = base.translate
+        for k in range(1, count):
+            step = k * spacing
+            name = f"{seed}#{k}"
+            if name in self.instances:
+                raise GitcadError(f"pattern_linear: duplicate copy name {name!r}")
+            inst = Instance(name, base.part,
+                            (tx + ux * step, ty + uy * step, tz + uz * step),
+                            base.rotate_z_deg)
+            self.instances[name] = inst
+            made.append(inst)
+        return made
+
+    def pattern_circular(self, seed: str, *, center=(0.0, 0.0),
+                         count: int, total_angle_deg: float = 360.0) -> list[Instance]:
+        """Replicate an instance ``count`` times about the global Z axis
+        through ``center`` (an XY point). Copies span ``total_angle_deg`` —
+        a full 360° drops the redundant final copy (it would coincide with
+        the seed); a partial arc keeps both ends. Each copy is the seed
+        rigidly rotated about ``center`` (translate revolves, ``rotate_z_deg``
+        advances), which is exact within the rotate-about-Z placement model."""
+        if seed not in self.instances:
+            raise GitcadError(f"pattern_circular: no seed instance {seed!r}")
+        if count < 1:
+            raise GitcadError("pattern_circular: count must be >= 1")
+        base = self.instances[seed]
+        cx, cy = float(center[0]), float(center[1])
+        # a closed 360° ring divides the full turn into ``count`` gaps; an
+        # open arc puts the last copy AT total_angle (count-1 gaps).
+        full = abs((total_angle_deg % 360.0)) < 1e-9 and total_angle_deg != 0.0
+        gaps = count if full else max(count - 1, 1)
+        step_deg = total_angle_deg / gaps
+        tx, ty, tz = base.translate
+        rx, ry = tx - cx, ty - cy
+        made: list[Instance] = []
+        for k in range(1, count):
+            ang = math.radians(step_deg * k)
+            ca, sa = math.cos(ang), math.sin(ang)
+            nx = cx + rx * ca - ry * sa
+            ny = cy + rx * sa + ry * ca
+            name = f"{seed}#{k}"
+            if name in self.instances:
+                raise GitcadError(f"pattern_circular: duplicate copy name {name!r}")
+            inst = Instance(name, base.part, (nx, ny, tz),
+                            base.rotate_z_deg + step_deg * k)
+            self.instances[name] = inst
+            made.append(inst)
+        return made
+
     # -- validation: interface checking (the whole point) ---------------------
 
     def validate(self) -> ValidationReport:
