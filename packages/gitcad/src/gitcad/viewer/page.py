@@ -43,12 +43,22 @@ PAGE = r"""<!DOCTYPE html>
   .chk h3{margin:0 0 6px;font-size:13px}
   .chk .ok{color:#3fb950} .chk .bad{color:#f85149}
   .chk li{color:#f85149;margin-left:1.2em;list-style:disc}
+  #review{position:fixed;inset:0;display:none;overflow:auto;padding:44px 24px 24px;
+          font-size:13px}
+  .rev{max-width:1100px;margin:0 auto 16px;border:1px solid var(--line);
+       border-radius:6px;padding:10px 14px}
+  .rev h3{margin:0 0 6px;font-size:13px} .rev small{color:var(--dim)}
+  .rev .bad{color:#f85149} .rev .good{color:#3fb950}
+  .rev .sxs{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+  .rev .pane{flex:1;min-width:300px;background:#fff;border-radius:4px;padding:6px}
+  .rev .pane h4{color:#57606a;margin:0 0 4px;font-size:11px}
+  .rev .pane svg{max-width:100%;height:auto;display:block}
   #explodebox{position:fixed;right:12px;top:40px;display:none;align-items:center;
               gap:8px;color:var(--dim);z-index:5}
   #explodebox input{width:140px;accent-color:var(--acc)}
 </style></head><body>
 <canvas id="gl"></canvas><div id="board"></div><div id="sheets"></div>
-<div id="checks"></div>
+<div id="checks"></div><div id="review"></div>
 <div id="tabs"></div>
 <div id="explodebox"><span>explode</span>
   <input id="explodeslider" type="range" min="0" max="100" value="0"></div>
@@ -403,17 +413,55 @@ function renderTabs(){
   if(sheetCount) mk("sheets", `schematics (${sheetCount})`);
   if(checksState) mk("checks",
     checksState.ok ? "checks ✓" : `checks (${checksState.total_violations})`);
+  if(reviewState) mk("review",
+    reviewState.gate_ok ? "review ✓" : `review (${reviewState.summary.introduced})`);
   if(activeTab === "3d") mk("measure", "measure", "tool");
 }
 function showTab(){
   document.getElementById("sheets").style.display = activeTab === "sheets" ? "block" : "none";
   document.getElementById("checks").style.display = activeTab === "checks" ? "block" : "none";
+  document.getElementById("review").style.display = activeTab === "review" ? "block" : "none";
   const three = activeTab === "3d";
   canvas.style.display = three ? "block" : "none";
   hud.style.display = three ? "block" : "none";
   measureHud.style.display = three ? "block" : "none";
 }
-let checksState = null;
+let checksState = null, reviewState = null;
+async function loadReview(baseRef){
+  if(!baseRef){ reviewState = null; return; }
+  try {
+    reviewState = await (await fetch("/api/review")).json();
+    if(reviewState.error) throw new Error(reviewState.error);
+    const el = document.getElementById("review");
+    el.innerHTML = "";
+    const head = document.createElement("div");
+    head.className = "rev";
+    head.innerHTML = `<h3>review vs <code>${baseRef}</code> — ` +
+      `<span class="${reviewState.gate_ok ? "good" : "bad"}">` +
+      `${reviewState.gate_ok ? "gate PASS" : "gate FAIL"}</span> · ` +
+      `${reviewState.summary.changed} file(s) · ` +
+      `${reviewState.summary.introduced} introduced · ` +
+      `${reviewState.summary.fixed} fixed</h3>`;
+    el.appendChild(head);
+    for(const f of reviewState.files){
+      const card = document.createElement("div");
+      card.className = "rev";
+      let html = `<h3>${f.file} <small>(${f.kind}, ${f.status})</small></h3>`;
+      for(const v of f.violations_introduced)
+        html += `<div class="bad">introduced: ${v}</div>`;
+      for(const v of f.violations_fixed)
+        html += `<div class="good">fixed: ${v}</div>`;
+      if(f.render_old || f.render_new){
+        html += '<div class="sxs">' +
+          `<div class="pane"><h4>base</h4>${f.render_old || ""}</div>` +
+          `<div class="pane"><h4>head</h4>${f.render_new || ""}</div></div>`;
+      }
+      card.innerHTML = html;
+      el.appendChild(card);
+    }
+    renderTabs();
+  } catch(e){ reviewState = null; }
+}
 async function loadChecks(){
   try {
     checksState = await (await fetch("/api/checks")).json();
@@ -500,6 +548,7 @@ async function poll(){
       }
       loadSheets();
       loadChecks();
+      loadReview(v.review_base);
     }
   } catch(e){ err.textContent = String(e); }
   setTimeout(poll, 1000);

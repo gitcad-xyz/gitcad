@@ -84,3 +84,43 @@ def test_client_ships_checks_tab():
     assert '"/api/checks"' in PAGE
     assert "checksState" in PAGE
     assert '"#checks"' in PAGE
+
+
+def test_review_mode_endpoint_and_client(tmp_path):
+    """gitcad-view --review BASE: the review tab, in-app."""
+    import json as _json
+    import threading
+    import urllib.request
+
+    from gitcad.viewer.server import serve
+
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@t")
+    _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / "main.sch").write_text(_sch("+3V3"), encoding="utf-8")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "base")
+    _git(tmp_path, "branch", "-M", "main")
+    (tmp_path / "main.sch").write_text(_sch("+5V"), encoding="utf-8")
+    _git(tmp_path, "commit", "-aqm", "hot rail")
+
+    httpd = serve(str(tmp_path / "main.sch"), port=0, review_base="main~1")
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        version = _json.load(urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/version"))
+        assert version["review_base"] == "main~1"
+        report = _json.load(urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/review"))
+        assert not report["gate_ok"]
+        assert any(v.startswith("pin-overvoltage")
+                   for f in report["files"]
+                   for v in f["violations_introduced"])
+    finally:
+        httpd.shutdown()
+
+    from gitcad.viewer.page import PAGE
+
+    assert '"/api/review"' in PAGE and "loadReview" in PAGE
+    assert "review_base" in PAGE

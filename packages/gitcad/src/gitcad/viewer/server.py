@@ -315,9 +315,10 @@ def discover_schematics(root: Path, limit: int = 12) -> list[dict]:
 
 
 class _Handler(BaseHTTPRequestHandler):
-    # Set by serve(): watched file path + kernel.
+    # Set by serve(): watched file path + kernel (+ optional review base ref).
     path_watched: Path
     kernel: Kernel
+    review_base: str | None = None
 
     def log_message(self, *args) -> None:  # quiet
         pass
@@ -339,8 +340,25 @@ class _Handler(BaseHTTPRequestHandler):
                 digest = hashlib.sha256(text.encode()).hexdigest()
                 kind = detect_kind(text)
                 self._send(200, json.dumps({"version": digest, "kind": kind,
-                                            "name": self.path_watched.name}).encode(),
+                                            "name": self.path_watched.name,
+                                            "review_base": self.review_base}).encode(),
                            "application/json")
+            elif self.path == "/api/review":
+                if not self.review_base:
+                    self._send(404, b'{"error": "no review base configured"}',
+                               "application/json")
+                    return
+                import subprocess as _sp
+
+                from gitcad.review import review_range
+
+                top = _sp.run(["git", "-C", str(self.path_watched.parent),
+                               "rev-parse", "--show-toplevel"],
+                              capture_output=True, text=True)
+                if top.returncode != 0:
+                    raise ValueError("watched file is not inside a git repo")
+                report = review_range(top.stdout.strip(), self.review_base)
+                self._send(200, json.dumps(report).encode(), "application/json")
             elif self.path == "/api/mesh":
                 kind = detect_kind(text)
                 if kind == "assembly":
@@ -387,11 +405,15 @@ class _Handler(BaseHTTPRequestHandler):
                        "application/json")
 
 
-def serve(path: str, port: int = 8137, kernel: Kernel | None = None) -> ThreadingHTTPServer:
-    """Start (and return) the server; caller decides whether to block."""
+def serve(path: str, port: int = 8137, kernel: Kernel | None = None,
+          review_base: str | None = None) -> ThreadingHTTPServer:
+    """Start (and return) the server; caller decides whether to block.
+    ``review_base``: a git ref — the viewer grows a review tab comparing
+    the design's repo against it (the gitcad-review report, in-app)."""
     handler = type("Handler", (_Handler,), {
         "path_watched": Path(path),
         "kernel": kernel or get_kernel(),
+        "review_base": review_base,
     })
     return ThreadingHTTPServer(("127.0.0.1", port), handler)
 
@@ -400,8 +422,10 @@ def main() -> None:  # pragma: no cover - CLI entrypoint
     ap = argparse.ArgumentParser(description="gitcad viewer — live local window on a model or board")
     ap.add_argument("file", help="a .gitcad.json model or board document")
     ap.add_argument("--port", type=int, default=8137)
+    ap.add_argument("--review", metavar="BASE",
+                    help="git ref to review against (adds the review tab)")
     args = ap.parse_args()
-    httpd = serve(args.file, args.port)
+    httpd = serve(args.file, args.port, review_base=args.review)
     print(f"gitcad viewer: http://127.0.0.1:{args.port}/  (watching {args.file}, Ctrl+C to stop)")
     try:
         httpd.serve_forever()
