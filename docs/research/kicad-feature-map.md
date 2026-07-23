@@ -101,8 +101,9 @@ state — updated statuses for the previously-missing rows:
 | Sheet text annotations | ✅ | authoring + import + render |
 | Eagle import | 🟡 | .sch netlist-level (explicit XML nets); board geometry later |
 | Sheet reuse (file instanced twice) | ⏸ deferred | needs a ref-instancing model (KiCad `instances` semantics); fails loud today |
-| Multi-layer (>2 copper) | ⏸ deferred | a board-model generation; refuses honestly today |
-| IPC-2581 / ODB++ / GenCAD | ⏸ deferred | large XML/structured specs — shipping an unconformant file would be worse than none; needs a conformance target (reference viewer/fab acceptance) first |
+| Multi-layer (2–16 copper) | ✅ | top/in1..inN/bottom; per-layer DRC/connectivity/Gerbers; through-vias (blind/buried deferred) |
+| IPC-2581 (rev C) | ✅ | conformance-benchmarked element-for-element vs kicad-cli's own export on the real board (holes 58=58, components identical, nets consistent); in the fab package |
+| ODB++ / GenCAD | ⏸ deferred | IPC-2581 covers the modern-exchange need; these on demand |
 | Altium binary import | ⏸ deferred | OLE compound format; route through Altium→KiCad conversion meanwhile |
 | Autorouting / push-and-shove / teardrops | ⏸ deferred | route() covers agent routing; interactive routing is GUI-era work |
 | Schematic PDF plot | ⏸ deferred | SVG ships; PDF wrapper when the drawing PDF engine grows text |

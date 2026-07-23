@@ -512,6 +512,19 @@ def schematic_export_kicad(schematic: str) -> dict[str, Any]:
     return {"netlist": to_kicad_netlist(Schematic.loads(schematic))}
 
 
+@tool("board_ipc2581")
+def board_ipc2581(board: str, origination: str = "1970-01-01T00:00:00") -> dict[str, Any]:
+    """IPC-2581C export — the modern fab/assembly exchange XML (stackup,
+    profile, packages, components, logical nets, per-layer features,
+    drills). Structure conformance-benchmarked element-for-element against
+    kicad-cli's own IPC-2581 on the same board. Deterministic: pass
+    origination only when a customer needs a real date."""
+    from gitcad.ecad import Board
+    from gitcad.ecad.ipc2581 import to_ipc2581
+
+    return {"ipc2581": to_ipc2581(Board.loads(board), origination=origination)}
+
+
 @tool("board_ipcd356")
 def board_ipcd356(board: str) -> dict[str, Any]:
     """IPC-D-356 electrical test netlist (flying probe / bed-of-nails):

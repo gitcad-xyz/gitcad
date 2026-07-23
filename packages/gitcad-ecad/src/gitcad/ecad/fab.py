@@ -29,6 +29,12 @@ def pick_and_place(board: Board) -> str:
     return buf.getvalue()
 
 
+def _ipc2581_text(board: Board) -> str:
+    from gitcad.ecad.ipc2581 import to_ipc2581
+
+    return to_ipc2581(board)
+
+
 def export_fab(board: Board, outdir: str) -> dict[str, str]:
     """Write the full fab package. Returns {file kind: path}. Raises if the
     board fails fab-readiness validation — never ship a known-bad package."""
@@ -52,6 +58,7 @@ def export_fab(board: Board, outdir: str) -> dict[str, str]:
         "drill": (f"{n}.drl", excellon.drills(board)),
         "drill_npth": (f"{n}-npth.drl", excellon.npth_drills(board)),
         "pick_and_place": (f"{n}-pnp.csv", pick_and_place(board)),
+        "ipc2581": (f"{n}-ipc2581.xml", _ipc2581_text(board)),
     }
     written: dict[str, str] = {}
     for kind, (fname, content) in files.items():
