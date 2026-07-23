@@ -70,6 +70,17 @@ class NullKernel:
                                        "rotate_axis": list(rotate_axis),
                                        "rotate_deg": rotate_deg}, (shape,))
 
+    def scale(self, shape: Shape, fx: float, fy: float | None = None,
+              fz: float | None = None) -> Shape:
+        _require_positive(fx=fx)
+        return NullShape("scale", {"fx": fx, "fy": fy, "fz": fz}, (shape,))
+
+    def draft(self, shape: Shape, faces: list[int], angle_deg: float,
+              pull: tuple[float, float, float] = (0, 0, 1),
+              neutral_z: float = 0.0) -> Shape:
+        return NullShape("draft", {"faces": list(faces), "angle_deg": angle_deg},
+                         (shape,))
+
     def bbox(self, shape: Shape) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
         """Analytic bounds for primitives; unions/first-child for symbolic ops.
         Approximate by design — good enough to test envelope derivation without

@@ -288,7 +288,8 @@ def _resolve_entity_indices(entity_ids: list[str], input_feature: str,
 # inputs silently building a disconnected feature was a dogfood finding.
 _REQUIRED_INPUTS = {"boolean": 2, "fillet": 1, "chamfer": 1, "shell": 1,
                     "move": 1, "hole": 1, "boss": 1, "mirror": 1,
-                    "pattern_linear": 1, "pattern_circular": 1}
+                    "pattern_linear": 1, "pattern_circular": 1,
+                    "scale": 1, "draft": 1, "split": 1, "rib": 1}
 
 _AXIS_ROTATION = {"z": None, "y": ((1, 0, 0), -90.0), "x": ((0, 1, 0), 90.0)}
 
@@ -450,4 +451,54 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
                 translate=(x, y, top_z - csink_depth))
             tool = kernel.boolean("union", tool, cs)
         return kernel.boolean("cut", ins[0], tool)
+    if f.op == "scale":
+        # SW-map P4: uniform ("factor") or anisotropic ("fx"/"fy"/"fz").
+        if "factor" in p:
+            return kernel.scale(ins[0], p["factor"])
+        return kernel.scale(ins[0], p.get("fx", 1.0), p.get("fy", 1.0),
+                            p.get("fz", 1.0))
+    if f.op == "draft":
+        # Molding draft on selected faces (lineage-stable ids), pulled along
+        # `pull` about the neutral plane z=`neutral_z`.
+        face_indices = _resolve_entity_indices(p.get("faces", []), f.inputs[0],
+                                               result, kind="face")
+        return kernel.draft(ins[0], face_indices, p["angle_deg"],
+                            pull=tuple(p.get("pull", (0, 0, 1))),
+                            neutral_z=p.get("neutral_z", 0.0))
+    if f.op == "split":
+        # Keep one side of an axis-aligned plane: a half-space boolean sized
+        # from the body's own bounds — the SolidWorks Split, agent-first.
+        normal, offset = p.get("normal", "z"), p["offset"]
+        keep = p.get("keep", "below")
+        if normal not in ("x", "y", "z") or keep not in ("above", "below"):
+            raise GitcadError(
+                f"split wants normal x|y|z and keep above|below (feature {f.id})")
+        (x0, y0, z0), (x1, y1, z1) = kernel.bbox(ins[0])
+        pad = 1.0 + max(x1 - x0, y1 - y0, z1 - z0)
+        lo = {"x": x0, "y": y0, "z": z0}[normal] - pad
+        hi = {"x": x1, "y": y1, "z": z1}[normal] + pad
+        start = offset if keep == "above" else lo
+        end = hi if keep == "above" else offset
+        dims = {"x": (end - start, (y1 - y0) + 2 * pad, (z1 - z0) + 2 * pad),
+                "y": ((x1 - x0) + 2 * pad, end - start, (z1 - z0) + 2 * pad),
+                "z": ((x1 - x0) + 2 * pad, (y1 - y0) + 2 * pad, end - start)}[normal]
+        trans = {"x": (start, y0 - pad, z0 - pad),
+                 "y": (x0 - pad, start, z0 - pad),
+                 "z": (x0 - pad, y0 - pad, start)}[normal]
+        tool = kernel.transform(kernel.box(*dims), translate=trans)
+        return kernel.boolean("intersect", ins[0], tool)
+    if f.op == "rib":
+        # Thin stiffening wall along a segment, unioned onto the body:
+        # (x1,y1)->(x2,y2) at base_z, `height` tall, `thickness` wide.
+        x1_, y1_, x2_, y2_ = p["x1"], p["y1"], p["x2"], p["y2"]
+        length = math.hypot(x2_ - x1_, y2_ - y1_)
+        if length <= 0:
+            raise GitcadError(f"rib is zero-length (feature {f.id})")
+        th = p["thickness"]
+        slab = kernel.box(length, th, p["height"])
+        slab = kernel.transform(slab, translate=(0, -th / 2, 0))
+        ang = math.degrees(math.atan2(y2_ - y1_, x2_ - x1_))
+        slab = kernel.transform(slab, rotate_axis=(0, 0, 1), rotate_deg=ang)
+        slab = kernel.transform(slab, translate=(x1_, y1_, p.get("base_z", 0.0)))
+        return kernel.boolean("union", ins[0], slab)
     raise GitcadError(f"unknown operation {f.op!r} (feature {f.id})")

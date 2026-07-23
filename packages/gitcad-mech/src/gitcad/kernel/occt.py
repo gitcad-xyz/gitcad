@@ -231,6 +231,53 @@ class OcctKernel:
         t.Multiply(trsf)  # rotate first, then translate
         return BRepBuilderAPI_Transform(shape, t, True).Shape()
 
+    def scale(self, shape: Shape, fx: float, fy: float | None = None,
+              fz: float | None = None) -> Shape:
+        """Uniform (one factor) or anisotropic (three) scale about origin."""
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_GTransform
+        from OCP.gp import gp_GTrsf
+
+        if fy is None and fz is None:
+            trsf = gp_Trsf()
+            trsf.SetScale(gp_Pnt(0, 0, 0), fx)
+            return BRepBuilderAPI_Transform(shape, trsf, True).Shape()
+        g = gp_GTrsf()
+        g.SetValue(1, 1, fx)
+        g.SetValue(2, 2, fy if fy is not None else fx)
+        g.SetValue(3, 3, fz if fz is not None else fx)
+        return BRepBuilderAPI_GTransform(shape, g, True).Shape()
+
+    def draft(self, shape: Shape, faces: list[int], angle_deg: float,
+              pull: tuple[float, float, float] = (0, 0, 1),
+              neutral_z: float = 0.0) -> Shape:
+        """Molding draft: tilt the listed faces by angle_deg about the
+        neutral plane z=neutral_z, pull direction ``pull``."""
+        from OCP.BRepOffsetAPI import BRepOffsetAPI_DraftAngle
+
+        all_faces = _unique_shapes(shape, TopAbs_FACE)
+        neutral = gp_Pln(gp_Pnt(0, 0, neutral_z), gp_Dir(0, 0, 1))
+        mk = BRepOffsetAPI_DraftAngle(shape)
+        for idx in faces:
+            if idx >= len(all_faces):
+                raise KernelError(
+                    f"draft: face index {idx} out of range ({len(all_faces)} faces)",
+                    FailureSignature(op="draft", diagnostic="FaceIndexOutOfRange",
+                                     kernel=self.name))
+            mk.Add(TopoDS.Face_s(all_faces[idx]), gp_Dir(*pull),
+                   math.radians(angle_deg), neutral)
+            if not mk.AddDone():
+                raise KernelError(
+                    f"draft: face {idx} rejected (not draftable along pull)",
+                    FailureSignature(op="draft", diagnostic="AddFailed",
+                                     kernel=self.name))
+        mk.Build()
+        if not mk.IsDone():
+            raise KernelError(
+                "draft failed to build",
+                FailureSignature(op="draft", diagnostic="BuildFailed",
+                                 kernel=self.name))
+        return mk.Shape()
+
     # -- sketch-based features (the 2D -> 3D workflow) ------------------------
 
     def _profile_wire(self, profile: dict, z: float = 0.0) -> "TopoDS_Shape":

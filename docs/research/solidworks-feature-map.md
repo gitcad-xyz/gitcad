@@ -54,16 +54,16 @@ Status is honest: ✅ shipped · 🟡 partial · ❌ missing · — non-goal.
 | Variable-radius / face / full-round fillet | per-edge radius table | ❌ |
 | Chamfer | `chamfer` | ✅ |
 | Shell | `shell` | ✅ |
-| **Draft** | face-angle op for molded/cast parts | ❌ P4 |
-| **Rib** | thin-extrude-to-body helper | ❌ P4 |
+| **Draft** | ✅ `draft` op: selected faces (lineage-stable ids), pull dir, neutral plane; non-draftable faces refused loud | ✅ |
+| **Rib** | ✅ `rib` op: wall along a segment, exact-volume-tested | ✅ |
 | Hole Wizard | `hole` (plain/cbore/csink/pilot) | ✅ |
 | **Threads (cosmetic + modeled)** | thread spec as data on holes; modeled via helix sweep | ❌ P5 |
 | Linear/circular pattern | `pattern_linear` / `pattern_circular` | ✅ |
 | Mirror | `mirror` | ✅ |
 | Table-driven pattern | placements-as-data pattern (agent-natural) | ❌ |
-| Scale | uniform/anisotropic scale feature | ❌ (kernel `transform` exists; trivial) |
+| Scale | ✅ `scale` op (uniform factor or fx/fy/fz) | ✅ |
 | Combine (booleans) | `boolean` fuse/cut/common | ✅ |
-| Split body | split-by-plane/face | ❌ |
+| Split body | ✅ `split` op: axis-aligned plane, keep above/below, self-sized half-space | ✅ |
 | Move/Copy body | `move` (translate/rotate) | ✅ |
 | Wrap / Dome / Freeform | — | ❌ defer (niche) |
 | Reference planes | sketch planes incl. sketch-on-face | ✅ |
@@ -185,8 +185,8 @@ What actually converts a SolidWorks user, in order of leverage:
 3. ~~P3 Sheet metal + flat pattern DXF~~ — SHIPPED: `gitcad.sheetmetal`
    (declarative flanges, exact K-factor unfold, shop DXF, DFM checks,
    folded solid via the ordinary Document pipeline).
-4. **P4 Draft + rib + scale + split (+ draft/thickness analysis)** —
-   the everyday plastic-part verbs.
+4. ~~P4 Draft + rib + scale + split~~ — SHIPPED as document ops with
+   OCCT volume proofs (draft/thickness *analysis* checks remain open).
 5. **P5 Helix + 3D curves** — unlocks modeled threads, springs, and
    later weldments.
 6. **P6 Fastener generator** — Toolbox, agent-first: every `mech.bolt`
