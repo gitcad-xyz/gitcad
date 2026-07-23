@@ -380,7 +380,8 @@ def _resolve_entity_indices(entity_ids: list[str], input_feature: str,
 _REQUIRED_INPUTS = {"boolean": 2, "fillet": 1, "chamfer": 1, "shell": 1,
                     "move": 1, "hole": 1, "boss": 1, "mirror": 1,
                     "pattern_linear": 1, "pattern_circular": 1,
-                    "scale": 1, "draft": 1, "split": 1, "rib": 1}
+                    "scale": 1, "draft": 1, "split": 1, "rib": 1,
+                    "engrave": 1}
 
 _AXIS_ROTATION = {"z": None, "y": ((1, 0, 0), -90.0), "x": ((0, 1, 0), 90.0)}
 
@@ -541,6 +542,30 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
                 kernel.cone(dia / 2, p["csink_diameter"] / 2, csink_depth),
                 translate=(x, y, top_z - csink_depth))
             tool = kernel.boolean("union", tool, cs)
+        return kernel.boolean("cut", ins[0], tool)
+    if f.op == "engrave":
+        # SW-map P8: sketch text as geometry — the shared stroke font
+        # (same glyphs as ECAD silkscreen) cut into the top face as
+        # rectangular grooves per stroke segment.
+        from gitcad.strokefont import text_strokes
+
+        height = p["height"]
+        groove = p.get("groove", height * 0.12)
+        depth = p.get("depth", 0.4)
+        top_z = p["top_z"]
+        tool = None
+        for x1_, y1_, x2_, y2_ in text_strokes(p["text"], p["x"], p["y"], height):
+            seg_len = math.hypot(x2_ - x1_, y2_ - y1_)
+            if seg_len <= 0:
+                continue
+            slab = kernel.box(seg_len + groove, groove, depth)
+            slab = kernel.transform(slab, translate=(-groove / 2, -groove / 2, 0))
+            ang = math.degrees(math.atan2(y2_ - y1_, x2_ - x1_))
+            slab = kernel.transform(slab, rotate_axis=(0, 0, 1), rotate_deg=ang)
+            slab = kernel.transform(slab, translate=(x1_, y1_, top_z - depth))
+            tool = slab if tool is None else kernel.boolean("union", tool, slab)
+        if tool is None:
+            raise GitcadError(f"engrave text is empty (feature {f.id})")
         return kernel.boolean("cut", ins[0], tool)
     if f.op == "spring":
         # SW-map P5: helical wire swept with a round section — a coil spring

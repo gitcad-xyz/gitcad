@@ -92,7 +92,7 @@ Status is honest: ✅ shipped · 🟡 partial · ❌ missing · — non-goal.
 | Sketch on face | ✅ | ✅ |
 | 3D sketch | 3D polyline/curve paths (sweeps, weldments need it) | ❌ P5 |
 | Convert/offset entities | derive profile from existing geometry | ❌ |
-| Sketch text | stroke-font text profiles (engrave/emboss) — font already ships in ECAD silkscreen | ❌ P8 |
+| Sketch text | ✅ `engrave` op: shared stroke font (moved to gitcad-core, same glyphs as silkscreen) cut as grooves; OCCT volume-verified | ✅ |
 
 ## 3. Surfaces
 
@@ -161,7 +161,7 @@ play. Mold tools (parting lines, core/cavity) ❌ defer; draft analysis
 |---|---|---|
 | Standard/projected views | HLR engine | ✅ |
 | Section views | ✅ | ✅ |
-| Detail views | scaled crop view | ❌ P8 |
+| Detail views | ✅ circle-clipped scaled crops of the top view with source marker + letter (`details=[{cx,cy,r,scale}]`) | ✅ |
 | Broken / crop views | — | ❌ defer |
 | Associative dimensions | hole callouts, position dims | ✅ |
 | **GD&T: FCF, datums, tolerances** | ✅ tolerances-as-data on feature ids; GD&T block + toleranced hole callouts on drawings | ✅ |
@@ -203,7 +203,8 @@ What actually converts a SolidWorks user, in order of leverage:
    bolt family via P1+P2; populate + mate + validate; assembly_fasteners MCP).
 7. ~~P7 Tolerances/GD&T as data~~ — SHIPPED: datums/FCFs/± in the
    document text, validated, surfaced on drawings.
-8. **P8 Detail views + sketch text** — drawing completeness, engraving.
+8. ~~P8 Detail views + sketch text~~ — SHIPPED. The attack list is
+   complete: every P1-P8 item landed, verification-first.
 
 Deferred with reasons recorded: FEA and motion (no fake physics — wait
 for a real solver integration), surfacing suite, mold tools, weldments,

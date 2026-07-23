@@ -256,7 +256,8 @@ def model_export(model: str, path: str, fmt: str = "step") -> dict[str, Any]:
 
 
 @tool("model_drawing")
-def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3") -> dict[str, Any]:
+def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3",
+                  details: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Build the model and emit a dimensioned 2D drawing (SVG or PDF by file
     extension) of the final feature — front/top/right/iso, third angle."""
     from gitcad.drawing import make_drawing
@@ -287,7 +288,8 @@ def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3")
             rp = resolve_value(f.params, env)
             threads[(round(float(rp["x"]), 3), round(float(rp["y"]), 3))] = " ".join(parts)
     d = make_drawing(doc.build(kernel).final(doc), title=title, sheet=sheet,
-                     thread_specs=threads, notes=doc.tolerance_notes())
+                     thread_specs=threads, notes=doc.tolerance_notes(),
+                     details=details)
     if path.lower().endswith(".pdf"):
         with open(path, "wb") as f:
             f.write(d.to_pdf())

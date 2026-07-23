@@ -4,6 +4,7 @@ with overall dimensions and a title block. Output via :mod:`.svg` / :mod:`.pdf`.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 from gitcad.drawing import hlr
@@ -71,9 +72,47 @@ def _transform(polys, scale: float, ox: float, oy: float, bmin: Point):
     return [[(ox + (x - bmin[0]) * scale, oy + (y - bmin[1]) * scale) for x, y in poly] for poly in polys]
 
 
+def _clip_poly_to_circle(poly, cx: float, cy: float, r: float):
+    """Sub-polylines of ``poly`` inside the circle — exact segment clipping
+    (quadratic in the segment parameter), for detail views."""
+    out: list[list[Point]] = []
+    run: list[Point] = []
+
+    def inside(px, py):
+        return (px - cx) ** 2 + (py - cy) ** 2 <= r * r
+
+    for (x1, y1), (x2, y2) in zip(poly, poly[1:]):
+        dx, dy = x2 - x1, y2 - y1
+        a = dx * dx + dy * dy
+        fx, fy = x1 - cx, y1 - cy
+        b = 2 * (fx * dx + fy * dy)
+        c = fx * fx + fy * fy - r * r
+        ts: list[float] = []
+        if a > 1e-12:
+            disc = b * b - 4 * a * c
+            if disc > 0:
+                sq = math.sqrt(disc)
+                ts = sorted(t for t in ((-b - sq) / (2 * a), (-b + sq) / (2 * a))
+                            if 0.0 < t < 1.0)
+        pts = [(x1, y1)] + [(x1 + t * dx, y1 + t * dy) for t in ts] + [(x2, y2)]
+        for (ax, ay), (bx2, by2) in zip(pts, pts[1:]):
+            mx, my = (ax + bx2) / 2, (ay + by2) / 2
+            if inside(mx, my):
+                if not run:
+                    run = [(ax, ay)]
+                run.append((bx2, by2))
+            elif run:
+                out.append(run)
+                run = []
+    if run:
+        out.append(run)
+    return out
+
+
 def make_drawing(shape, kernel=None, *, title: str = "part", sheet: str = "A3",
                  thread_specs: dict | None = None,
-                 notes: list | None = None) -> Drawing:
+                 notes: list | None = None,
+                 details: list | None = None) -> Drawing:
     """Project ``shape`` into front/top/right/iso via the kernel's HLR engine,
     lay out third-angle on the sheet, add overall dimensions."""
     if kernel is None:
@@ -125,6 +164,39 @@ def make_drawing(shape, kernel=None, *, title: str = "part", sheet: str = "A3",
                             _fmt(size["front"][1]), vertical=True))
     d.dims.append(Dimension((tx - DIM_OFFSET, ty), (tx - DIM_OFFSET, ty + th),
                             _fmt(size["top"][1]), vertical=True))
+
+    # Detail views (SW-map P8): circle-clipped scaled crops of the TOP view.
+    # Each spec is model-space {cx, cy, r, scale (default 2)}; the parent
+    # view gets a circle marker + letter, the crop lands bottom-right.
+    tx0, ty0 = placements["top"]
+    b_top = bb["top"]
+    detail_x = w - MARGIN
+    for di, spec in enumerate(details or []):
+        letter = chr(ord("A") + di)
+        dcx, dcy, dr = spec["cx"], spec["cy"], spec["r"]
+        dscale = spec.get("scale", 2.0) * scale
+        # marker on the parent top view (sheet coords)
+        mcx = tx0 + (dcx - b_top[0]) * scale
+        mcy = ty0 + (dcy - b_top[1]) * scale
+        mr = dr * scale
+        circle = [(mcx + mr * math.cos(a), mcy + mr * math.sin(a))
+                  for a in [i * math.tau / 32 for i in range(33)]]
+        d.views[[v.name for v in d.views].index("top")].visible.append(circle)
+        d.callouts.append(Callout((mcx + mr * 0.7071, mcy + mr * 0.7071),
+                                  (mcx + mr + 3.0, mcy + mr + 3.0), letter))
+        # the crop itself, rescaled and placed bottom-right, right-to-left
+        clipped_v = [c for poly in proj["top"]["visible"]
+                     for c in _clip_poly_to_circle(poly, dcx, dcy, dr)]
+        clipped_h = [c for poly in proj["top"]["hidden"]
+                     for c in _clip_poly_to_circle(poly, dcx, dcy, dr)]
+        box = 2 * dr * dscale
+        detail_x -= box + GAP
+        ox, oy = detail_x, MARGIN + 30.0
+        d.views.append(PlacedView(
+            name=f"detail_{letter}",
+            visible=_transform(clipped_v, dscale, ox, oy, (dcx - dr, dcy - dr)),
+            hidden=_transform(clipped_h, dscale, ox, oy, (dcx - dr, dcy - dr)),
+            label=f"DETAIL {letter}  ({_fmt(spec.get('scale', 2.0))}:1)"))
 
     _add_hole_dimensions(d, kernel, shape, placements["top"], bb["top"], scale,
                          thread_specs or {})
