@@ -87,7 +87,8 @@ def _lib_symbols(lib_symbols) -> dict[str, dict]:
 
 
 def import_kicad_sch(path: str, *,
-                     _seen: frozenset = frozenset()) -> tuple[Schematic, ImportReport]:
+                     _seen: frozenset = frozenset(),
+                     _inst_path: tuple = ()) -> tuple[Schematic, ImportReport]:
     report = ImportReport(source=path, format="kicad_sch")
     with open(path, encoding="utf-8") as f:
         root = parse(f.read())
@@ -95,6 +96,13 @@ def import_kicad_sch(path: str, *,
         raise GitcadError(f"{path!r} is not a kicad_sch document")
 
     lib = _lib_symbols(find_one(root, "lib_symbols"))
+
+    # Instance path (KiCad instances model): "/root-uuid/sheet-uuid/..." keys
+    # the per-instance reference of every symbol, which is what makes SHEET
+    # REUSE work — one file instanced twice yields different refs per path.
+    # At the root the path is just this file's own uuid.
+    inst_chain = _inst_path or (str(value_of(root, "uuid", default="")),)
+    inst_key = "/" + "/".join(u for u in inst_chain if u)
 
     # hierarchical subsheets: parsed here, recursed + bridged at the end
     subsheets: list[dict] = []
@@ -112,7 +120,15 @@ def import_kicad_sch(path: str, *,
             "name": props.get("Sheetname") or props.get("Sheet name")
             or (file.rsplit(".", 1)[0] or "sheet"),
             "file": file, "x": float(at[1]), "y": float(at[2]),
-            "w": float(size[1]), "h": float(size[2]), "pins": spins})
+            "w": float(size[1]), "h": float(size[2]), "pins": spins,
+            "uuid": str(value_of(sh, "uuid", default=""))})
+    # sheet-scope names must be unique or two instances' locals would merge
+    seen_names: dict[str, int] = {}
+    for ss in subsheets:
+        n = seen_names.get(ss["name"], 0)
+        seen_names[ss["name"]] = n + 1
+        if n:
+            ss["name"] = f"{ss['name']}#{n + 1}"
 
     # buses: VISUAL groupings — connectivity comes from member labels, which
     # unify by name in the shared engine, so a bus imports as graphics plus
@@ -164,6 +180,24 @@ def import_kicad_sch(path: str, *,
         mirror = value_of(sym, "mirror")
         props = {p[1]: str(p[2]) for p in find_all(sym, "property") if len(p) >= 3}
         ref = props.get("Reference", "?")
+        # per-instance reference: the entry whose path matches OUR instance
+        # chain wins (sheet reuse); a lone entry is trusted as-is
+        inst = find_one(sym, "instances")
+        if inst is not None:
+            by_path = {}
+            for proj in find_all(inst, "project"):
+                for pth in find_all(proj, "path"):
+                    pref = value_of(pth, "reference")
+                    if pref is not None and len(pth) >= 2:
+                        by_path[str(pth[1])] = str(pref)
+            if inst_key in by_path:
+                ref = by_path[inst_key]
+            elif len(by_path) == 1:
+                ref = next(iter(by_path.values()))
+            elif by_path:
+                report.warnings.append(
+                    f"symbol {ref!r}: no instance entry for path {inst_key!r} "
+                    f"— using the Reference property")
         entry = lib.get(lib_id, {"pins": [], "shapes": []})
         pins = entry["pins"]
 
@@ -249,7 +283,11 @@ def import_kicad_sch(path: str, *,
             report.count("labels", 1)
 
     # -- transform self-check: wire endpoints should land somewhere known -----
-    rate = wire_end_hit_rate(pin_pts, wires_mm, net_names)
+    # sheet pins are legitimate wire targets too, else hierarchy sheets
+    # self-report a false transform warning
+    sheet_pin_pts = [((sp["x"], sp["y"]), f"sheet:{ss['name']}.{sp['name']}", "sheet_pin")
+                     for ss in subsheets for sp in ss["pins"]]
+    rate = wire_end_hit_rate(pin_pts + sheet_pin_pts, wires_mm, net_names)
     if rate is not None:
         report.imported["wire_end_hit_pct"] = round(rate * 100)
         if rate < 0.9:
@@ -280,7 +318,9 @@ def import_kicad_sch(path: str, *,
                 elif not cp.is_file():
                     report.warnings.append(f"sheet file missing: {ss['file']!r}")
                 else:
-                    child, crep = import_kicad_sch(str(cp), _seen=seen)
+                    child, crep = import_kicad_sch(
+                        str(cp), _seen=seen,
+                        _inst_path=inst_chain + (ss["uuid"],))
                     report.warnings += [f"{ss['name']}: {w}" for w in crep.warnings]
             children.append(child)
         report.imported["subsheets"] = sum(1 for c in children if c is not None)
@@ -314,8 +354,9 @@ def _hier_merge(sch, parent_nets, subsheets, children, query_net,
       across every sheet;
     - everything else in a child is sheet-scoped: names become
       ``sheetname/NAME`` so locals never collide across sheets.
-    Sheet REUSE (one file instanced twice) is not yet supported — duplicate
-    refs fail loud rather than silently sharing components."""
+    Sheet REUSE (one file instanced twice) resolves per-instance refs from
+    the KiCad instances model upstream; refs that STILL collide here are a
+    genuine error and fail loud rather than silently sharing components."""
     from gitcad.errors import GitcadError
 
     uf: dict = {}
@@ -414,6 +455,7 @@ def _hier_merge(sch, parent_nets, subsheets, children, query_net,
         for comp in child.components:
             if comp.ref in have:
                 raise GitcadError(
-                    f"duplicate ref {comp.ref!r} across sheets — sheet reuse "
-                    "(one file instanced twice) is not yet supported")
+                    f"duplicate ref {comp.ref!r} across sheets — reused "
+                    "sheets need per-instance references (KiCad instances "
+                    "blocks); re-annotate the design")
             sch.components.append(comp)

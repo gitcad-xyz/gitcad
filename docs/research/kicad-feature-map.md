@@ -16,7 +16,7 @@ honest: ✅ shipped · 🟡 partial · ❌ missing.
 | Power symbols / no-connect | power flags name nets; nc markers type pins `no_connect` | ✅ |
 | Hierarchical sheets (import) | recursive import, sheet pins bridge structurally, scoped names | ✅ |
 | Hierarchical sheets (authoring) | SheetEditor subsheet support | ❌ |
-| Sheet reuse (one file, N instances) | needs ref-instancing model | ❌ |
+| Sheet reuse (one file, N instances) | per-instance refs from KiCad `instances` paths | ✅ |
 | **Buses / bus entries / bus aliases** | grouped-net vocabulary + fan-out helper | ❌ |
 | ERC | pin-type matrix + system ERC across sheets | ✅ |
 | **ERC/DRC exclusions (waivers)** | reviewed, persistent waiver records (a check you silence must leave a trace) | ❌ |
@@ -100,7 +100,7 @@ state — updated statuses for the previously-missing rows:
 | IPC-D-356 | 🟡 | records emitted per spec; not yet run on a physical tester |
 | Sheet text annotations | ✅ | authoring + import + render |
 | Eagle import | 🟡 | .sch netlist-level (explicit XML nets); board geometry later |
-| Sheet reuse (file instanced twice) | ⏸ deferred | needs a ref-instancing model (KiCad `instances` semantics); fails loud today |
+| Sheet reuse (file instanced twice) | ✅ | `(path "/root/sheet-uuid" (reference ..))` resolved per instance; netlist matched against kicad-cli oracle; genuine ref collisions still fail loud |
 | Multi-layer (2–16 copper) | ✅ | top/in1..inN/bottom; per-layer DRC/connectivity/Gerbers |
 | Blind/buried vias | ✅ | `Via.layer_from/layer_to` span; span-aware Gerber flash, per-span drill files, DRC/connectivity, KiCad import, IPC-2581 `<Span>` drill layers (kicad-cli oracle-matched) |
 | IPC-2581 (rev C) | ✅ | conformance-benchmarked element-for-element vs kicad-cli's own export on the real board (holes 58=58, components identical, nets consistent); in the fab package |
