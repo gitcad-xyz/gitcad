@@ -43,18 +43,25 @@ as-code, review tooling, viewer with zebra inspection.
 The one big kernel capability not yet attempted: solid booleans where
 faces are NURBS patches. Everything it needs now exists — SSI with
 complete branch detection, Bézier extraction, exact point classification
-machinery. Plan:
-1. Ordered SSI curve output (chain certified points into parameter-space
-   polylines per branch; Rust marching). *Small.*
-2. Trimmed-patch representation: a patch + parameter-space trim loops
-   (SSI curves + boundary segments). *Medium.*
-3. Point-in-trimmed-region classification (exact ray parity in parameter
-   space). *Small.*
-4. Volume of a freeform solid via the divergence theorem over trimmed
-   patches — certified quadrature (interval-bounded), not float. *Hard;
-   the honest version is a certified interval, per ADR-0019.*
-5. Corpus model + OCCT differential (expect to *win* on tangential
-   cases; OCCT booleans notoriously fail near tangency).
+machinery.
+
+- **✅ K7.0 — exact volume of a Bézier-patch-bounded solid** (done). The
+  divergence-theorem flux `⅓∮ S·(S_u×S_v)` has a *polynomial* integrand,
+  so the volume is an exact ℚ (interpolatory rational quadrature).
+  OCCT-oracle-verified.
+- **✅ K7.0b — exact inertia tensor** (done) via the same flux, one
+  degree up; matches OCCT `MatrixOfInertia`, off-diagonals exactly zero.
+- **✅ K7.0c — native STEP AP214 export** (done). Full product structure,
+  OCCT reads forge's file back exactly. With the K3.4/K3.6 reader, forge
+  round-trips STEP with no OCCT in the loop.
+- ⏳ Ordered SSI curve output (chain certified points into parameter-
+  space polylines per branch; Rust marching). *Small.*
+- ⏳ Trimmed-patch representation (patch + parameter-space trim loops).
+  *Medium.*
+- ⏳ Point-in-trimmed-region classification (exact ray parity). *Small.*
+- ⏳ Trimmed-patch volume via Green's theorem over trim loops, then the
+  boolean assembly. *Hard — the remaining freeform frontier.* Corpus
+  model + OCCT differential (expect to *win* near tangency).
 
 ### K3.7 — the freeform import gap **[K]**
 - Freeform STEP **topology**: trimmed `ADVANCED_FACE` over B-spline
@@ -84,25 +91,26 @@ bbox touches. A real BSP change; do it in Rust where the engine lives.
 
 ## Horizon 2 — Near (platform features on top of the kernel)
 
-### Kernel promotion **[K][I]**
-Make `forge` the *default* gitcad backend for the classes it covers
-(ADR-0018 gate G2 was crossed long ago), with OCCT auto-fallback for
-the rest. Needs: shadow-run vs the model corpus per the ADR's
-architecture-change protocol, plus `forgekernel` wheels on PyPI
-(**gated**: PyPI name approval still pending for `gitcad` itself).
+### Kernel promotion **[K][I]** — **✅ auto-backend done**
+`forge` is now the *default* via the `auto` backend (forge-first, OCCT
+fallback on honest refusal; builds 100% of the corpus with the exact
+kernel in front). Remaining: publish `forgekernel` wheels on PyPI
+(**gated**: PyPI name approval still pending).
 
-### Native STEP **export** from forge **[K]**
-The reader exists; the writer closes the loop: AP214 subset (planar +
-B-spline geometry, MANIFOLD_SOLID_BREP topology). Oracle: OCCT imports
-forge's file and volumes match. Unlocks OCCT-free CAD exchange.
+### Native STEP **export** from forge **[K]** — **✅ done**
+`stepio.write_step_planar_solid`: AP214 planar-solid export with full
+product structure; OCCT reads forge's file and volumes match (box 72,
+non-convex L-prism 4800). With the reader, forge round-trips STEP with
+no OCCT in the loop. Remaining: B-spline-surface faces once K7 trimmed
+topology lands.
 
-### Validation gauntlet **[K]**
-- ABC dataset sample (10k STEP models): batch-import census — % parsed,
-  % topology-imported, failure taxonomy. The public acid test.
-- NIST MBE / CAx-IF STEP conformance files.
-- Fuzzing: random Bézier patch pairs through SSI with certified-residual
-  invariants; random booleans with volume-identity invariants
-  (V(A∪B)+V(A∩B) == V(A)+V(B) — exact, so violations are hard proof).
+### Validation gauntlet **[K]** — *partial*
+- ✅ Volume-identity fuzzing: `V(A∪B)+V(A∩B) == V(A)+V(B)` holds EXACTLY
+  over random box pairs — a decidable correctness net (exact kernel), not
+  a tolerance check. (done)
+- ⏳ ABC dataset sample census, NIST/CAx-IF conformance files
+  (**gated**: dataset download).
+- ⏳ SSI certified-residual fuzzing over random Bézier patch pairs.
 
 ### Cross-kernel identity stability **[I]** — **(gated: human sign-off)**
 Entity ids are minted per-kernel today (fingerprints differ across
@@ -174,9 +182,10 @@ change, requires human approval before implementation.*
 - Examples gallery: the Altair project as the flagship walkthrough.
 
 ### Simulation & analysis **[X]**
-- Mass-properties-driven checks are done; next: exact moments of
-  inertia through the seam (forge can do these exactly for its solid
-  classes — extend mass_props to the full inertia tensor).
+- ✅ Exact inertia tensors (done in `bsolid.mass_properties` — full
+  tensor as exact rationals; OCCT `MatrixOfInertia` differential).
+  Remaining: surface it through the seam/`mass_props` for all solid
+  classes and a `model_inertia` MCP tool.
 - Thermal envelope pass (power budget → per-component dissipation →
   board copper-area heuristic checks).
 - Clearance/creepage electrical-mechanical co-checks (voltage-aware
