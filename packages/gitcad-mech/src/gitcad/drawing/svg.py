@@ -55,9 +55,58 @@ def render_svg(d: Drawing) -> str:
         out.append(f'<text class="t" x="{nx:.2f}" y="{y(ny):.2f}" '
                    f'style="font-family:monospace" xml:space="preserve">{escape(text)}</text>')
 
+    for sf in d.surface_finishes:
+        out.append(_surface_finish_svg(sf, y))
+    for w in d.welds:
+        out.append(_weld_svg(w, y))
+
     out.append(_title_block(d, y))
     out.append("</svg>")
     return "".join(out) + "\n"
+
+
+def _surface_finish_svg(sf, y) -> str:
+    """ISO 1302 tick: a short left leg and a longer right leg meeting at
+    the base point, with the Ra value above the right leg."""
+    x, yb = sf.x, sf.y
+    # the tick: base at (x, yb); left leg up-left, right leg up-right (taller)
+    lx, ly = x - 2.5, yb + 4.3          # left leg top
+    rx, ry = x + 4.5, yb + 7.8          # right leg top (60°, longer)
+    s = [f'<path class="d" d="M {lx:.2f} {y(ly):.2f} L {x:.2f} {y(yb):.2f} '
+         f'L {rx:.2f} {y(ry):.2f}" fill="none"/>']
+    s.append(f'<text class="t" x="{x + 0.6:.2f}" y="{y(ry) - 0.6:.2f}">'
+             f'Ra {sf.ra:g}</text>')
+    if sf.all_around:
+        s.append(f'<circle class="d" cx="{x:.2f}" cy="{y(yb + 5.5):.2f}" '
+                 f'r="1.3" fill="none"/>')
+    return "".join(s)
+
+
+def _weld_svg(w, y) -> str:
+    """ISO 2553 weld symbol: leader arrow to the joint, a reference line,
+    and a weld-type flag (fillet triangle / square / vee) on it."""
+    s = [f'<line class="d" x1="{w.x:.2f}" y1="{y(w.y):.2f}" '
+         f'x2="{w.ax:.2f}" y2="{y(w.ay):.2f}"/>']            # leader
+    rl = w.x + 14                                             # reference line
+    s.append(f'<line class="d" x1="{w.x:.2f}" y1="{y(w.y):.2f}" '
+             f'x2="{rl:.2f}" y2="{y(w.y):.2f}"/>')
+    fx = w.x + 5
+    if w.weld == "fillet":                                    # triangle flag
+        s.append(f'<path class="d" d="M {fx:.2f} {y(w.y):.2f} '
+                 f'L {fx:.2f} {y(w.y + 3.5):.2f} L {fx + 3:.2f} {y(w.y):.2f} Z" '
+                 f'fill="black"/>')
+    elif w.weld == "square":                                  # two ticks
+        for dx in (0, 3):
+            s.append(f'<line class="d" x1="{fx + dx:.2f}" y1="{y(w.y):.2f}" '
+                     f'x2="{fx + dx:.2f}" y2="{y(w.y + 3.5):.2f}"/>')
+    else:                                                     # vee groove
+        s.append(f'<path class="d" d="M {fx:.2f} {y(w.y + 3.5):.2f} '
+                 f'L {fx + 1.8:.2f} {y(w.y):.2f} L {fx + 3.6:.2f} {y(w.y + 3.5):.2f}" '
+                 f'fill="none"/>')
+    if w.size:
+        s.append(f'<text class="t" x="{fx - 3.5:.2f}" y="{y(w.y + 3):.2f}">'
+                 f'{w.size:g}</text>')
+    return "".join(s)
 
 
 def _dim_svg(dim: Dimension, y) -> str:

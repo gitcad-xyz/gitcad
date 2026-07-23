@@ -44,6 +44,28 @@ class Callout:
 
 
 @dataclass
+class SurfaceFinish:
+    """ISO 1302 surface-texture symbol at (x, y): the tick, an optional
+    'all around' circle, and the roughness value (µm Ra)."""
+    x: float
+    y: float
+    ra: float
+    all_around: bool = False
+
+
+@dataclass
+class WeldSymbol:
+    """ISO 2553 / AWS weld symbol: an arrow to (ax, ay), a reference line
+    starting at (x, y), a weld-type flag on it, and the size."""
+    x: float
+    y: float
+    ax: float
+    ay: float
+    weld: str = "fillet"        # fillet | square | vee
+    size: float = 0.0
+
+
+@dataclass
 class Drawing:
     sheet: str
     width: float
@@ -54,6 +76,16 @@ class Drawing:
     dims: list[Dimension] = field(default_factory=list)
     callouts: list[Callout] = field(default_factory=list)
     notes: list[tuple[float, float, str]] = field(default_factory=list)
+    surface_finishes: list[SurfaceFinish] = field(default_factory=list)
+    welds: list[WeldSymbol] = field(default_factory=list)
+
+    def surface_finish(self, x, y, ra, *, all_around=False) -> "Drawing":
+        self.surface_finishes.append(SurfaceFinish(x, y, ra, all_around))
+        return self
+
+    def weld(self, x, y, ax, ay, *, weld="fillet", size=0.0) -> "Drawing":
+        self.welds.append(WeldSymbol(x, y, ax, ay, weld, size))
+        return self
 
     def to_svg(self) -> str:
         from gitcad.drawing.svg import render_svg
