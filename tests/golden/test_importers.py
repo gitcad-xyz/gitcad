@@ -75,15 +75,19 @@ def test_kicad_import_maps_the_board(kicad_file) -> None:
     assert board.validate().ok, board.validate().violations
 
 
-def test_kicad_import_refuses_inner_layer_copper(tmp_path) -> None:
+def test_kicad_import_inner_copper_on_2layer_stack_drops_honestly(tmp_path) -> None:
+    # multi-layer boards import (In<k>.Cu -> in<k>); but a segment on an
+    # inner layer the STACK doesn't declare cannot be mapped — reported as
+    # dropped, never silently kept or refused wholesale
     from gitcad.importers.kicad import import_kicad_pcb
 
     text = KICAD_FIXTURE.replace('(segment (start 104 110) (end 112.25 108) (width 0.4) (layer "F.Cu") (net 1))',
                                  '(segment (start 104 110) (end 112.25 108) (width 0.4) (layer "In1.Cu") (net 1))')
     p = tmp_path / "four_layer.kicad_pcb"
     p.write_text(text, newline="\n")
-    with pytest.raises(GitcadError, match="inner copper"):
-        import_kicad_pcb(str(p))
+    board, report = import_kicad_pcb(str(p))
+    assert board.layers == 2
+    assert any("unmapped layer 'In1.Cu'" in d for d in report.dropped)
 
 
 def test_sexp_parser_handles_quotes_and_numbers() -> None:

@@ -114,7 +114,10 @@ class MountingHole:
 
 @dataclass
 class Board:
-    """A complete 2-layer board (v0.1: exactly two copper layers)."""
+    """A complete board: 2 copper layers by default, up to 16 (``layers``).
+    Copper layer names: ``top``, ``in1``..``in{n-2}``, ``bottom``. Vias are
+    through-hole (span all layers) — blind/buried vias are a later stage,
+    refused honestly rather than modeled wrong."""
 
     name: str
     outline: list[tuple[float, float]]   # closed polygon (first != last is fine)
@@ -125,6 +128,7 @@ class Board:
     mounting_holes: list[MountingHole] = field(default_factory=list)
     thickness: float = 1.6               # mm — board stack height
     mask_expansion: float = 0.05         # mm per side
+    layers: int = 2                      # copper layer count (2..16)
     # Net classes: named net groups binding DRC constraints (KiCad-map P1).
     # {"power": {"nets": ["VCC", "GND", "+*"], "clearance": 0.3,
     #            "track_width_min": 0.5}} — nets may be fnmatch globs; DRC
@@ -172,8 +176,14 @@ class Board:
             mounting_holes=[MountingHole(**m) for m in b.get("mounting_holes", [])],
             thickness=b.get("thickness", 1.6),
             mask_expansion=b.get("mask_expansion", 0.05),
+            layers=int(b.get("layers", 2)),
             net_classes={k: dict(v) for k, v in b.get("net_classes", {}).items()},
         )
+
+    def copper_layers(self) -> list[str]:
+        """Layer names outside-in: top, in1..in{n-2}, bottom."""
+        return (["top"] + [f"in{i}" for i in range(1, self.layers - 1)]
+                + ["bottom"])
 
     # -- checks (the agent verification loop) ---------------------------------
 
@@ -193,6 +203,9 @@ class Board:
             violations.append("board-name-not-filesystem-safe")
         if len(self.outline) < 3:
             violations.append("outline-degenerate")
+        if not (2 <= self.layers <= 16):
+            violations.append(f"layers-out-of-range:{self.layers}")
+        valid_layers = set(self.copper_layers())
         minx, miny, maxx, maxy = self.bbox()
         refs = [c.ref for c in self.components]
         if len(refs) != len(set(refs)):
@@ -216,12 +229,12 @@ class Board:
             if (t.x1, t.y1) == (t.x2, t.y2):
                 # a zero-length track slipped through in the dogfood build
                 violations.append(f"track-degenerate:{i}")
-            if t.layer not in ("top", "bottom"):
+            if t.layer not in valid_layers:
                 violations.append(f"track-bad-layer:{i}")
         for i, z in enumerate(self.zones):
             if len(z.polygon) < 3:
                 violations.append(f"zone-degenerate:{i}")
-            if z.layer not in ("top", "bottom"):
+            if z.layer not in valid_layers:
                 violations.append(f"zone-bad-layer:{i}")
             if z.kind not in ("copper", "keepout"):
                 violations.append(f"zone-bad-kind:{i}")

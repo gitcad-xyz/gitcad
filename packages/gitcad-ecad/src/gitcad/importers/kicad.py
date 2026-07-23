@@ -15,6 +15,8 @@ Honesty rules (ImportReport):
 
 from __future__ import annotations
 
+import re
+
 from gitcad.ecad.board import Board, Component, Footprint, MountingHole, Pad, Track, Via, Zone
 from gitcad.errors import GitcadError
 from gitcad.importers.report import ImportReport
@@ -30,21 +32,26 @@ def import_kicad_pcb(path: str) -> tuple[Board, ImportReport]:
     if not (isinstance(root, list) and root and root[0] == "kicad_pcb"):
         raise GitcadError(f"{path!r} is not a kicad_pcb document")
 
-    # -- copper layer census: refuse to silently drop copper ------------------
+    # -- copper layer census: multi-layer stacks map In<k>.Cu -> in<k> --------
     layers_node = find_one(root, "layers") or []
     copper = [c for c in layers_node if isinstance(c, list) and len(c) >= 2
               and isinstance(c[1], str) and c[1].endswith(".Cu")]
     inner = [c[1] for c in copper if c[1] not in ("F.Cu", "B.Cu")]
-    used_inner = {seg for seg in (value_of(s, "layer") for s in find_all(root, "segment"))
-                  if isinstance(seg, str) and seg.endswith(".Cu") and seg not in ("F.Cu", "B.Cu")}
-    if used_inner:
-        raise GitcadError(
-            f"board routes on inner copper layers {sorted(used_inner)} — "
-            "gitcad v0.1 supports exactly 2 copper layers; import refused rather "
-            "than silently dropping copper"
-        )
+    layer_count = max(2, len(copper))
+    if layer_count > 16:
+        raise GitcadError(f"{layer_count} copper layers — gitcad supports up to 16")
+
+    def map_layer(kc: str) -> str | None:
+        if kc == "F.Cu":
+            return "top"
+        if kc == "B.Cu":
+            return "bottom"
+        m = re.match(r"In(\d+)\.Cu$", kc or "")
+        if m and int(m.group(1)) <= layer_count - 2:
+            return f"in{m.group(1)}"
+        return None
     if inner:
-        report.warnings.append(f"stack defines inner layers {inner} but none are routed; imported as 2-layer")
+        report.count("inner_layers", len(inner))
 
     # -- nets ------------------------------------------------------------------
     net_names: dict[float, str] = {}
@@ -86,7 +93,8 @@ def import_kicad_pcb(path: str) -> tuple[Board, ImportReport]:
     def cy(y: float) -> float:
         return maxy - y
 
-    board = Board(name="imported", outline=[(0, 0), (cx(maxx), 0), (cx(maxx), cy(miny)), (0, cy(miny))])
+    board = Board(name="imported", outline=[(0, 0), (cx(maxx), 0), (cx(maxx), cy(miny)), (0, cy(miny))],
+                  layers=layer_count)
     if other_edges or (rect_count == 0 and len(pts) > 8):
         report.warnings.append("outline approximated by bounding box (arcs/complex Edge.Cuts)")
     report.count("outline_points", len(pts))
@@ -148,14 +156,18 @@ def import_kicad_pcb(path: str) -> tuple[Board, ImportReport]:
 
     # -- tracks and vias -------------------------------------------------------
     for seg in find_all(root, "segment"):
-        layer = value_of(seg, "layer", default="F.Cu")
+        layer = map_layer(value_of(seg, "layer", default="F.Cu"))
+        if layer is None:
+            report.dropped.append(
+                f"track on unmapped layer {value_of(seg, 'layer')!r}")
+            continue
         start, end = find_one(seg, "start"), find_one(seg, "end")
         net = net_names.get(value_of(seg, "net", default=-1.0), "")
         board.tracks.append(Track(
             cx(float(start[1])), cy(float(start[2])),
             cx(float(end[1])), cy(float(end[2])),
             float(value_of(seg, "width", default=0.25)),
-            "top" if layer == "F.Cu" else "bottom", net))
+            layer, net))
         report.count("tracks", 1)
 
     for via_node in find_all(root, "via"):
@@ -169,9 +181,10 @@ def import_kicad_pcb(path: str) -> tuple[Board, ImportReport]:
 
     # -- zones: the real routing strategy of pour-based boards ----------------
     for zn in find_all(root, "zone"):
-        layer = value_of(zn, "layer", default="F.Cu")
-        if layer not in ("F.Cu", "B.Cu"):
-            report.dropped.append(f"zone on unsupported layer {layer}")
+        layer = map_layer(value_of(zn, "layer", default="F.Cu"))
+        if layer is None:
+            report.dropped.append(
+                f"zone on unmapped layer {value_of(zn, 'layer')!r}")
             continue
         poly = find_one(zn, "polygon")
         pts_node = find_one(poly, "pts") if poly else None
@@ -181,8 +194,7 @@ def import_kicad_pcb(path: str) -> tuple[Board, ImportReport]:
         polygon = [(cx(float(p[1])), cy(float(p[2]))) for p in find_all(pts_node, "xy")]
         keepout = find_one(zn, "keepout") is not None
         net = "" if keepout else net_names.get(value_of(zn, "net", default=-1.0), "")
-        board.zones.append(Zone(net=net, layer="top" if layer == "F.Cu" else "bottom",
-                                polygon=polygon,
+        board.zones.append(Zone(net=net, layer=layer, polygon=polygon,
                                 kind="keepout" if keepout else "copper"))
         report.count("keepouts" if keepout else "zones", 1)
     arcs = find_all(root, "arc")

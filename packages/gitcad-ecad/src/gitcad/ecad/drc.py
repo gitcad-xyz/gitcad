@@ -287,7 +287,8 @@ def run_drc(board: Board, pack: RulePack | None = None) -> ValidationReport:
                     continue
                 if a.net == b.net == "" and a.owner and a.owner == b.owner:
                     continue   # unnetted pads of one footprint: its own geometry
-                if not any(a.on(layer) and b.on(layer) for layer in ("top", "bottom")):
+                if not any(a.on(layer) and b.on(layer)
+                           for layer in board.copper_layers()):
                     continue
                 need = max(filter(None, (limit("clearance", a.net, "min"),
                                          limit("clearance", b.net, "min"))), default=None)

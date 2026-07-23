@@ -89,11 +89,21 @@ def _pad_spec(w: float, h: float, shape: str) -> str:
 
 
 def copper(board: Board, side: str) -> str:
-    layer = "L1,Top" if side == "top" else "L2,Bot"
-    g = _GerberFile(f"Copper,{layer}")
+    """One copper layer's Gerber: side is "top", "bottom", or "in<k>".
+    Inner layers carry through copper only (PTH pads, vias, tracks, zones
+    on that layer) — SMD pads exist only on the outer surfaces."""
+    names = board.copper_layers()
+    if side not in names:
+        raise ValueError(f"unknown copper layer {side!r} (board has {names})")
+    idx = names.index(side) + 1
+    x2 = ("L1,Top" if side == "top"
+          else f"L{len(names)},Bot" if side == "bottom"
+          else f"L{idx},Inr")
+    g = _GerberFile(f"Copper,{x2}")
+    outer = side in ("top", "bottom")
     for comp in board.components:
         for pad, bx, by, rot in comp.placed_pads():
-            on_this_side = pad.drill is not None or comp.side == side
+            on_this_side = pad.drill is not None or (outer and comp.side == side)
             if not on_this_side:
                 continue
             w, h = (pad.h, pad.w) if round(rot) % 180 == 90 else (pad.w, pad.h)

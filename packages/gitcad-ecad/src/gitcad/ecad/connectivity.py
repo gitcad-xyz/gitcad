@@ -43,7 +43,8 @@ def check_connectivity(board: Board) -> ValidationReport:
     for i, a in enumerate(items):
         for j in range(i + 1, len(items)):
             b = items[j]
-            if not any(a.on(layer) and b.on(layer) for layer in ("top", "bottom")):
+            if not any(a.on(layer) and b.on(layer)
+                       for layer in board.copper_layers()):
                 continue
             if _copper_dist(a, b) <= _TOUCH_TOL:
                 dsu.union(i, j)

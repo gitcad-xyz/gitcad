@@ -42,6 +42,9 @@ def export_fab(board: Board, outdir: str) -> dict[str, str]:
     files = {
         "copper_top": (f"{n}.gtl", gerber.copper(board, "top")),
         "copper_bottom": (f"{n}.gbl", gerber.copper(board, "bottom")),
+        # inner copper: .g2, .g3, ... (the common inner-layer convention)
+        **{f"copper_in{i}": (f"{n}.g{i + 1}", gerber.copper(board, f"in{i}"))
+           for i in range(1, board.layers - 1)},
         "mask_top": (f"{n}.gts", gerber.mask(board, "top")),
         "mask_bottom": (f"{n}.gbs", gerber.mask(board, "bottom")),
         "silk_top": (f"{n}.gto", gerber.silkscreen(board, "top")),
