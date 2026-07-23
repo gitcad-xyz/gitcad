@@ -72,7 +72,8 @@ def _transform(polys, scale: float, ox: float, oy: float, bmin: Point):
 
 
 def make_drawing(shape, kernel=None, *, title: str = "part", sheet: str = "A3",
-                 thread_specs: dict | None = None) -> Drawing:
+                 thread_specs: dict | None = None,
+                 notes: list | None = None) -> Drawing:
     """Project ``shape`` into front/top/right/iso via the kernel's HLR engine,
     lay out third-angle on the sheet, add overall dimensions."""
     if kernel is None:
@@ -127,6 +128,12 @@ def make_drawing(shape, kernel=None, *, title: str = "part", sheet: str = "A3",
 
     _add_hole_dimensions(d, kernel, shape, placements["top"], bb["top"], scale,
                          thread_specs or {})
+    # notes block (GD&T table, general tolerances): stacked bottom-left,
+    # rendered through the existing callout machinery (zero-length leader)
+    for i, note in enumerate(notes or []):
+        ny = 28.0 + 5.0 * i
+        d.callouts.append(Callout((MARGIN + 2.0, ny), (MARGIN + 2.0, ny),
+                                  str(note)))
     return d
 
 

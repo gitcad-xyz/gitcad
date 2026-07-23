@@ -88,6 +88,11 @@ class Document:
         # name existing parameters (fail loud); each variant builds through
         # the same tree with the same feature ids.
         self.configurations: dict[str, dict[str, Any]] = {}
+        # Tolerances (SW-map P7): GD&T as data, bound to lineage-stable
+        # feature ids — datums, geometric FCFs, dimensional plus/minus.
+        # The QA handshake lives in the SAME reviewable text as the
+        # geometry it constrains.
+        self.tolerances: list[dict[str, Any]] = []
 
     # -- construction ---------------------------------------------------------
 
@@ -162,6 +167,89 @@ class Document:
                 table[name] = value
         return resolve_table(table)
 
+    # -- tolerances / GD&T as data (SW-map P7) --------------------------------
+
+    GDT_SYMBOLS = {
+        "straightness": "⏤", "flatness": "⏥",
+        "circularity": "○", "cylindricity": "⌭",
+        "position": "⌖", "concentricity": "◎",
+        "symmetry": "⌯", "parallelism": "∥",
+        "perpendicularity": "⟂", "angularity": "∠",
+        "profile_line": "⌒", "profile_surface": "⌓",
+        "runout": "↗", "total_runout": "⌰",
+    }
+
+    def add_tolerance(self, record: dict[str, Any]) -> None:
+        """Attach one tolerance record; fail-loud validation up front.
+
+        kinds:
+        - {"kind": "datum", "label": "A", "feature": fid}
+        - {"kind": "gdt", "symbol": <GDT_SYMBOLS key>, "value": 0.1,
+           "feature": fid, "datum_refs": ["A", ...]}
+        - {"kind": "dim", "feature": fid, "param": "diameter",
+           "plus": 0.05, "minus": 0.02}
+        """
+        kind = record.get("kind")
+        if kind == "datum":
+            label = record.get("label", "")
+            if not label or any(t.get("kind") == "datum" and t.get("label") == label
+                                for t in self.tolerances):
+                raise GitcadError(f"datum label {label!r} missing or duplicate")
+            self._require_feature(record.get("feature"))
+        elif kind == "gdt":
+            if record.get("symbol") not in self.GDT_SYMBOLS:
+                raise GitcadError(
+                    f"unknown GD&T symbol {record.get('symbol')!r} "
+                    f"(have {sorted(self.GDT_SYMBOLS)})")
+            if not (isinstance(record.get("value"), (int, float))
+                    and record["value"] > 0):
+                raise GitcadError("gdt tolerance needs a positive value")
+            self._require_feature(record.get("feature"))
+            datums = {t["label"] for t in self.tolerances
+                      if t.get("kind") == "datum"}
+            for ref in record.get("datum_refs", []):
+                if ref not in datums:
+                    raise GitcadError(
+                        f"gdt references undefined datum {ref!r} — add the "
+                        "datum record first")
+        elif kind == "dim":
+            f = self._require_feature(record.get("feature"))
+            if record.get("param") not in f.params:
+                raise GitcadError(
+                    f"feature {f.id} has no param {record.get('param')!r}")
+            if not any(k in record for k in ("plus", "minus", "fit")):
+                raise GitcadError("dim tolerance needs plus/minus or fit")
+        else:
+            raise GitcadError(f"unknown tolerance kind {kind!r} (datum|gdt|dim)")
+        self.tolerances.append(dict(record))
+
+    def _require_feature(self, fid: Any) -> Feature:
+        if fid not in self._by_id:
+            raise GitcadError(f"tolerance references unknown feature {fid!r}")
+        return self._by_id[fid]
+
+    def tolerance_notes(self) -> list[str]:
+        """The drawing-block projection: one line per datum and FCF, plus
+        dimensional tolerances — deterministic, ASME-tabulated style."""
+        notes: list[str] = []
+        for t in self.tolerances:
+            if t["kind"] == "datum":
+                notes.append(f"DATUM {t['label']}  [{t['feature']}]")
+        for t in self.tolerances:
+            if t["kind"] == "gdt":
+                refs = "|".join(t.get("datum_refs", []))
+                sym = self.GDT_SYMBOLS[t["symbol"]]
+                fcf = f"{sym} {t['value']:g}" + (f" |{refs}" if refs else "")
+                notes.append(f"[{fcf}]  [{t['feature']}]")
+        for t in self.tolerances:
+            if t["kind"] == "dim":
+                if "fit" in t:
+                    spec = t["fit"]
+                else:
+                    spec = f"+{t.get('plus', 0):g}/-{t.get('minus', 0):g}"
+                notes.append(f"{t['param']} {spec}  [{t['feature']}]")
+        return notes
+
     def set_configuration(self, name: str, overrides: dict[str, Any]) -> None:
         """Define/update a configuration: named overrides of existing
         parameters. The document stays ONE file that is a product family."""
@@ -186,6 +274,8 @@ class Document:
             doc["parameters"] = self.parameters
         if self.configurations:
             doc["configurations"] = self.configurations
+        if self.tolerances:
+            doc["tolerances"] = self.tolerances
         return canonical_json(doc, indent=2) + "\n"
 
     @classmethod
@@ -197,6 +287,7 @@ class Document:
         out.parameters = dict(doc.get("parameters", {}))
         out.configurations = {k: dict(v)
                               for k, v in doc.get("configurations", {}).items()}
+        out.tolerances = [dict(t) for t in doc.get("tolerances", [])]
         for fd in doc["features"]:
             f = Feature.from_dict(fd)
             if not f.id:

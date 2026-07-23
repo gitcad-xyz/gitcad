@@ -10,6 +10,15 @@ Status is honest: ✅ shipped · 🟡 partial · ❌ missing · — non-goal.
 
 ## Why everyone uses SolidWorks — the actual moats
 
+0. **Recorded intent — kernel push-down.** Several gitcad layers emulate
+   what a purpose-built kernel would own: exact persistent naming
+   (OCCT op histories `Modified()`/`Generated()` are unmined today —
+   wiring them into IdentityService upgrades ADR-0003 re-binding from
+   fingerprint-heuristic to history-exact), structured failure as the
+   primary op result, canonical geometry serialization (making the
+   ADR-0006 gate an equality check), and native distance-field checks.
+   The Kernel seam (ADR-0002) is the contract; the invariants suite is
+   any future kernel's acceptance tests.
 1. **Kernel robustness on ugly geometry.** Parasolid plus 30 years of
    edge-case hardening: fillets that resolve on tangent chains, shells
    that survive drafted ribs, drafts on complex parting lines. Our
@@ -130,7 +139,7 @@ play. Mold tools (parting lines, core/cavity) ❌ defer; draft analysis
 | SimulationXpress / FEA | — honest defer: no fake physics; sim-as-test philosophy extends when a real solver integrates | ❌ defer |
 | Motion studies | mate solver is static placement | ❌ defer |
 | Costing | process cost model per part | ❌ defer (good future agent play) |
-| DimXpert / MBD (GD&T) | tolerance data model on dims/features | ❌ P7 |
+| DimXpert / MBD (GD&T) | ✅ `Document.tolerances`: datums, FCFs (symbol whitelist + datum refs), dimensional ± on feature params; validated fail-loud; rendered as drawing block + toleranced callouts | ✅ |
 
 ## 7. Assembly environment
 
@@ -155,7 +164,7 @@ play. Mold tools (parting lines, core/cavity) ❌ defer; draft analysis
 | Detail views | scaled crop view | ❌ P8 |
 | Broken / crop views | — | ❌ defer |
 | Associative dimensions | hole callouts, position dims | ✅ |
-| **GD&T: FCF, datums, tolerances** | tolerance objects bound to lineage-stable entities | ❌ P7 |
+| **GD&T: FCF, datums, tolerances** | ✅ tolerances-as-data on feature ids; GD&T block + toleranced hole callouts on drawings | ✅ |
 | Surface finish / weld symbols | annotation set | ❌ |
 | BOM table + balloons | ✅ | ✅ |
 | Revision table | — git history IS the revision table; projection possible | ✅ (beyond) |
@@ -192,7 +201,8 @@ What actually converts a SolidWorks user, in order of leverage:
    thread cuts and general 3D sketch paths remain open.
 6. ~~P6 Fastener generator~~ — SHIPPED: `gitcad.fasteners` (parametric
    bolt family via P1+P2; populate + mate + validate; assembly_fasteners MCP).
-7. **P7 Tolerances/GD&T as data** — the QA handshake.
+7. ~~P7 Tolerances/GD&T as data~~ — SHIPPED: datums/FCFs/± in the
+   document text, validated, surfaced on drawings.
 8. **P8 Detail views + sketch text** — drawing completeness, engraving.
 
 Deferred with reasons recorded: FEA and motion (no fake physics — wait

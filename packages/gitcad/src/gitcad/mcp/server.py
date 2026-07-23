@@ -270,18 +270,31 @@ def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3")
     from gitcad.expr import resolve_value
 
     env = doc.resolved_parameters()
+    dim_tols = {t["feature"]: t for t in doc.tolerances
+                if t.get("kind") == "dim" and t.get("param") == "diameter"}
     threads = {}
     for f in doc.features:
-        if f.op == "hole" and f.params.get("thread"):
+        if f.op != "hole":
+            continue
+        parts = []
+        if f.params.get("thread"):
+            parts.append(str(f.params["thread"]))
+        tol = dim_tols.get(f.id)
+        if tol:
+            parts.append(tol["fit"] if "fit" in tol
+                         else f"+{tol.get('plus', 0):g}/-{tol.get('minus', 0):g}")
+        if parts:
             rp = resolve_value(f.params, env)
-            threads[(round(float(rp["x"]), 3), round(float(rp["y"]), 3))] = rp["thread"]
+            threads[(round(float(rp["x"]), 3), round(float(rp["y"]), 3))] = " ".join(parts)
     d = make_drawing(doc.build(kernel).final(doc), title=title, sheet=sheet,
-                     thread_specs=threads)
+                     thread_specs=threads, notes=doc.tolerance_notes())
     if path.lower().endswith(".pdf"):
         with open(path, "wb") as f:
             f.write(d.to_pdf())
     else:
-        with open(path, "w", newline="\n") as f:
+        # utf-8 explicitly: GD&T symbols are non-ASCII and Windows' locale
+        # codec is not (the em-dash lesson, round two)
+        with open(path, "w", newline="\n", encoding="utf-8") as f:
             f.write(d.to_svg())
     return {"path": path, "scale": d.scale, "sheet": d.sheet, "views": [v.name for v in d.views]}
 
