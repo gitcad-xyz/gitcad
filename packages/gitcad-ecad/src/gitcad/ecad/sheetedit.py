@@ -14,11 +14,32 @@ grid): resistor, capacitor, led, diode, ic (pins left/right), header.
 
 from __future__ import annotations
 
-from gitcad.ecad.netderive import derive_nets, pin_abs
+from gitcad.ecad.netderive import derive_nets, derive_nets_ex, hier_merge, pin_abs
 from gitcad.ecad.schematic import PIN_TYPES, Pin, SchComponent, Schematic
 from gitcad.errors import GitcadError
 
 Point = tuple[float, float]
+
+
+def _remap_refs(sch: Schematic, ref_map: dict[str, str]) -> Schematic:
+    """Copy a child schematic with refs renamed — the authoring-side mirror
+    of KiCad's per-instance references, used when one child is instanced
+    more than once."""
+    import copy
+
+    out = copy.deepcopy(sch)
+    for comp in out.components:
+        comp.ref = ref_map.get(comp.ref, comp.ref)
+
+    def m(refpin: str) -> str:
+        r, p = refpin.split(".", 1)
+        return f"{ref_map.get(r, r)}.{p}"
+
+    out.nets = {n: sorted(m(rp) for rp in refs) for n, refs in out.nets.items()}
+    g = getattr(out, "graphics", None)
+    if g and "symbols" in g:
+        g["symbols"] = {ref_map.get(k, k): v for k, v in g["symbols"].items()}
+    return out
 
 
 def _two_pin(kind: str) -> dict:
@@ -91,6 +112,8 @@ class SheetEditor:
                            "symbols": {}, "junctions": []}
         self._pins: list[tuple[Point, str, str]] = []
         self._net_names: dict[Point, str] = {}
+        self._subsheets: list[dict] = []
+        self._children: list[Schematic] = []
 
     # -- placement -------------------------------------------------------------
 
@@ -194,20 +217,82 @@ class SheetEditor:
         self._net_names[(float(x), float(y))] = name
         return self
 
+    def global_label(self, name: str, x: float, y: float) -> "SheetEditor":
+        """Design-wide net name — same name is the same net on EVERY sheet
+        of the hierarchy (KiCad global-label semantics)."""
+        self._gfx["labels"].append({"name": name, "x": float(x), "y": float(y),
+                                    "kind": "global_label", "rot": 0.0})
+        self._net_names[(float(x), float(y))] = name
+        return self
+
+    def hier_label(self, name: str, x: float, y: float) -> "SheetEditor":
+        """Hierarchical label — the child-side attachment point a parent
+        sheet pin of the same name bridges to."""
+        self._gfx["labels"].append({"name": name, "x": float(x), "y": float(y),
+                                    "kind": "hierarchical_label", "rot": 0.0})
+        self._net_names[(float(x), float(y))] = name
+        return self
+
+    # -- hierarchy -------------------------------------------------------------
+
+    def sheet(self, name: str, child: "Schematic | SheetEditor",
+              x: float, y: float, w: float, h: float, *,
+              pins: dict[str, Point],
+              ref_map: dict[str, str] | None = None) -> "SheetEditor":
+        """Place a subsheet instance. ``child`` is a finished Schematic (or a
+        SheetEditor, finished here); ``pins`` maps sheet-pin names to points
+        on THIS sheet — each must match a hierarchical label in the child,
+        and parent wires touching that point bridge into the child's net.
+
+        REUSE: place the same child twice with distinct ``ref_map``s (the
+        authoring mirror of KiCad's per-instance references); colliding refs
+        fail loud in the merge."""
+        if any(ss["name"] == name for ss in self._subsheets):
+            raise GitcadError(f"duplicate sheet name {name!r}")
+        csch = child.finish() if isinstance(child, SheetEditor) else child
+        if ref_map:
+            csch = _remap_refs(csch, ref_map)
+        spins = [{"name": pn, "x": float(px), "y": float(py)}
+                 for pn, (px, py) in sorted(pins.items())]
+        child_hier = {lb["name"]
+                      for lb in (getattr(csch, "graphics", None) or {}).get("labels", [])
+                      if lb.get("kind") == "hierarchical_label"}
+        for sp in spins:
+            if sp["name"] not in child_hier:
+                raise GitcadError(
+                    f"sheet {name!r}: pin {sp['name']!r} has no hierarchical "
+                    f"label in child {csch.name!r}")
+        self._subsheets.append({"name": name, "file": f"{csch.name}.sch",
+                                "x": float(x), "y": float(y),
+                                "w": float(w), "h": float(h), "pins": spins})
+        self._children.append(csch)
+        return self
+
     # -- result ----------------------------------------------------------------
 
     def finish(self) -> Schematic:
         """Derive the netlist from the drawing (geometry is the source) and
-        return the schematic with its sheet graphics attached. ERC and
-        sheet_parity are the caller's gates — parity is green by construction
-        but re-checkable like any imported sheet."""
-        nets = derive_nets(
-            self._pins,
-            [((w[0], w[1]), (w[2], w[3])) for w in self._gfx["wires"]],
-            [tuple(j) for j in self._gfx["junctions"]],
-            self._net_names)
+        return the schematic with its sheet graphics attached. With subsheets
+        placed, the hierarchy flattens through the SAME hier_merge engine as
+        the KiCad importer — authored and imported hierarchies mean exactly
+        the same thing. ERC and sheet_parity are the caller's gates."""
+        wires = [((w[0], w[1]), (w[2], w[3])) for w in self._gfx["wires"]]
+        junctions = [tuple(j) for j in self._gfx["junctions"]]
         self.sch.nets = {}
-        for name, refs in nets.items():
-            self.sch.connect(name, *refs)
+        self.warnings: list[str] = []
+        if not self._subsheets:
+            nets = derive_nets(self._pins, wires, junctions, self._net_names)
+            for name, refs in nets.items():
+                self.sch.connect(name, *refs)
+        else:
+            query_pts = tuple((sp["x"], sp["y"])
+                              for ss in self._subsheets for sp in ss["pins"])
+            parent_nets, query_net = derive_nets_ex(
+                self._pins, wires, junctions, self._net_names,
+                frozenset(), query_pts)
+            hier_merge(self.sch, parent_nets, self._subsheets, self._children,
+                       query_net, self._gfx["labels"], self._gfx["powers"],
+                       self.warnings)
+            self._gfx["sheets"] = self._subsheets
         self.sch.graphics = dict(self._gfx)  # type: ignore[attr-defined]
         return self.sch

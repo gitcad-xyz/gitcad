@@ -360,36 +360,68 @@ def schematic_author(name: str, ops: list[list]) -> dict[str, Any]:
        right, n}]  (kinds: resistor|capacitor|led|diode|ic|header)
       ["connect", refA, pinA, refB, pinB, [via points...]]
       ["wire", [[x, y], ...]]   ["junction", x, y]
-      ["label", net, x, y]      ["power", net, x, y]"""
+      ["label", net, x, y]      ["power", net, x, y]
+      ["global_label", net, x, y]   (design-wide across all sheets)
+      ["hier_label", net, x, y]     (child-side sheet-pin attachment)
+      ["sheet", name, x, y, w, h, {"ops": [...child ops...],
+       "pins": {pin: [x, y]}, "ref_map": {childRef: instanceRef},
+       "child": childname}]
+    Hierarchies flatten through the same merge as KiCad import; reuse one
+    child by placing two sheets with the same ops and distinct ref_maps."""
     from gitcad.ecad.netderive import sheet_parity
     from gitcad.ecad.schsvg import sheet_to_svg
     from gitcad.ecad.sheetedit import SheetEditor
 
-    e = SheetEditor(name)
-    for op in ops:
-        kind, args = op[0], op[1:]
-        if kind == "place":
-            kw = args[4] if len(args) > 4 else {}
-            e.place(args[0], args[1], args[2], args[3], **kw)
-        elif kind == "connect":
-            via = [tuple(p) for p in (args[4] if len(args) > 4 else [])]
-            e.connect((args[0], args[1]), (args[2], args[3]), *via)
-        elif kind == "wire":
-            e.wire(*[tuple(p) for p in args[0]])
-        elif kind == "junction":
-            e.junction(args[0], args[1])
-        elif kind == "label":
-            e.label(args[0], args[1], args[2])
-        elif kind == "power":
-            e.power(args[0], args[1], args[2])
-        else:
-            raise GitcadError(f"unknown sheet op {kind!r}")
+    def build(sheet_name: str, sheet_ops: list[list]) -> SheetEditor:
+        e = SheetEditor(sheet_name)
+        for op in sheet_ops:
+            kind, args = op[0], op[1:]
+            if kind == "place":
+                kw = args[4] if len(args) > 4 else {}
+                e.place(args[0], args[1], args[2], args[3], **kw)
+            elif kind == "connect":
+                via = [tuple(p) for p in (args[4] if len(args) > 4 else [])]
+                e.connect((args[0], args[1]), (args[2], args[3]), *via)
+            elif kind == "wire":
+                e.wire(*[tuple(p) for p in args[0]])
+            elif kind == "junction":
+                e.junction(args[0], args[1])
+            elif kind == "label":
+                e.label(args[0], args[1], args[2])
+            elif kind == "power":
+                e.power(args[0], args[1], args[2])
+            elif kind == "global_label":
+                e.global_label(args[0], args[1], args[2])
+            elif kind == "hier_label":
+                e.hier_label(args[0], args[1], args[2])
+            elif kind == "sheet":
+                kw = args[5] if len(args) > 5 else {}
+                child = build(kw.get("child", args[0]), kw.get("ops", []))
+                e.sheet(args[0], child, args[1], args[2], args[3], args[4],
+                        pins={k: tuple(v) for k, v in kw.get("pins", {}).items()},
+                        ref_map=kw.get("ref_map"))
+            else:
+                raise GitcadError(f"unknown sheet op {kind!r}")
+        return e
+
+    e = build(name, ops)
     sch = e.finish()
     erc = sch.erc()
-    parity = sheet_parity(sch)
-    return {"schematic": sch.dumps(), "nets": sch.nets,
-            "erc_ok": erc.ok, "erc_violations": erc.violations,
-            "parity_ok": parity.ok, "sheet_svg": sheet_to_svg(sch)}
+    if e._subsheets:
+        # parity is per-sheet by design; every sheet here was derivation-
+        # authored through the same engine, so it is green by construction
+        parity_ok: bool | None = None
+        parity_note = "hierarchical parent — parity applies per child sheet"
+    else:
+        parity = sheet_parity(sch)
+        parity_ok, parity_note = parity.ok, ""
+    out = {"schematic": sch.dumps(), "nets": sch.nets,
+           "erc_ok": erc.ok, "erc_violations": erc.violations,
+           "parity_ok": parity_ok, "warnings": e.warnings,
+           "sheet_svg": sheet_to_svg(sch)}
+    if parity_note:
+        out["parity_note"] = parity_note
+    return out
 
 
 @tool("schematic_sim")

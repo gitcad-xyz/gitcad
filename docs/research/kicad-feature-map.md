@@ -15,7 +15,7 @@ honest: ✅ shipped · 🟡 partial · ❌ missing.
 | Local / global / hierarchical labels | labels in authoring + import; hierarchy flattened with KiCad semantics | ✅ |
 | Power symbols / no-connect | power flags name nets; nc markers type pins `no_connect` | ✅ |
 | Hierarchical sheets (import) | recursive import, sheet pins bridge structurally, scoped names | ✅ |
-| Hierarchical sheets (authoring) | SheetEditor subsheet support | ❌ |
+| Hierarchical sheets (authoring) | `SheetEditor.sheet()` subsheet instances + hier/global labels; same hier_merge engine as import (equivalence-tested); reuse via `ref_map` | ✅ |
 | Sheet reuse (one file, N instances) | per-instance refs from KiCad `instances` paths | ✅ |
 | **Buses / bus entries / bus aliases** | grouped-net vocabulary + fan-out helper | ❌ |
 | ERC | pin-type matrix + system ERC across sheets | ✅ |

@@ -214,3 +214,123 @@ def wire_end_hit_rate(pins, wires, net_names) -> float | None:
                if p in pin_keys or sum(q == p for q in ends) > 1
                or any(_on_segment(p, a, b) for a, b in wire_keys if p not in (a, b)))
     return hits / len(ends)
+
+
+def hier_merge(sch, parent_nets, subsheets, children, query_net,
+               gfx_labels, gfx_powers, warnings: list) -> None:
+    """Flatten a sheet hierarchy into one netlist — KiCad semantics, shared
+    by the .kicad_sch importer and SheetEditor authoring so an authored
+    hierarchy and an imported one mean exactly the same thing:
+
+    - a sheet pin joins the parent net at its point to the child net named
+      by the matching hierarchical label (structural union, so a parent
+      label on the same wire still wins the name);
+    - global labels and power nets are design-wide — same name, same net,
+      across every sheet;
+    - everything else in a child is sheet-scoped: names become
+      ``sheetname/NAME`` so locals never collide across sheets.
+    Sheet REUSE arrives here with per-instance refs already resolved
+    (importer: KiCad instances model; authoring: ``ref_map``); refs that
+    STILL collide are a genuine error and fail loud."""
+    from gitcad.errors import GitcadError
+
+    uf: dict = {}
+
+    def find(a):
+        uf.setdefault(a, a)
+        while uf[a] != a:
+            uf[a] = uf[uf[a]]
+            a = uf[a]
+        return a
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            uf[rb] = ra
+
+    child_global: list[set] = []
+    child_hier: list[set] = []
+    for c in children:
+        g = getattr(c, "graphics", None) or {}
+        child_global.append(
+            {lb["name"] for lb in g.get("labels", [])
+             if lb.get("kind") == "global_label"}
+            | {pw["name"] for pw in g.get("powers", [])})
+        child_hier.append({lb["name"] for lb in g.get("labels", [])
+                           if lb.get("kind") == "hierarchical_label"})
+    global_names = ({lb["name"] for lb in gfx_labels
+                     if lb.get("kind") == "global_label"}
+                    | {pw["name"] for pw in gfx_powers})
+    for gset in child_global:
+        global_names |= gset
+
+    # 1) sheet pins bridge parent groups to child hier-label nets
+    qi = 0
+    for ci, ss in enumerate(subsheets):
+        for sp in ss["pins"]:
+            pnet = query_net[qi]
+            qi += 1
+            child = children[ci]
+            if child is None:
+                continue
+            if sp["name"] in child.nets:
+                union(("P", pnet), ("C", ci, sp["name"]))
+            else:
+                warnings.append(
+                    f"sheet {ss['name']!r}: pin {sp['name']!r} has no matching "
+                    "hierarchical label in the child")
+    # 2) global/power names are design-wide
+    for n in parent_nets:
+        if n in global_names:
+            union(("P", n), ("G", n))
+    for ci, child in enumerate(children):
+        if child is None:
+            continue
+        for n in child.nets:
+            if n in global_names:
+                union(("C", ci, n), ("G", n))
+
+    # collect every net node's refs, then name each merged group
+    members: dict = {}
+    for n, refs in parent_nets.items():
+        members.setdefault(find(("P", n)), []).append(("P", None, n, refs))
+    for ci, child in enumerate(children):
+        if child is None:
+            continue
+        for n, refs in child.nets.items():
+            members.setdefault(find(("C", ci, n)), []).append(("C", ci, n, refs))
+
+    def group_name(items) -> str:
+        globals_ = sorted(n for _, _, n, _ in items if n in global_names)
+        if globals_:
+            return globals_[0]
+        parents = [n for kind, _, n, _ in items if kind == "P"]
+        real_parent = sorted(n for n in parents if not n.startswith("N$"))
+        if real_parent:
+            return real_parent[0]
+        hier = sorted(f"{subsheets[ci]['name']}/{n}" for kind, ci, n, _ in items
+                      if kind == "C" and n in child_hier[ci])
+        if hier:
+            return hier[0]
+        if parents:
+            return parents[0]                      # parent auto name
+        (kind, ci, n, _), = items[:1]
+        return f"{subsheets[ci]['name']}/{n}"      # sheet-scoped child net
+
+    for items in members.values():
+        name = group_name(items)
+        refs = sorted({r for _, _, _, rs in items for r in rs})
+        if refs:
+            sch.connect(name, *refs)
+
+    for ci, child in enumerate(children):
+        if child is None:
+            continue
+        have = {c.ref for c in sch.components}
+        for comp in child.components:
+            if comp.ref in have:
+                raise GitcadError(
+                    f"duplicate ref {comp.ref!r} across sheets — reused "
+                    "sheets need per-instance references (importer: KiCad "
+                    "instances blocks; authoring: ref_map)")
+            sch.components.append(comp)
