@@ -83,6 +83,11 @@ class Document:
         # changes geometry (an ADR-0006 breaking change) but never
         # re-identifies the tree.
         self.parameters: dict[str, Any] = {}
+        # Configurations (SW-map P2): named parameter-override sets — one
+        # document IS a product family ("M3x8": {"L": 8}). Overrides must
+        # name existing parameters (fail loud); each variant builds through
+        # the same tree with the same feature ids.
+        self.configurations: dict[str, dict[str, Any]] = {}
 
     # -- construction ---------------------------------------------------------
 
@@ -135,12 +140,37 @@ class Document:
             raise GitcadError(f"parameter name {name!r} must be an identifier")
         self.parameters[name] = value
 
-    def resolved_parameters(self) -> dict[str, float]:
+    def resolved_parameters(self, config: str | None = None) -> dict[str, float]:
         """The parameter table with every expression evaluated —
-        deterministic, cycle-detecting, fail-loud (gitcad.expr)."""
+        deterministic, cycle-detecting, fail-loud (gitcad.expr). With
+        ``config``, that configuration's overrides apply first (SW-map P2:
+        a design-table row), then the whole table re-resolves so dependent
+        expressions follow the override."""
         from gitcad.expr import resolve_table
 
-        return resolve_table(self.parameters)
+        table = dict(self.parameters)
+        if config is not None:
+            if config not in self.configurations:
+                raise GitcadError(
+                    f"unknown configuration {config!r} "
+                    f"(have {sorted(self.configurations)})")
+            for name, value in self.configurations[config].items():
+                if name not in table:
+                    raise GitcadError(
+                        f"configuration {config!r} overrides undefined "
+                        f"parameter {name!r}")
+                table[name] = value
+        return resolve_table(table)
+
+    def set_configuration(self, name: str, overrides: dict[str, Any]) -> None:
+        """Define/update a configuration: named overrides of existing
+        parameters. The document stays ONE file that is a product family."""
+        for pname in overrides:
+            if pname not in self.parameters:
+                raise GitcadError(
+                    f"configuration {name!r} overrides undefined parameter "
+                    f"{pname!r} — define it in `parameters` first")
+        self.configurations[name] = dict(overrides)
 
     def __len__(self) -> int:
         return len(self._features)
@@ -154,6 +184,8 @@ class Document:
             # emitted only when present, so parameter-free documents stay
             # byte-identical with every previously stored one (ADR-0004)
             doc["parameters"] = self.parameters
+        if self.configurations:
+            doc["configurations"] = self.configurations
         return canonical_json(doc, indent=2) + "\n"
 
     @classmethod
@@ -163,6 +195,8 @@ class Document:
             raise GitcadError(f"unsupported document schema {doc.get('schema')!r}")
         out = cls()
         out.parameters = dict(doc.get("parameters", {}))
+        out.configurations = {k: dict(v)
+                              for k, v in doc.get("configurations", {}).items()}
         for fd in doc["features"]:
             f = Feature.from_dict(fd)
             if not f.id:
@@ -183,7 +217,8 @@ class Document:
 
     # -- build (produces artifacts, not source) -------------------------------
 
-    def build(self, kernel: Kernel, identity: IdentityService | None = None) -> BuildResult:
+    def build(self, kernel: Kernel, identity: IdentityService | None = None,
+              config: str | None = None) -> BuildResult:
         """Evaluate the tree against a kernel.
 
         Assigns stable entity ids to every feature's faces/edges via
@@ -197,7 +232,7 @@ class Document:
 
         identity = identity or IdentityService()
         result = BuildResult(identity=identity)
-        env = self.resolved_parameters()
+        env = self.resolved_parameters(config)
         for f in self._features:
             ins = [result.shapes[i] for i in f.inputs]
             try:

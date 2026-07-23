@@ -128,3 +128,57 @@ def test_mcp_model_parameters_tool() -> None:
     r2 = REGISTRY["feature_add"](model=r["model"], op="box",
                                  params={"dx": "=W", "dy": "=H", "dz": 2})
     assert "feature_id" in r2
+
+
+# -- configurations (SW-map P2) ------------------------------------------------
+
+def _family() -> Document:
+    d = Document()
+    d.set_parameter("L", 8)
+    d.set_parameter("d", 3)
+    d.set_parameter("head", "=d*1.8")
+    d.add(Feature(op="cylinder", params={"radius": "=d/2", "height": "=L"}))
+    d.set_configuration("M3x8", {"L": 8})
+    d.set_configuration("M3x10", {"L": 10})
+    d.set_configuration("M4x10", {"L": 10, "d": 4})
+    return d
+
+
+def test_configurations_resolve_with_dependent_expressions() -> None:
+    d = _family()
+    assert d.resolved_parameters("M3x10") == {"L": 10.0, "d": 3.0, "head": 5.4}
+    assert d.resolved_parameters("M4x10")["head"] == pytest.approx(7.2)
+
+
+def test_variant_builds_share_feature_ids() -> None:
+    d = _family()
+    ka, kb = _RecordingKernel(), _RecordingKernel()
+    ra = d.build(ka, config="M3x8")
+    rb = d.build(kb, config="M4x10")
+    assert ka.calls == [("cylinder", 1.5, 8.0)]
+    assert kb.calls == [("cylinder", 2.0, 10.0)]
+    assert set(ra.shapes) == set(rb.shapes)          # same ids, every variant
+
+
+def test_configuration_roundtrips_and_fails_loud() -> None:
+    d = _family()
+    d2 = Document.loads(d.dumps())
+    assert d2.configurations == d.configurations
+    assert d2.dumps() == d.dumps()
+    with pytest.raises(GitcadError, match="undefined parameter"):
+        d2.set_configuration("bad", {"nope": 1})
+    with pytest.raises(GitcadError, match="unknown configuration"):
+        d2.resolved_parameters("ghost")
+    plain = Document()
+    plain.add(Feature(op="box", params={"dx": 1, "dy": 1, "dz": 1}))
+    assert "configurations" not in plain.dumps()
+
+
+def test_mcp_model_configurations_tool() -> None:
+    from gitcad.mcp.server import REGISTRY
+
+    model = REGISTRY["model_new"]()["model"]
+    model = REGISTRY["model_parameters"](model=model, set={"L": 8, "d": 3})["model"]
+    r = REGISTRY["model_configurations"](
+        model=model, set={"M3x8": {"L": 8}, "M3x12": {"L": 12}})
+    assert r["resolved"]["M3x12"] == {"L": 12.0, "d": 3.0}

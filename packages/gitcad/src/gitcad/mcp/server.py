@@ -72,6 +72,27 @@ def model_parameters(model: str, set: dict[str, Any] | None = None) -> dict[str,
             "resolved": doc.resolved_parameters()}
 
 
+@tool("model_configurations")
+def model_configurations(model: str, set: dict[str, dict[str, Any]] | None = None,
+                         delete: list[str] | None = None) -> dict[str, Any]:
+    """Configurations / design tables (SW-map P2): one document IS a
+    product family. Each configuration is a named override set of
+    existing parameters ('M3x10': {'L': 10}); the whole table re-resolves
+    per variant so dependent expressions follow. Build any variant with
+    model ops' `config` argument. Returns the model text plus each
+    configuration's fully resolved parameter table — the design table,
+    as data."""
+    doc = Document.loads(model)
+    for name, overrides in (set or {}).items():
+        doc.set_configuration(name, overrides)
+    for name in (delete or []):
+        doc.configurations.pop(name, None)
+    return {"model": doc.dumps(),
+            "configurations": doc.configurations,
+            "resolved": {name: doc.resolved_parameters(name)
+                         for name in sorted(doc.configurations)}}
+
+
 @tool("feature_add")
 def feature_add(model: str, op: str, params: dict[str, Any] | None = None,
                 inputs: list[str] | None = None) -> dict[str, Any]:

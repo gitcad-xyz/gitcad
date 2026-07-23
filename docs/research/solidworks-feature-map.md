@@ -69,7 +69,7 @@ Status is honest: ✅ shipped · 🟡 partial · ❌ missing · — non-goal.
 | Reference planes | sketch planes incl. sketch-on-face | ✅ |
 | Reference axis/point/coordinate system | part `Frame`s at interface level | 🟡 |
 | **Equations / global variables** | ✅ named parameters (`=expr`, degree trig, cross-references, cycle-detection); ids minted from expression text so re-valuing never re-identifies | ✅ |
-| **Configurations / design tables** | variants table over parameters; per-variant build+checks in CI | ❌ **P2** |
+| **Configurations / design tables** | ✅ named override sets in the document; whole table re-resolves per variant; every variant builds with identical feature ids | ✅ |
 | Helix/spiral curve | 3D curve for springs/threads | ❌ P5 |
 
 ## 2. Sketching
@@ -180,9 +180,8 @@ What actually converts a SolidWorks user, in order of leverage:
 
 1. ~~P1 Named parameters + equations~~ — SHIPPED: `gitcad.expr` +
    `Document.parameters` + build-time resolution + `model_parameters` MCP.
-2. **P2 Configurations / design tables** — product families as data,
-   every variant built and checked in CI. SolidWorks' most-loved
-   capability, and ours can be strictly stronger.
+2. ~~P2 Configurations / design tables~~ — SHIPPED: `Document.configurations`
+   + per-variant build + `model_configurations` MCP.
 3. **P3 Sheet metal + flat pattern DXF** — the missing manufacturing
    handoff; enclosures are the co-design centerpiece.
 4. **P4 Draft + rib + scale + split (+ draft/thickness analysis)** —
