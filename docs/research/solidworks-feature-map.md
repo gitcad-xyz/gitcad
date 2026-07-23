@@ -60,7 +60,7 @@ Status is honest: ✅ shipped · 🟡 partial · ❌ missing · — non-goal.
 | Lofted boss/cut | `loft` (+ ruled) | ✅ |
 | Boundary boss | loft covers common cases; true boundary surfaces | ❌ defer |
 | Fillet (constant radius) | `fillet` on lineage-stable edge refs | ✅ |
-| Variable-radius / face / full-round fillet | per-edge radius table | ❌ |
+| Variable-radius fillet | linear-taper per-edge, exact ℚ[π] (VariableFilletedBox); face/full-round later | 🟡 |
 | Chamfer | `chamfer` | ✅ |
 | Shell | `shell` | ✅ |
 | **Draft** | ✅ `draft` op: selected faces (lineage-stable ids), pull dir, neutral plane; non-draftable faces refused loud | ✅ |
@@ -69,7 +69,7 @@ Status is honest: ✅ shipped · 🟡 partial · ❌ missing · — non-goal.
 | **Threads (cosmetic + modeled)** | 🟡 thread spec as data on holes, surfaced in drawing callouts ("M3x0.5-6H (Ø2.5)"); modeled helical cut later | 🟡 |
 | Linear/circular pattern | `pattern_linear` / `pattern_circular` | ✅ |
 | Mirror | `mirror` | ✅ |
-| Table-driven pattern | placements-as-data pattern (agent-natural) | ❌ |
+| Table-driven pattern | placements-as-data `pattern_table` op | ✅ |
 | Scale | ✅ `scale` op (uniform factor or fx/fy/fz) | ✅ |
 | Combine (booleans) | `boolean` fuse/cut/common | ✅ |
 | Split body | ✅ `split` op: axis-aligned plane, keep above/below, self-sized half-space | ✅ |
@@ -86,7 +86,7 @@ Status is honest: ✅ shipped · 🟡 partial · ❌ missing · — non-goal.
 | SolidWorks | agent-first form | status |
 |---|---|---|
 | Line/arc/circle/rect profiles | sketch profiles | ✅ |
-| Splines | spline profile segments | ❌ |
+| Splines | spline profile segments (`spline_to`), exact area via Green's theorem | ✅ |
 | Dimensions + relations | ADR-0013 constraint solver (declared, not inferred) | ✅ |
 | Auto-relation inference | — agents declare intent; inference is a mouse optimization | — |
 | Sketch on face | ✅ | ✅ |
@@ -128,13 +128,13 @@ play. Mold tools (parting lines, core/cavity) ❌ defer; draft analysis
 | SolidWorks | agent-first form | status |
 |---|---|---|
 | Measure | kernel `measure` + viewer measure tools | ✅ |
-| Mass properties | `mass_props` (validated vs SW output earlier) | ✅ |
+| Mass properties + inertia tensor | `mass_props` + `analysis.inertia` (EXACT rational tensor for forge solids) | ✅ |
 | Interference detection | assembly interference (real solids) | ✅ |
 | Clearance verification | `interference_clear` requirements kind | ✅ (beyond: versioned, CI-gated) |
 | Section views | drawing sections + viewer | ✅ |
 | Sensors/alerts | requirements-as-code | ✅ (beyond) |
-| Draft analysis | min-draft-angle check per pull direction | ❌ (pairs with Draft op, P4) |
-| Thickness analysis | min-wall check (moldability) | ❌ |
+| Draft analysis | `analysis.draft_analysis` — faces below min draft per pull | ✅ |
+| Thickness analysis | `analysis.thickness_analysis` — anti-parallel face min-wall (prismatic-exact) | 🟡 |
 | Curvature/zebra | — | ❌ defer |
 | SimulationXpress / FEA | — honest defer: no fake physics; sim-as-test philosophy extends when a real solver integrates | ❌ defer |
 | Motion studies | mate solver is static placement | ❌ defer |
@@ -165,7 +165,7 @@ play. Mold tools (parting lines, core/cavity) ❌ defer; draft analysis
 | Broken / crop views | — | ❌ defer |
 | Associative dimensions | hole callouts, position dims | ✅ |
 | **GD&T: FCF, datums, tolerances** | ✅ tolerances-as-data on feature ids; GD&T block + toleranced hole callouts on drawings | ✅ |
-| Surface finish / weld symbols | annotation set | ❌ |
+| Surface finish / weld symbols | ISO 1302 tick + ISO 2553 weld symbols in drawings | ✅ |
 | BOM table + balloons | ✅ | ✅ |
 | Revision table | — git history IS the revision table; projection possible | ✅ (beyond) |
 | Sheet formats / standards | title block basic; ASME/ISO styles | 🟡 |
@@ -175,7 +175,7 @@ play. Mold tools (parting lines, core/cavity) ❌ defer; draft analysis
 | SolidWorks | agent-first form | status |
 |---|---|---|
 | Feature tree rollback/reorder/edit | text-native: the tree is the file; edit + regen; lineage-stable ids keep downstream refs alive | ✅ (beyond) |
-| Suppress/unsuppress feature | `suppressed` flag honored by regen | ❌ (small, useful for variants) |
+| Suppress/unsuppress feature | `suppressed` flag honored by build (modifier pass-through) | ✅ |
 | Undo / autosave | git | ✅ (beyond) |
 | PDM (vault, workflows) | git + review gates + semantic merge + lots | ✅ (beyond) |
 | FeatureWorks (recognition) | recognize v1 (verified hole recovery) | 🟡 |
