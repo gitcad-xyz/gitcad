@@ -133,6 +133,15 @@ Fuzz lane: random CSG programs (bounded depth) with invariant checks
 (volume additivity, boolean algebra identities, watertightness) — runs
 nightly against whichever backends exist.
 
+## 2b. THE EXECUTION PLAN
+
+The packet-by-packet, model-independent execution plan lives in the
+forge repo: **github.com/gitcad-xyz/forge/blob/main/PLAN.md** (local
+C:/Users/danie/forge/PLAN.md). It contains the rules of engagement,
+current-state file map, work packets W-A..W-K with specs and
+hand-computed acceptance values, and the session-start checklist.
+Any executing agent starts THERE.
+
 ## 3. Workstreams & immediate execution order
 
 1. **W0 harness** — scorecard + corpus assembly + OCCT baseline. No
