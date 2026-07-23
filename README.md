@@ -1,6 +1,6 @@
 # gitcad
 
-**Agent-first, headless, git-native CAD.**
+**Agent-first, headless, git-native CAD — mechanical and electrical, one substrate.**
 
 gitcad is a boundary-representation CAD system designed from the ground up to be
 driven by agents over [MCP](https://modelcontextprotocol.io), with git as the
@@ -10,60 +10,68 @@ source of truth and a browser as the (optional) viewer. It leans on the mature
 b-rep math — the value lives in the *layers around* the kernel:
 
 - an **intent-based API** agents can author without visualizing raw NURBS,
-- a **verification/render loop** so agents model by checking, not hoping,
-- **associative 2D drawings** derived from the 3D model (mechanical drafting),
-- a **git-native text format** so models diff, branch, and merge like code, and
+- a **verification loop** so agents model by checking, not hoping — ERC, DRC,
+  electrical envelopes, interference, executable requirements,
+- **KiCad-grade schematics** and a 2-layer board flow through to Gerbers,
+- a **git-native text format** so designs diff, branch, review, and **merge
+  semantically** like code, and
 - a **privacy-preserving bug loop** where failures are auto-reduced to minimal,
   synthetic, shareable repros.
 
-> Website: [gitcad.xyz](https://gitcad.xyz)
+> Website: [gitcad.xyz](https://gitcad.xyz) · Registry: [gitcad-xyz/registry](https://github.com/gitcad-xyz/registry)
 
 ## Why this exists
 
-Agents fall back to shelling out to FreeCAD for anything with complex curves —
-not because that's good, but because it's what's in the training distribution,
-and they model *blind*. gitcad's thesis: wrap the same proven kernel (OCCT) in
-an intent API plus a deterministic inspect/render loop, make the model **text**
-so git works, and make MCP the *primary* interface so the product is
-agent-legible from day one.
+Agents fall back to shelling out to FreeCAD or KiCad for anything real — not
+because that's good, but because it's what's in the training distribution, and
+they model *blind*. gitcad's thesis: wrap proven kernels and formats in an
+intent API plus a deterministic check/render loop, make the design **text** so
+git works, and make MCP the *primary* interface so the product is agent-legible
+from day one.
 
-## The six seams
+Because designs are canonical text with stable identity, gitcad does things the
+incumbent architectures structurally cannot:
 
-Everything swappable lives behind a small, stable interface (`gitcad.seams`):
+| | |
+|---|---|
+| **A type system for hardware** | 5V into a 3.6V-max pin is a design-time error (pin envelopes, rail budgets — ADR-0015) |
+| **PRs that show their physics** | `gitcad-review`: check deltas (introduced vs fixed) + side-by-side renders, merge-gated |
+| **Semantic 3-way merge** | `gitcad-merge`: features by id, connectivity by pin, copper by content — no file locks (ADR-0016) |
+| **Simulation as tests** | `to_spice` + ngspice assertions: "OUT sits at 2.5±0.05 V" runs on every commit |
+| **Requirements as code** | `gitcad-verify`: the traceability matrix that executes (mass, envelopes, rails, DRC, fit) |
+| **Fab-lot bisect** | `gitcad-lot`: builds pinned to commits + artifact hashes; field failures bisect through design history |
 
-| Seam | Responsibility | Default backend |
-|------|----------------|-----------------|
-| `Kernel` | b-rep geometry ops | OCCT via `cadquery-ocp` (`gitcad.kernel.occt`) |
-| `IdentityService` | stable entity IDs (topological naming) | lineage-hash (`gitcad.identity`) |
-| `DocumentModel` | the feature tree + text (de)serialization | `gitcad.document` |
-| `Renderer` | headless tessellate → image/glTF | *stub* |
-| `DrawingEngine` | 3D → 2D HLR projection + dimensions | *stub* |
-| `Storage` | git-backed model + artifact store | *stub* |
-
-A "major architecture change" should mean replacing one backend, not a rewrite.
-
-## Layout
+## A project is a repo
 
 ```
-src/gitcad/
-  seams.py         # the six Protocol interfaces — the load-bearing boundaries
-  errors.py        # structured errors that double as bug-repro payloads
-  identity.py      # IdentityService: stable IDs from construction lineage
-  document.py      # DocumentModel: feature tree + canonical text format
-  kernel/
-    null.py        # pure-Python test backend (no OCCT dependency)
-    occt.py        # OCCT via cadquery-ocp (the real kernel)
-  report/
-    fingerprint.py # deterministic failure fingerprints (for dedup)
-    reduce.py      # delta-debug reducer: proprietary model -> minimal synthetic repro
-  mcp/
-    server.py      # the MCP tool surface (the PRIMARY interface)
-docs/adr/          # architecture decision records (the durable intent)
-tests/
-  invariants/      # permanent, architecture-independent properties
-  golden/          # curated user-visible contracts
-  regression/      # auto-generated, second-class, expirable
+widget/
+├── widget.gitcad        # THE product: the top-level assembly (mech + elec parts)
+├── housing.part         #   a mechanical part…
+├── housing.model        #   …and the feature tree that gives it shape
+├── mainboard.pcba       #   an electrical assembly: mechanical outside,
+├── mainboard.board      #   enter it for the electrical workflow
+├── mainboard.sch        #   the electrical source of truth
+├── requirements.reqs    # executable requirements
+└── release-*/           # built artifacts + *.lot fab provenance
 ```
+
+`gitcad-init widget` scaffolds all of it — merge driver wired, CI gates included.
+Extensions are roles; detection is by content; `.json` variants stay accepted.
+
+## The CLI surface
+
+| command | what it does |
+|---|---|
+| `gitcad-init` | new project: product root, merge driver, CI, requirements |
+| `gitcad-mcp` | the MCP server — the primary interface (60+ tools) |
+| `gitcad-view` | live viewer: 3D + explode + cross-probe + schematics + checks; `--review BASE` adds in-app PR review |
+| `gitcad-render` | PNG/SVG artifacts from any design file (drawn sheets, board top, 3D) |
+| `gitcad-review` | semantic + check-delta + visual diff between git refs; exit 1 gates merges |
+| `gitcad-merge` | git merge driver: semantic 3-way at each kind's natural grain |
+| `gitcad-verify` | run `requirements.reqs` — measured-vs-limit per requirement |
+| `gitcad-explore` | branch scoreboard: N variants judged by the same gates |
+| `gitcad-convert` | multi-body FreeCAD `.FCStd` → a whole gitcad project |
+| `gitcad-lot` | fab-lot provenance: record + tamper-verify |
 
 ## Quick start
 
@@ -74,36 +82,42 @@ pip install cadquery-ocp        # add the real OCCT kernel (~large wheel)
 ```
 
 The test suite runs with **no geometry kernel installed** — the null backend
-covers identity, document round-tripping, and reduction. Tests that need real
-geometry are marked `@pytest.mark.occt` and skip when `cadquery-ocp` is absent.
+covers identity, documents, netlists, checks, merge, and reduction. Tests that
+need real geometry are marked `@pytest.mark.occt` and skip when `cadquery-ocp`
+is absent.
 
-## Status — v0.1
+## What works (v0.7.x)
 
-**Manufacturing outputs work end to end.** From a text model, gitcad produces
-files you can send to a manufacturer today:
+**Mechanical** — primitives, booleans, fillets/chamfers/shell, extrude/revolve/
+loft/sweep/mirror, sketch planes + sketch-on-face, constraint solver
+(authoring-time, ADR-0013), holes with counterbore/countersink, patterns,
+stable entity identity (fillet-by-id survives upstream edits), mass properties,
+STEP/STL/DXF, dimensioned drawings (third-angle + section views with hatching
++ assembly BOM/balloons), exploded views (ADR-0014), mate checking + `mate_solve`,
+exact interference with clash budgets, feature recognition from STEP, FreeCAD
+import (parametric tree where possible, multi-body conversion always).
 
-| Domain | Outputs |
-|---|---|
-| Mechanical | **STEP** (ISO 10303-21) · **STL** · dimensioned 2D **drawings** (SVG + PDF, third-angle front/top/right/iso via OCCT HLR) |
-| Electrical | **Gerber X2** (copper ×2, mask ×2, silk, profile) · **Excellon** drill · **pick-and-place** CSV · manifest |
+**Electrical** — schematic capture (typed pins) + sheet *authoring* with a
+KiCad-convention symbol library, `.kicad_sch` import validated
+**pin-group-identical against KiCad's own netlist engine** (hierarchical
+sheets, buses, multi-sheet systems), sheet-fidelity rendering, ERC + electrical
+envelopes + power budgets, forward/back annotation, 2-layer boards with net
+classes, keepouts, courtyard DRC, copper zones, silkscreen text (stroke font),
+copper connectivity, `route()` with guardrails, Gerber X2 / Excellon / PnP /
+IPC-D-356 / KiCad-netlist export, board stats + matched-pair length checks,
+Eagle `.sch` import, SPICE export + ngspice sim-as-test.
 
-Working: OCCT kernel (primitives, booleans, fillets, transforms, validation,
-measurement, entity enumeration) · drawing engine · 2-layer board model with
-fab-readiness validation · MCP tools for all of it · deterministic, byte-stable
-outputs (same source → identical Gerbers).
+**Cross-domain** — parts with typed interfaces + interface-semver + lockfiles
+(ADR-0008/9), MPN-atomic registry parts (ADR-0010), PCBA duality (`.pcba`:
+mechanical outside, electrical inside), populated board envelopes for
+enclosure fit checks, the `interference_clear` requirement, releases with
+all-or-nothing gates, fab-lot records.
 
-Try it:
+Everything deferred is deferred *explicitly with rationale* — see
+[docs/research/kicad-feature-map.md](docs/research/kicad-feature-map.md).
 
-```bash
-pip install cadquery-ocp   # after the editable installs above
-python examples/bracket.py   # → bracket.step, bracket.pdf, bracket.svg, bracket.stl
-python examples/blinky.py    # → full Gerber/drill/PnP fab package
-```
-
-Next: the cross-domain part standard (interfaces, ports, lockfile versioning),
-schematic capture + ERC, DRC engine, associative feature-level dimensions, the
-component registry. See `docs/adr/` for the reasoning, `docs/research/` for the
-competitive feature map, and `CLAUDE.md` for the rules agents must follow.
+See `docs/adr/` for the reasoning (17 ADRs) and `CLAUDE.md` for the rules
+agents must follow.
 
 ## License
 
