@@ -81,12 +81,12 @@ class RefKernel:
 
     def transform(self, shape, *, translate=(0, 0, 0),
                   rotate_axis=(0, 0, 1), rotate_deg: float = 0.0):
-        from forgekernel.quadric import AxisStack, Cone, Cyl, Sphere
+        from forgekernel.quadric import AxisStack, Cone, Cyl, DrilledSolid, Sphere
         from forgekernel.curve import TubeSolid
 
-        if isinstance(shape, TubeSolid):
+        if isinstance(shape, (TubeSolid, DrilledSolid)):
             if rotate_deg:
-                _nope("transform(rotate a certified tube)", "K3.1")
+                _nope("transform(rotate a drilled/tube solid)", "K2.2")
             return shape.translated(*translate)
         if isinstance(shape, (Cyl, Cone, Sphere)):
             if rotate_deg and (tuple(rotate_axis) != (0, 0, 1)):

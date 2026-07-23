@@ -38,6 +38,14 @@ class Profile:
         self.segments.append({"kind": "arc", "to": [x, y], "via": [via[0], via[1]]})
         return self
 
+    def spline_to(self, x: float, y: float, *, ctrl: list) -> "Profile":
+        """A polynomial-Bézier segment to (x, y) with intermediate control
+        points ``ctrl`` (one → quadratic, two → cubic, …). Its enclosed area
+        is exact in ℚ (Green's theorem), so an extrude of it is exact."""
+        self.segments.append({"kind": "spline", "to": [x, y],
+                              "ctrl": [list(c) for c in ctrl]})
+        return self
+
     def close(self) -> "Profile":
         """Close the loop back to ``start`` with a line (if not already there)."""
         if self.segments and self._end() != tuple(self.start):
@@ -54,8 +62,10 @@ class Profile:
             raise GitcadError("profile needs at least 2 segments")
         prev = tuple(self.start)
         for i, seg in enumerate(self.segments):
-            if seg["kind"] not in ("line", "arc"):
+            if seg["kind"] not in ("line", "arc", "spline"):
                 raise GitcadError(f"segment {i}: unknown kind {seg['kind']!r}")
+            if seg["kind"] == "spline" and "ctrl" not in seg:
+                raise GitcadError(f"segment {i}: spline needs 'ctrl' points")
             to = tuple(seg["to"])
             if to == prev and seg["kind"] == "line":
                 raise GitcadError(f"segment {i}: zero-length line")

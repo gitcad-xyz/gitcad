@@ -330,6 +330,17 @@ class Document:
                 resolved = resolve_value(f.params, env)
             except ExprError as e:
                 raise GitcadError(f"feature {f.id} ({f.op}): {e}") from None
+            # SW-map: a suppressed MODIFIER feature is skipped — its output is
+            # its first input (variants toggle features without deleting them).
+            # A suppressed base (no input) would orphan dependents; refuse.
+            if resolved.get("suppressed"):
+                if not f.inputs:
+                    raise GitcadError(
+                        f"feature {f.id} ({f.op}): cannot suppress a base "
+                        "feature with no inputs (would orphan dependents)")
+                result.shapes[f.id] = ins[0]
+                result.entities[f.id] = result.entities.get(f.inputs[0], {})
+                continue
             f_run = (f if resolved == f.params
                      else Feature(op=f.op, params=resolved, inputs=f.inputs, id=f.id))
             shape = _dispatch(kernel, f_run, ins, result)
@@ -380,6 +391,7 @@ def _resolve_entity_indices(entity_ids: list[str], input_feature: str,
 _REQUIRED_INPUTS = {"boolean": 2, "fillet": 1, "chamfer": 1, "shell": 1,
                     "move": 1, "hole": 1, "boss": 1, "mirror": 1,
                     "pattern_linear": 1, "pattern_circular": 1,
+                    "pattern_table": 1,
                     "scale": 1, "draft": 1, "split": 1, "rib": 1,
                     "engrave": 1}
 
@@ -502,6 +514,20 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
         for i in range(1, count):
             copy = kernel.transform(ins[0], rotate_axis=(0, 0, 1),
                                     rotate_deg=360.0 * i / count)
+            out = kernel.boolean("union", out, copy)
+        return out
+    if f.op == "pattern_table":
+        # Table-driven (placements-as-data) pattern — the agent-natural
+        # form: an explicit list of {translate, rotate_deg} placements
+        # unioned onto the seed. The seed itself is placement 0 if the
+        # table omits it; each row is applied to the ORIGINAL seed.
+        out = ins[0]
+        for row in p["placements"]:
+            t = row.get("translate", [0.0, 0.0, 0.0])
+            copy = kernel.transform(
+                ins[0], translate=(t[0], t[1], t[2]),
+                rotate_axis=tuple(row.get("rotate_axis", (0, 0, 1))),
+                rotate_deg=row.get("rotate_deg", 0.0))
             out = kernel.boolean("union", out, copy)
         return out
     if f.op == "boss":
