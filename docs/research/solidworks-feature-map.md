@@ -68,7 +68,7 @@ Status is honest: ✅ shipped · 🟡 partial · ❌ missing · — non-goal.
 | Wrap / Dome / Freeform | — | ❌ defer (niche) |
 | Reference planes | sketch planes incl. sketch-on-face | ✅ |
 | Reference axis/point/coordinate system | part `Frame`s at interface level | 🟡 |
-| **Equations / global variables** | named parameters; features reference them; a part becomes a function | ❌ **P1** |
+| **Equations / global variables** | ✅ named parameters (`=expr`, degree trig, cross-references, cycle-detection); ids minted from expression text so re-valuing never re-identifies | ✅ |
 | **Configurations / design tables** | variants table over parameters; per-variant build+checks in CI | ❌ **P2** |
 | Helix/spiral curve | 3D curve for springs/threads | ❌ P5 |
 
@@ -178,8 +178,8 @@ play. Mold tools (parting lines, core/cavity) ❌ defer; draft analysis
 
 What actually converts a SolidWorks user, in order of leverage:
 
-1. **P1 Named parameters + equations** — a part becomes a function;
-   everything else (configs, families, optimization loops) stands on it.
+1. ~~P1 Named parameters + equations~~ — SHIPPED: `gitcad.expr` +
+   `Document.parameters` + build-time resolution + `model_parameters` MCP.
 2. **P2 Configurations / design tables** — product families as data,
    every variant built and checked in CI. SolidWorks' most-loved
    capability, and ours can be strictly stronger.

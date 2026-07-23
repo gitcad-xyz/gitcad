@@ -76,6 +76,13 @@ class Document:
     def __init__(self) -> None:
         self._features: list[Feature] = []
         self._by_id: dict[str, Feature] = {}
+        # Named parameters (SW-map P1): values are numbers or "=expr"
+        # strings referencing other parameters. Feature params reference
+        # them as "=NAME..." expressions, resolved at BUILD time — ids are
+        # minted from the expression TEXT, so re-valuing a parameter
+        # changes geometry (an ADR-0006 breaking change) but never
+        # re-identifies the tree.
+        self.parameters: dict[str, Any] = {}
 
     # -- construction ---------------------------------------------------------
 
@@ -117,13 +124,36 @@ class Document:
     def features(self) -> list[Feature]:
         return list(self._features)
 
+    # -- named parameters (SW-map P1) -----------------------------------------
+
+    def set_parameter(self, name: str, value: Any) -> None:
+        """Define or update a named parameter. Value is a number or an
+        '=expr' string referencing other parameters ('=W/2 + wall')."""
+        import re as _re
+
+        if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise GitcadError(f"parameter name {name!r} must be an identifier")
+        self.parameters[name] = value
+
+    def resolved_parameters(self) -> dict[str, float]:
+        """The parameter table with every expression evaluated —
+        deterministic, cycle-detecting, fail-loud (gitcad.expr)."""
+        from gitcad.expr import resolve_table
+
+        return resolve_table(self.parameters)
+
     def __len__(self) -> int:
         return len(self._features)
 
     # -- text form (the git-diffable source) ----------------------------------
 
     def dumps(self) -> str:
-        doc = {"schema": self.SCHEMA, "features": [f.to_dict() for f in self._features]}
+        doc: dict[str, Any] = {"schema": self.SCHEMA,
+                               "features": [f.to_dict() for f in self._features]}
+        if self.parameters:
+            # emitted only when present, so parameter-free documents stay
+            # byte-identical with every previously stored one (ADR-0004)
+            doc["parameters"] = self.parameters
         return canonical_json(doc, indent=2) + "\n"
 
     @classmethod
@@ -132,6 +162,7 @@ class Document:
         if doc.get("schema") != cls.SCHEMA:
             raise GitcadError(f"unsupported document schema {doc.get('schema')!r}")
         out = cls()
+        out.parameters = dict(doc.get("parameters", {}))
         for fd in doc["features"]:
             f = Feature.from_dict(fd)
             if not f.id:
@@ -162,11 +193,20 @@ class Document:
         ``result.identity.dumps()`` alongside the model so stored references
         resolve in future processes.
         """
+        from gitcad.expr import ExprError, resolve_value
+
         identity = identity or IdentityService()
         result = BuildResult(identity=identity)
+        env = self.resolved_parameters()
         for f in self._features:
             ins = [result.shapes[i] for i in f.inputs]
-            shape = _dispatch(kernel, f, ins, result)
+            try:
+                resolved = resolve_value(f.params, env)
+            except ExprError as e:
+                raise GitcadError(f"feature {f.id} ({f.op}): {e}") from None
+            f_run = (f if resolved == f.params
+                     else Feature(op=f.op, params=resolved, inputs=f.inputs, id=f.id))
+            shape = _dispatch(kernel, f_run, ins, result)
             result.shapes[f.id] = shape
             result.entities[f.id] = _index_entities(kernel, shape, f.id, identity)
         return result

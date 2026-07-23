@@ -56,6 +56,22 @@ def model_new() -> dict[str, Any]:
     return {"model": Document().dumps()}
 
 
+@tool("model_parameters")
+def model_parameters(model: str, set: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Named parameters + equations (SW-map P1): read or update the model's
+    parameter table. Values are numbers or '=expr' strings ('=W/2 + wall';
+    trig in degrees, pi available). Feature params reference them the same
+    way — a part becomes a function of its parameters. Re-valuing a
+    parameter changes geometry (an ADR-0006 breaking change, gated like
+    any other) but never re-identifies features. Returns the model text
+    and the fully resolved table."""
+    doc = Document.loads(model)
+    for name, value in (set or {}).items():
+        doc.set_parameter(name, value)
+    return {"model": doc.dumps(), "parameters": doc.parameters,
+            "resolved": doc.resolved_parameters()}
+
+
 @tool("feature_add")
 def feature_add(model: str, op: str, params: dict[str, Any] | None = None,
                 inputs: list[str] | None = None) -> dict[str, Any]:
