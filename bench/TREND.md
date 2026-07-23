@@ -28,3 +28,5 @@ Regenerated from bench/*.json — every improvement claim has a snapshot behind it
 | 2026-07-23-we | ref | 94.1 | 5/5 | 16/17 | 0.16 |
 | 2026-07-23-wf | occt | 94.1 | 5/5 | 16/17 | 0.16 |
 | 2026-07-23-wf | ref | 88.2 | 5/5 | 15/17 | 0.16 |
+| 2026-07-23-wh | occt | 88.9 | 5/5 | 16/18 | 0.16 |
+| 2026-07-23-wh | ref | 94.4 | 5/5 | 17/18 | 0.17 |

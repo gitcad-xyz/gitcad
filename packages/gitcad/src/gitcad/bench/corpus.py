@@ -170,6 +170,20 @@ def torture_tangent_sphere_plane() -> Document:
     return d
 
 
+def sweep_rightangle() -> Document:
+    """A square profile swept along a 90-degree-cornered axis-aligned path
+    — all segment lengths RATIONAL, so ref builds it in plain Q (no surd
+    field needed). Exact volume = area * (10+10+10) = 16*30 = 480."""
+    d = Document()
+    profile = {"start": [-2, -2], "segments": [
+        {"kind": "line", "to": [2, -2]}, {"kind": "line", "to": [2, 2]},
+        {"kind": "line", "to": [-2, 2]}, {"kind": "line", "to": [-2, -2]}]}
+    d.add(Feature(op="sweep", params={"profile": profile,
+                                      "path": [[0, 0, 0], [0, 0, 10],
+                                               [10, 0, 10], [10, 0, 20]]}))
+    return d
+
+
 def torture_menger_1() -> Document:
     """The K1 acid test: Menger sponge level 1 — a 27mm cube minus three
     orthogonal 9mm square rods through the center. Five chained booleans
@@ -212,4 +226,5 @@ CORPUS: list[tuple[str, tuple[str, ...], Callable[[], Document]]] = [
     ("torture_tangent_sphere_plane", ("torture", "quadric", "boolean"),
      torture_tangent_sphere_plane),
     ("torture_menger_1", ("torture", "planar", "boolean"), torture_menger_1),
+    ("sweep_rightangle", ("sweep",), sweep_rightangle),
 ]
