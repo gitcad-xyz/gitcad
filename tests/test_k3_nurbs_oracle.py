@@ -466,3 +466,37 @@ def test_freeform_inertia_tensor_matches_occt() -> None:
     for i in range(3):
         for j in range(3):
             assert abs(float(ref[i][j]) - m.Value(i + 1, j + 1)) < 1e-6
+
+
+@pytest.mark.occt
+def test_forge_step_export_reads_in_occt(tmp_path) -> None:
+    """K7.0c: OCCT reads forge's natively-written STEP and recovers the
+    exact solid volume — OCCT-free CAD export, verified by the 30-year
+    kernel. Box and a non-convex L-prism (triangulated faces)."""
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+    from OCP.STEPControl import STEPControl_Reader
+
+    from gitcad.kernel.ref import RefKernel
+
+    k = RefKernel()
+
+    def occt_volume(path):
+        r = STEPControl_Reader()
+        r.ReadFile(path)
+        r.TransferRoots()
+        g = GProp_GProps()
+        BRepGProp.VolumeProperties_s(r.OneShape(), g)
+        return g.Mass()
+
+    box_path = str(tmp_path / "box.step")
+    k.export_step(k.box(6, 4, 3), box_path)
+    assert abs(occt_volume(box_path) - 72) < 1e-6
+
+    L = k.extrude({"start": [0, 0], "segments": [
+        {"kind": "line", "to": [40, 0]}, {"kind": "line", "to": [40, 10]},
+        {"kind": "line", "to": [10, 10]}, {"kind": "line", "to": [10, 30]},
+        {"kind": "line", "to": [0, 30]}, {"kind": "line", "to": [0, 0]}]}, 8)
+    L_path = str(tmp_path / "L.step")
+    k.export_step(L, L_path)
+    assert abs(occt_volume(L_path) - 4800) < 1e-6

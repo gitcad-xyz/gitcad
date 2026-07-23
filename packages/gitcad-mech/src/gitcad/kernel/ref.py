@@ -680,7 +680,15 @@ class RefKernel:
         _nope("hlr_project", _K2)
 
     def export_step(self, shape, path):
-        _nope("export_step", _K2)
+        # K7.0c: native AP214 export of a planar-faced solid — OCCT-free
+        # CAD exchange. Curved solids arrive at K3.7 (freeform topology).
+        from forgekernel.brep import Solid
+        from forgekernel.stepio import write_step_planar_solid
+
+        if not isinstance(shape, Solid):
+            _nope("export_step(curved solid)", "K3.7")
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(write_step_planar_solid(shape))
 
     def export_stl(self, shape, path, *, deflection=0.1):
         from forgekernel import io
