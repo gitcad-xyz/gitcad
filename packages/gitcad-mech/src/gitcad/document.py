@@ -451,6 +451,14 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
                 translate=(x, y, top_z - csink_depth))
             tool = kernel.boolean("union", tool, cs)
         return kernel.boolean("cut", ins[0], tool)
+    if f.op == "spring":
+        # SW-map P5: helical wire swept with a round section — a coil spring
+        # as one intent op (helix + pipe under the hood).
+        spine = kernel.helix(p["radius"], p["pitch"], p["turns"],
+                             bool(p.get("ccw", True)))
+        solid = kernel.pipe(spine, p["wire_diameter"])
+        return kernel.transform(solid, translate=(
+            p.get("x", 0.0), p.get("y", 0.0), p.get("base_z", 0.0)))
     if f.op == "scale":
         # SW-map P4: uniform ("factor") or anisotropic ("fx"/"fy"/"fz").
         if "factor" in p:

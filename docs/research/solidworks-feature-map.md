@@ -57,7 +57,7 @@ Status is honest: ✅ shipped · 🟡 partial · ❌ missing · — non-goal.
 | **Draft** | ✅ `draft` op: selected faces (lineage-stable ids), pull dir, neutral plane; non-draftable faces refused loud | ✅ |
 | **Rib** | ✅ `rib` op: wall along a segment, exact-volume-tested | ✅ |
 | Hole Wizard | `hole` (plain/cbore/csink/pilot) | ✅ |
-| **Threads (cosmetic + modeled)** | thread spec as data on holes; modeled via helix sweep | ❌ P5 |
+| **Threads (cosmetic + modeled)** | 🟡 thread spec as data on holes, surfaced in drawing callouts ("M3x0.5-6H (Ø2.5)"); modeled helical cut later | 🟡 |
 | Linear/circular pattern | `pattern_linear` / `pattern_circular` | ✅ |
 | Mirror | `mirror` | ✅ |
 | Table-driven pattern | placements-as-data pattern (agent-natural) | ❌ |
@@ -70,7 +70,7 @@ Status is honest: ✅ shipped · 🟡 partial · ❌ missing · — non-goal.
 | Reference axis/point/coordinate system | part `Frame`s at interface level | 🟡 |
 | **Equations / global variables** | ✅ named parameters (`=expr`, degree trig, cross-references, cycle-detection); ids minted from expression text so re-valuing never re-identifies | ✅ |
 | **Configurations / design tables** | ✅ named override sets in the document; whole table re-resolves per variant; every variant builds with identical feature ids | ✅ |
-| Helix/spiral curve | 3D curve for springs/threads | ❌ P5 |
+| Helix/spiral curve | ✅ `kernel.helix` + `pipe` sweep; `spring` intent op (volume-verified vs analytic wire length) | ✅ |
 
 ## 2. Sketching
 
@@ -187,8 +187,9 @@ What actually converts a SolidWorks user, in order of leverage:
    folded solid via the ordinary Document pipeline).
 4. ~~P4 Draft + rib + scale + split~~ — SHIPPED as document ops with
    OCCT volume proofs (draft/thickness *analysis* checks remain open).
-5. **P5 Helix + 3D curves** — unlocks modeled threads, springs, and
-   later weldments.
+5. ~~P5 Helix + springs + thread specs~~ — SHIPPED (helix/pipe kernel
+   ops, spring feature, thread-as-data on holes in callouts); modeled
+   thread cuts and general 3D sketch paths remain open.
 6. **P6 Fastener generator** — Toolbox, agent-first: every `mech.bolt`
    port can grow a correct bolt stack automatically.
 7. **P7 Tolerances/GD&T as data** — the QA handshake.

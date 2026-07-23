@@ -71,7 +71,8 @@ def _transform(polys, scale: float, ox: float, oy: float, bmin: Point):
     return [[(ox + (x - bmin[0]) * scale, oy + (y - bmin[1]) * scale) for x, y in poly] for poly in polys]
 
 
-def make_drawing(shape, kernel=None, *, title: str = "part", sheet: str = "A3") -> Drawing:
+def make_drawing(shape, kernel=None, *, title: str = "part", sheet: str = "A3",
+                 thread_specs: dict | None = None) -> Drawing:
     """Project ``shape`` into front/top/right/iso via the kernel's HLR engine,
     lay out third-angle on the sheet, add overall dimensions."""
     if kernel is None:
@@ -124,12 +125,14 @@ def make_drawing(shape, kernel=None, *, title: str = "part", sheet: str = "A3") 
     d.dims.append(Dimension((tx - DIM_OFFSET, ty), (tx - DIM_OFFSET, ty + th),
                             _fmt(size["top"][1]), vertical=True))
 
-    _add_hole_dimensions(d, kernel, shape, placements["top"], bb["top"], scale)
+    _add_hole_dimensions(d, kernel, shape, placements["top"], bb["top"], scale,
+                         thread_specs or {})
     return d
 
 
 def _add_hole_dimensions(d: Drawing, kernel, shape, top_origin: Point,
-                         top_bounds, scale: float) -> None:
+                         top_bounds, scale: float,
+                         thread_specs: dict | None = None) -> None:
     """Derived (associative) hole dimensions on the top view: a Ø-callout per
     unique hole plus x/y position dims from the part datum. Derived from the
     kernel's face enumeration — the same geometry source feature recognition
@@ -159,8 +162,10 @@ def _add_hole_dimensions(d: Drawing, kernel, shape, top_origin: Point,
         # Ø-callout: leader from the circle's 45° edge point outward.
         k = 0.7071
         anchor = (cx + rs * k, cy + rs * k)
+        spec = (thread_specs or {}).get((round(hx, 3), round(hy, 3)))
+        label = f"{spec} (Ø{_fmt(2 * r)})" if spec else f"Ø{_fmt(2 * r)}"
         d.callouts.append(Callout(anchor, (anchor[0] + 5.0, anchor[1] + 5.0),
-                                  f"Ø{_fmt(2 * r)}"))
+                                  label))
         # Position dims from the part datum (view min corner), stacked above
         # the view (x) and left of it (y) so multiple holes don't collide.
         x_off = top_h + DIM_OFFSET * (i + 1)

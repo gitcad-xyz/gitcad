@@ -265,7 +265,18 @@ def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3")
     if not len(doc):
         raise ValueError("model has no features")
     kernel = get_kernel()
-    d = make_drawing(doc.build(kernel).final(doc), title=title, sheet=sheet)
+    # thread specs on hole features surface in the hole callouts (SW-map P5);
+    # positions resolve through the parameter table like the build does
+    from gitcad.expr import resolve_value
+
+    env = doc.resolved_parameters()
+    threads = {}
+    for f in doc.features:
+        if f.op == "hole" and f.params.get("thread"):
+            rp = resolve_value(f.params, env)
+            threads[(round(float(rp["x"]), 3), round(float(rp["y"]), 3))] = rp["thread"]
+    d = make_drawing(doc.build(kernel).final(doc), title=title, sheet=sheet,
+                     thread_specs=threads)
     if path.lower().endswith(".pdf"):
         with open(path, "wb") as f:
             f.write(d.to_pdf())

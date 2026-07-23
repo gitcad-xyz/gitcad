@@ -70,6 +70,16 @@ class NullKernel:
                                        "rotate_axis": list(rotate_axis),
                                        "rotate_deg": rotate_deg}, (shape,))
 
+    def helix(self, radius: float, pitch: float, turns: float,
+              ccw: bool = True) -> Shape:
+        _require_positive(radius=radius, pitch=pitch, turns=turns)
+        return NullShape("helix", {"radius": radius, "pitch": pitch,
+                                   "turns": turns, "ccw": ccw})
+
+    def pipe(self, spine: Shape, profile_diameter: float) -> Shape:
+        _require_positive(profile_diameter=profile_diameter)
+        return NullShape("pipe", {"profile_diameter": profile_diameter}, (spine,))
+
     def scale(self, shape: Shape, fx: float, fy: float | None = None,
               fz: float | None = None) -> Shape:
         _require_positive(fx=fx)

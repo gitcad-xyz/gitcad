@@ -231,6 +231,51 @@ class OcctKernel:
         t.Multiply(trsf)  # rotate first, then translate
         return BRepBuilderAPI_Transform(shape, t, True).Shape()
 
+    def helix(self, radius: float, pitch: float, turns: float,
+              ccw: bool = True) -> Shape:
+        """A 3D helical wire about +z starting at (radius, 0, 0) — the curve
+        under springs and modeled threads. Standard OCCT recipe: a 2D line
+        on a cylindrical surface, 3D curve built on demand."""
+        from OCP.BRepLib import BRepLib
+        from OCP.GCE2d import GCE2d_MakeSegment
+        from OCP.Geom import Geom_CylindricalSurface
+        from OCP.gp import gp_Ax3, gp_Pnt2d
+
+        if radius <= 0 or pitch <= 0 or turns <= 0:
+            raise KernelError(
+                "helix wants positive radius/pitch/turns",
+                FailureSignature(op="helix", diagnostic="BadInput", kernel=self.name))
+        surf = Geom_CylindricalSurface(gp_Ax3(), radius)
+        du = 2 * math.pi * turns * (1.0 if ccw else -1.0)
+        seg = GCE2d_MakeSegment(gp_Pnt2d(0, 0), gp_Pnt2d(du, pitch * turns)).Value()
+        edge = BRepBuilderAPI_MakeEdge(seg, surf).Edge()
+        wire = BRepBuilderAPI_MakeWire(edge).Wire()
+        BRepLib.BuildCurves3d_s(wire)
+        return wire
+
+    def pipe(self, spine: Shape, profile_diameter: float) -> Shape:
+        """Sweep a circular section along a wire spine (springs, wire runs).
+        The section is auto-placed at the spine start, normal to it."""
+        from OCP.BRepAdaptor import BRepAdaptor_CompCurve
+        from OCP.gp import gp_Ax2, gp_Circ, gp_Vec as _Vec
+
+        curve = BRepAdaptor_CompCurve(spine)
+        p0 = gp_Pnt()
+        v0 = _Vec()
+        curve.D1(curve.FirstParameter(), p0, v0)
+        circ = gp_Circ(gp_Ax2(p0, gp_Dir(v0)), profile_diameter / 2)
+        wire = BRepBuilderAPI_MakeWire(
+            BRepBuilderAPI_MakeEdge(circ).Edge()).Wire()
+        face = BRepBuilderAPI_MakeFace(wire).Face()
+        mk = BRepOffsetAPI_MakePipe(spine, face)
+        mk.Build()
+        if not mk.IsDone():
+            raise KernelError(
+                "pipe sweep failed",
+                FailureSignature(op="pipe", diagnostic="BuildFailed",
+                                 kernel=self.name))
+        return mk.Shape()
+
     def scale(self, shape: Shape, fx: float, fy: float | None = None,
               fz: float | None = None) -> Shape:
         """Uniform (one factor) or anisotropic (three) scale about origin."""
