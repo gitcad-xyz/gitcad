@@ -42,13 +42,104 @@ def merge_documents(base: str, ours: str, theirs: str) -> dict:
         return _merge_model(base, ours, theirs)
     if kind_b == "schematic":
         return _merge_schematic(base, ours, theirs)
-    # boards / parts: whole-document 3-way, honest coarse fallback (ADR-0016)
+    if kind_b == "board":
+        return _merge_board(base, ours, theirs)
+    # parts: whole-document 3-way, honest coarse fallback (ADR-0016)
     verdict = _cell3(base, ours, theirs)
     if verdict[0] == "take":
         return {"ok": True, "merged": verdict[1], "conflicts": []}
     return {"ok": False, "merged": None, "conflicts": [
         {"unit": kind_b, "reason": "both branches changed this document "
          "(fine-grained merge for this kind is a later stage)"}]}
+
+
+# -- boards: refs/names are identity; copper's CONTENT is its identity --------
+
+def _merge_board(base: str, ours: str, theirs: str) -> dict:
+    """Fine-grained board merge (ADR-0016 upgrade):
+
+    - components by ref, mounting holes by name, net classes by class name —
+      classic 3-way cells (both changed differently = conflict);
+    - tracks/vias/zones have no stable id, and don't need one: their content
+      IS their identity, so they merge as element SETS — a moved track is a
+      removal plus an addition and merges cleanly; the only way to conflict
+      is at the named units above (or the outline, a whole-value cell);
+    - outline/thickness/mask_expansion: whole-value cells.
+    """
+    from gitcad.ecad.board import Board
+
+    bb, bo, bt = (Board.loads(x) for x in (base, ours, theirs))
+    conflicts: list[dict] = []
+
+    def keyed_merge(unit: str, base_map: dict, ours_map: dict, theirs_map: dict,
+                    canon) -> dict:
+        out = {}
+        for k in {**base_map, **ours_map, **theirs_map}:
+            verdict = _cell3(canon(base_map.get(k)), canon(ours_map.get(k)),
+                             canon(theirs_map.get(k)))
+            if verdict[0] == "conflict":
+                side = lambda v: json.loads(v) if v else None  # noqa: E731
+                conflicts.append({"unit": unit, "key": k,
+                                  "ours": side(verdict[1]),
+                                  "theirs": side(verdict[2])})
+            elif verdict[1] is not None:
+                out[k] = json.loads(verdict[1])
+        return out
+
+    from dataclasses import asdict
+
+    canon_d = lambda x: canonical_json(asdict(x)) if x is not None else None  # noqa: E731
+    comps = keyed_merge("component",
+                        {c.ref: c for c in bb.components},
+                        {c.ref: c for c in bo.components},
+                        {c.ref: c for c in bt.components}, canon_d)
+    holes = keyed_merge("mounting_hole",
+                        {m.name: m for m in bb.mounting_holes},
+                        {m.name: m for m in bo.mounting_holes},
+                        {m.name: m for m in bt.mounting_holes}, canon_d)
+    canon_j = lambda x: canonical_json(x) if x is not None else None  # noqa: E731
+    classes = keyed_merge("net_class", bb.net_classes, bo.net_classes,
+                          bt.net_classes, canon_j)
+
+    def element_set(unit: str, base_l: list, ours_l: list, theirs_l: list) -> list:
+        b_set = {canonical_json(asdict(x)) for x in base_l}
+        o_set = {canonical_json(asdict(x)) for x in ours_l}
+        t_set = {canonical_json(asdict(x)) for x in theirs_l}
+        # element-wise 3-way: keep if (in base and neither side removed it)
+        # or (added by either side)
+        kept = ((b_set & o_set & t_set)
+                | (o_set - b_set) | (t_set - b_set))
+        return [json.loads(x) for x in sorted(kept)]
+
+    tracks = element_set("track", bb.tracks, bo.tracks, bt.tracks)
+    vias = element_set("via", bb.vias, bo.vias, bt.vias)
+    zones = element_set("zone", bb.zones, bo.zones, bt.zones)
+
+    scalars = {}
+    for attr in ("name", "outline", "thickness", "mask_expansion"):
+        verdict = _cell3(canonical_json(getattr(bb, attr)),
+                         canonical_json(getattr(bo, attr)),
+                         canonical_json(getattr(bt, attr)))
+        if verdict[0] == "conflict":
+            conflicts.append({"unit": attr,
+                              "ours": json.loads(verdict[1]),
+                              "theirs": json.loads(verdict[2])})
+        else:
+            scalars[attr] = json.loads(verdict[1])
+
+    if conflicts:
+        return {"ok": False, "merged": None, "conflicts": conflicts}
+
+    merged_doc = {"schema": Board.SCHEMA, "board": {
+        **scalars,
+        "components": [comps[k] for k in sorted(comps)],
+        "tracks": tracks, "vias": vias, "zones": zones,
+        "mounting_holes": [holes[k] for k in sorted(holes)],
+        "net_classes": classes,
+    }}
+    text = canonical_json(merged_doc, indent=2) + "\n"
+    Board.loads(text)   # the rebuild gate
+    return {"ok": True, "merged": text, "conflicts": []}
 
 
 # -- models: features by stable id --------------------------------------------

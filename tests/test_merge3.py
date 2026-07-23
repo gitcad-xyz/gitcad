@@ -147,7 +147,7 @@ def test_component_added_on_both_sides_identically_is_clean():
     assert r["ok"], r["conflicts"]
 
 
-def test_board_falls_back_to_coarse_but_honest():
+def test_board_one_sided_change_takes_that_side():
     from gitcad.ecad import Board
 
     b = Board(name="b", outline=[(0, 0), (10, 0), (10, 10), (0, 10)])
@@ -155,12 +155,83 @@ def test_board_falls_back_to_coarse_but_honest():
     b2 = Board.loads(base)
     b2.outline = [(0, 0), (20, 0), (20, 10), (0, 10)]
     ours = b2.dumps()
-    # theirs unchanged -> take ours
-    r = merge_documents(base, ours, base)
-    assert r["ok"] and r["merged"] == ours
-    # both changed -> coarse conflict, clearly labeled
-    b3 = Board.loads(base)
-    b3.outline = [(0, 0), (30, 0), (30, 10), (0, 10)]
-    r2 = merge_documents(base, ours, b3.dumps())
-    assert not r2["ok"]
-    assert "later stage" in r2["conflicts"][0]["reason"]
+    r = merge_documents(base, ours, base)   # theirs unchanged
+    assert r["ok"]
+    assert Board.loads(r["merged"]).outline == b2.outline
+
+
+# -- boards: fine-grained (ADR-0016 upgrade) ----------------------------------
+
+def _base_board():
+    from gitcad.ecad import Board, Component, Footprint, MountingHole, Pad, Track
+
+    fp = Footprint("R0603", pads=[Pad("1", -0.75, 0, 0.9, 0.95),
+                                  Pad("2", 0.75, 0, 0.9, 0.95)])
+    b = Board(name="m", outline=[(0, 0), (30, 0), (30, 20), (0, 20)])
+    b.components += [Component("R1", fp, x=5, y=5),
+                     Component("R2", fp, x=15, y=5)]
+    b.tracks.append(Track(0, 1, 10, 1, 0.2, "top", "A"))
+    b.mounting_holes.append(MountingHole("mh1", 2, 18, 2.2))
+    return b
+
+
+def test_board_parallel_edits_merge_fine_grained():
+    from gitcad.ecad import Board, Track, Via
+
+    base = _base_board()
+    ours = Board.loads(base.dumps())
+    theirs = Board.loads(base.dumps())
+    # ours: move R1 and reroute the track (delete + add = clean)
+    ours.components[0].x = 7
+    ours.tracks[0] = Track(0, 2, 10, 2, 0.2, "top", "A")
+    # theirs: add a via and a new track on net B
+    theirs.vias.append(Via(x=20, y=10, drill=0.3, diameter=0.6, net="B"))
+    theirs.tracks.append(Track(15, 5, 20, 10, 0.2, "top", "B"))
+    r = merge_documents(base.dumps(), ours.dumps(), theirs.dumps())
+    assert r["ok"], r["conflicts"]
+    merged = Board.loads(r["merged"])
+    assert next(c for c in merged.components if c.ref == "R1").x == 7
+    assert len(merged.tracks) == 2            # rerouted + added, old gone
+    assert len(merged.vias) == 1
+
+
+def test_board_same_component_moved_differently_conflicts():
+    from gitcad.ecad import Board
+
+    base = _base_board()
+    ours = Board.loads(base.dumps())
+    theirs = Board.loads(base.dumps())
+    ours.components[0].x = 7
+    theirs.components[0].x = 9
+    r = merge_documents(base.dumps(), ours.dumps(), theirs.dumps())
+    assert not r["ok"]
+    (c,) = r["conflicts"]
+    assert c["unit"] == "component" and c["key"] == "R1"
+    assert c["ours"]["x"] == 7 and c["theirs"]["x"] == 9
+
+
+def test_board_outline_both_changed_conflicts():
+    from gitcad.ecad import Board
+
+    base = _base_board()
+    ours = Board.loads(base.dumps())
+    theirs = Board.loads(base.dumps())
+    ours.outline = [(0, 0), (40, 0), (40, 20), (0, 20)]
+    theirs.outline = [(0, 0), (50, 0), (50, 20), (0, 20)]
+    r = merge_documents(base.dumps(), ours.dumps(), theirs.dumps())
+    assert not r["ok"]
+    assert r["conflicts"][0]["unit"] == "outline"
+
+
+def test_board_net_classes_merge_by_name():
+    from gitcad.ecad import Board
+
+    base = _base_board()
+    ours = Board.loads(base.dumps())
+    theirs = Board.loads(base.dumps())
+    ours.net_classes["power"] = {"nets": ["VCC"], "track_width_min": 0.5}
+    theirs.net_classes["spi"] = {"nets": ["SPI_*"], "clearance": 0.2}
+    r = merge_documents(base.dumps(), ours.dumps(), theirs.dumps())
+    assert r["ok"]
+    merged = Board.loads(r["merged"])
+    assert set(merged.net_classes) == {"power", "spi"}
