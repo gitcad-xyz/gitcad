@@ -82,6 +82,8 @@ def draft_analysis(kernel, shape, pull=(0, 0, 1),
     whose draft angle — 90° minus the angle between the face normal and
     the pull — is below ``min_angle_deg``. Zero-draft walls (parallel to
     the pull) fail hardest; floors/ceilings (perpendicular) pass."""
+    if math.sqrt(sum(float(c) ** 2 for c in pull)) < 1e-12:
+        raise ValueError("draft_analysis: pull direction must be non-zero")
     d = _unit(pull)
     faces = kernel.entities(shape, "face")
     violations = []

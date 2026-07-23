@@ -338,6 +338,14 @@ class Document:
                     raise GitcadError(
                         f"feature {f.id} ({f.op}): cannot suppress a base "
                         "feature with no inputs (would orphan dependents)")
+                if len(f.inputs) > 1:
+                    # a multi-input op (boolean) has no single well-defined
+                    # pass-through — suppressing an intersect by keeping only
+                    # ins[0] would silently enlarge the body. Refuse.
+                    raise GitcadError(
+                        f"feature {f.id} ({f.op}): cannot suppress a "
+                        f"multi-input op (ambiguous pass-through); remove the "
+                        "feature instead")
                 result.shapes[f.id] = ins[0]
                 result.entities[f.id] = result.entities.get(f.inputs[0], {})
                 continue

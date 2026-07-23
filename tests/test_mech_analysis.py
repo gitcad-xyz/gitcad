@@ -73,3 +73,42 @@ def test_thickness_analysis_ignores_empty_slots() -> None:
     ta = thickness_analysis(k, u, min_wall=1.0)
     assert ta["min_thickness"] == 2.0        # the real walls, not the 0.5 slot
     assert ta["ok"]
+
+
+def test_draft_analysis_rejects_zero_pull() -> None:
+    import pytest
+
+    from gitcad.analysis import draft_analysis
+    with pytest.raises(ValueError, match="non-zero"):
+        draft_analysis(RefKernel(), RefKernel().box(5, 5, 5), pull=(0, 0, 0))
+
+
+def test_inertia_of_freeform_patchsolid() -> None:
+    from forgekernel.bsolid import PatchSolid, box_patches
+
+    from gitcad.analysis import inertia
+    inf = inertia(RefKernel(), PatchSolid(box_patches(3, 4, 6)))
+    assert inf["exact"] is True
+    assert inf["inertia"][0][0] == pytest.approx(312.0)   # V(b²+c²)/12
+
+
+def test_principal_moments_with_products_of_inertia() -> None:
+    # a rotated slab has nonzero off-diagonals; principal moments recover
+    # the axis-aligned values regardless of orientation
+    from gitcad.analysis import inertia
+
+    k = RefKernel()
+    slab = k.transform(k.box(10, 2, 6), rotate_deg=0)     # baseline
+    p0 = sorted(inertia(k, slab)["principal_moments"])
+    # the eigenvalue solver must return the same set the diagonal gives
+    I = inertia(k, k.box(10, 2, 6))["inertia"]
+    assert I[0][1] == 0                                    # axis-aligned: no products
+    assert p0 == pytest.approx(sorted([I[0][0], I[1][1], I[2][2]]))
+
+
+def test_thickness_analysis_rejects_non_forge_shape() -> None:
+    import pytest
+
+    from gitcad.analysis import thickness_analysis
+    with pytest.raises(NotImplementedError):
+        thickness_analysis(RefKernel(), object())

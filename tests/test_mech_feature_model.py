@@ -76,3 +76,26 @@ def test_drilled_solid_translates_preserving_volume() -> None:
     d.add(Feature(op="move", params={"translate": [5, 5, 0]}, inputs=[h]))
     v = k.mass_props(d.build(k).final(d))["volume"]
     assert abs(v - (20 * 20 * 10 - math.pi * 4 * 10)) < 1e-6
+
+
+def test_cannot_suppress_a_multi_input_boolean() -> None:
+    from gitcad.errors import GitcadError
+
+    k = RefKernel()
+    d = Document()
+    a = d.add(Feature(op="box", params={"dx": 5, "dy": 5, "dz": 5}))
+    b = d.add(Feature(op="box", params={"dx": 5, "dy": 5, "dz": 5}))
+    bm = d.add(Feature(op="move", params={"translate": [2, 2, 2]}, inputs=[b]))
+    d.add(Feature(op="boolean", params={"kind": "union", "suppressed": True},
+                  inputs=[a, bm]))
+    with pytest.raises(GitcadError, match="multi-input"):
+        d.build(k)
+
+
+def test_degenerate_extrude_profile_is_a_kernel_error() -> None:
+    from gitcad.errors import KernelError
+
+    k = RefKernel()
+    with pytest.raises(KernelError):
+        k.extrude({"start": [0, 0], "segments": [
+            {"kind": "line", "to": [5, 0]}, {"kind": "line", "to": [0, 0]}]}, 5)

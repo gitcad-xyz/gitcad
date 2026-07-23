@@ -75,7 +75,20 @@ class RefKernel:
         loop = [tuple(profile["start"])] + [tuple(s["to"]) for s in segs]
         if loop[0] == loop[-1]:
             loop = loop[:-1]
-        return self._fk.prism(loop, height)
+        if len(loop) < 3:
+            raise KernelError(
+                "extrude: profile has fewer than 3 distinct points",
+                FailureSignature(op="extrude", diagnostic="BadInput",
+                                 kernel="ref"))
+        try:
+            return self._fk.prism(loop, height)
+        except (ValueError, ArithmeticError, ZeroDivisionError) as exc:
+            # a degenerate loop (collinear / zero-area) must surface as a
+            # KernelError, not a raw Python exception through the seam
+            raise KernelError(
+                f"extrude: degenerate profile ({exc})",
+                FailureSignature(op="extrude", diagnostic="BadInput",
+                                 kernel="ref"))
 
     # -- transforms -----------------------------------------------------------
 
