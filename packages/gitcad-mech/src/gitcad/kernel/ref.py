@@ -59,8 +59,19 @@ class RefKernel:
 
     def extrude(self, profile: dict, height: float):
         segs = profile.get("segments", [])
-        if any(s.get("kind") != "line" for s in segs):
+        kinds = {s.get("kind") for s in segs}
+        if "arc" in kinds:
             _nope("extrude(arc profile)", _K2)
+        if "spline" in kinds:
+            # K3.8: spline (polynomial-Bézier) profile → exact rational
+            # volume via Green's-theorem area (SplinePrism).
+            from forgekernel.profile2d import SplinePrism
+
+            try:
+                return SplinePrism(profile["start"], segs, height)
+            except ValueError as exc:
+                raise KernelError(str(exc), FailureSignature(
+                    op="extrude", diagnostic="NotYetImplemented", kernel="ref"))
         loop = [tuple(profile["start"])] + [tuple(s["to"]) for s in segs]
         if loop[0] == loop[-1]:
             loop = loop[:-1]
@@ -175,7 +186,8 @@ class RefKernel:
                                          MiteredSweep, RevolveSolid, RoundedBox, Sphere, SphereOverlap)
 
         from forgekernel.loft import LoftSolid
-        if isinstance(shape, LoftSolid):
+        from forgekernel.profile2d import SplinePrism
+        if isinstance(shape, (LoftSolid, SplinePrism)):
             cx, cy, cz = shape.centroid_f()
             return {"volume": float(shape.volume()), "cx": cx, "cy": cy, "cz": cz}
         if isinstance(shape, TubeSolid):
@@ -208,7 +220,8 @@ class RefKernel:
 
         from forgekernel.quadric import RoundedBox
         from forgekernel.loft import LoftSolid
-        if isinstance(shape, (TubeSolid, LoftSolid)):
+        from forgekernel.profile2d import SplinePrism
+        if isinstance(shape, (TubeSolid, LoftSolid, SplinePrism)):
             return shape.bbox_f()
         if isinstance(shape, (Cone, Sphere)):
             shape = AxisStack(shape.cx, shape.cy, [shape])
@@ -243,6 +256,10 @@ class RefKernel:
         from forgekernel.quadric import MiteredSweep, RoundedBox, SphereOverlap
         from forgekernel.curve import TubeSolid
         from forgekernel.loft import LoftSolid
+        from forgekernel.profile2d import SplinePrism
+        if isinstance(shape, SplinePrism):
+            return [{"surface": "spline-swept"}, {"surface": "plane"},
+                    {"surface": "plane"}]
         if isinstance(shape, LoftSolid):
             return [{"surface": "spline-loft"}, {"surface": "plane"},
                     {"surface": "plane"}]
@@ -289,9 +306,10 @@ class RefKernel:
         from forgekernel.curve import TubeSolid
 
         from forgekernel.loft import LoftSolid
-        if isinstance(shape, LoftSolid):
+        from forgekernel.profile2d import SplinePrism
+        if isinstance(shape, (LoftSolid, SplinePrism)):
             return ValidationReport(ok=shape.volume() > 0,
-                                    checks={"method": "exact-loft-spline"},
+                                    checks={"method": "exact-green-area"},
                                     violations=[])
         if isinstance(shape, TubeSolid):
             # watertight by construction (closed section, non-self-overlapping

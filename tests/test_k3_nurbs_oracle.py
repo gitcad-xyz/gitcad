@@ -500,3 +500,38 @@ def test_forge_step_export_reads_in_occt(tmp_path) -> None:
     L_path = str(tmp_path / "L.step")
     k.export_step(L, L_path)
     assert abs(occt_volume(L_path) - 4800) < 1e-6
+
+
+@pytest.mark.occt
+def test_spline_profile_extrude_matches_occt() -> None:
+    """K3.8: forge's Green's-theorem spline-profile volume is exact ℚ;
+    OCCT extrudes the same Bézier-edge face and integrates numerically."""
+    from OCP.BRepBuilderAPI import (BRepBuilderAPI_MakeEdge,
+                                    BRepBuilderAPI_MakeFace,
+                                    BRepBuilderAPI_MakeWire)
+    from OCP.BRepGProp import BRepGProp
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism
+    from OCP.Geom import Geom_BezierCurve
+    from OCP.gp import gp_Pnt, gp_Vec
+    from OCP.GProp import GProp_GProps
+    from OCP.TColgp import TColgp_Array1OfPnt
+
+    from gitcad.kernel.ref import RefKernel
+
+    prof = {"start": [0, 0], "segments": [
+        {"kind": "line", "to": [10, 0]},
+        {"kind": "spline", "to": [0, 0], "ctrl": [[12, 7], [-2, 7]]}]}
+    v_ref = RefKernel().extrude(prof, 5).volume()
+    assert isinstance(v_ref, Fraction) and v_ref == 231
+
+    e_line = BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(10, 0, 0)).Edge()
+    arr = TColgp_Array1OfPnt(1, 4)
+    for i, (x, y) in enumerate([(10, 0), (12, 7), (-2, 7), (0, 0)]):
+        arr.SetValue(i + 1, gp_Pnt(x, y, 0))
+    e_bez = BRepBuilderAPI_MakeEdge(Geom_BezierCurve(arr)).Edge()
+    wire = BRepBuilderAPI_MakeWire(e_line, e_bez).Wire()
+    face = BRepBuilderAPI_MakeFace(wire, True).Face()
+    solid = BRepPrimAPI_MakePrism(face, gp_Vec(0, 0, 5)).Shape()
+    g = GProp_GProps()
+    BRepGProp.VolumeProperties_s(solid, g)
+    assert abs(float(v_ref) - abs(g.Mass())) < 1e-6
