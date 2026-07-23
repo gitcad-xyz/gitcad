@@ -156,7 +156,15 @@ class RefKernel:
         _nope("fillet", _K5)
 
     def chamfer(self, shape, edges, distance):
-        _nope("chamfer", "arrives at K1.1 (planar chamfer = exact cut)")
+        if edges:
+            _nope("chamfer(selected edges)", "K1.2 (edge enumeration ids)")
+        from forgekernel.kernel import chamfer as fk_chamfer
+
+        try:
+            return fk_chamfer(shape, distance)
+        except ValueError as exc:
+            raise KernelError(str(exc), FailureSignature(
+                op="chamfer", diagnostic="NotYetImplemented", kernel="ref"))
 
     def shell(self, shape, remove_faces, thickness):
         _nope("shell", "arrives at K4 (offsets)")
@@ -177,13 +185,22 @@ class RefKernel:
         _nope("export_step", _K2)
 
     def export_stl(self, shape, path, *, deflection=0.1):
-        _nope("export_stl", "K1.1 (mesh writer)")
+        from forgekernel import io
+
+        with open(path, "w", newline=chr(10)) as f:
+            f.write(io.to_stl(shape))
 
     def export_brep(self, shape, path):
-        _nope("export_brep", "K1.1 (native serialization)")
+        from forgekernel import io
+
+        with open(path, "w", newline=chr(10)) as f:
+            f.write(io.dumps(shape))
 
     def import_step(self, path):
         _nope("import_step", _K3)
 
     def import_brep(self, path):
-        _nope("import_brep", "K1.1 (native serialization)")
+        from forgekernel import io
+
+        with open(path, encoding="utf-8") as f:
+            return io.loads(f.read())
