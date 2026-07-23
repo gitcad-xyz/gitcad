@@ -393,6 +393,106 @@ class RefKernel:
             raise KernelError(str(exc), FailureSignature(
                 op="sweep", diagnostic="NotYetImplemented", kernel="ref"))
 
+    def _prism_shell(self, shape, t: Fraction):
+        """K4.1: closed hollow of a convex right prism. The inner void's
+        profile is the exact inward inset: each edge line moved ``t``
+        along its inward unit normal (rational only for Pythagorean
+        edge directions), adjacent inset lines intersected exactly."""
+        from math import isqrt
+
+        lo, hi = shape.bbox()
+        z0, z1 = lo[2], hi[2]
+        if 2 * t >= z1 - z0 or t <= 0:
+            raise ValueError("shell too thick for the prism height")
+        # the bottom cap is ear-clipped into triangles — reconstruct the
+        # boundary loop: interior diagonals appear in two triangles with
+        # opposite directions and cancel; boundary edges survive once.
+        from collections import Counter
+
+        directed: Counter = Counter()
+        found_cap = False
+        for p in shape.polys:
+            if all(v[2] == z0 for v in p.verts):
+                found_cap = True
+                m = len(p.verts)
+                for i in range(m):
+                    a = (p.verts[i][0], p.verts[i][1])
+                    b = (p.verts[(i + 1) % m][0], p.verts[(i + 1) % m][1])
+                    directed[(a, b)] += 1
+            elif not all(v[2] in (z0, z1) for v in p.verts):
+                raise ValueError("shell(non-prism base) — K4.2")
+        if not found_cap:
+            raise ValueError("shell: no planar bottom cap found — K4.2")
+        boundary = {a: b for (a, b), cnt in directed.items()
+                    if cnt == 1 and directed.get((b, a), 0) == 0}
+        if not boundary:
+            raise ValueError("shell: cap boundary reconstruction failed")
+        start = next(iter(boundary))
+        bottom = [start]
+        cur = boundary[start]
+        while cur != start:
+            bottom.append(cur)
+            cur = boundary.get(cur)
+            if cur is None or len(bottom) > len(boundary) + 1:
+                raise ValueError("shell: cap boundary is not a single loop")
+        # drop collinear midpoints so each remaining edge is a true side
+        cleaned = []
+        m = len(bottom)
+        for i in range(m):
+            (x0_, y0_), (x1_, y1_), (x2_, y2_) = (
+                bottom[i - 1], bottom[i], bottom[(i + 1) % m])
+            if (x1_ - x0_) * (y2_ - y1_) != (y1_ - y0_) * (x2_ - x1_):
+                cleaned.append(bottom[i])
+        bottom = cleaned
+        if len(bottom) < 3:
+            raise ValueError("shell: degenerate cap boundary")
+        # enforce CCW (positive shoelace)
+        area2 = sum(bottom[i][0] * bottom[(i + 1) % len(bottom)][1]
+                    - bottom[(i + 1) % len(bottom)][0] * bottom[i][1]
+                    for i in range(len(bottom)))
+        if area2 < 0:
+            bottom = list(reversed(bottom))
+            area2 = -area2
+        n = len(bottom)
+        lines = []                          # (a, b, c): ax + by = c inset line
+        for i in range(n):
+            (x1, y1), (x2, y2) = bottom[i], bottom[(i + 1) % n]
+            dx, dy = x2 - x1, y2 - y1
+            # convexity: next turn must be left
+            (x3, y3) = bottom[(i + 2) % n]
+            cross = dx * (y3 - y2) - dy * (x3 - x2)
+            if cross <= 0:
+                raise ValueError("shell(non-convex prism profile) — K4.2")
+            # |d| must be rational (Pythagorean edge)
+            l2 = dx * dx + dy * dy
+            num, den = l2.numerator, l2.denominator
+            rn, rd = isqrt(num), isqrt(den)
+            if rn * rn != num or rd * rd != den:
+                raise ValueError(
+                    "shell(irrational edge normal) — K4.2 (certified insets)")
+            length = Fraction(rn, rd)
+            # inward (left) unit normal = (-dy, dx)/|d|
+            a, b = -dy, dx
+            c = a * x1 + b * y1 + t * length   # shift by t along unit normal
+            lines.append((a, b, c))
+        inset = []
+        for i in range(n):
+            a1, b1, c1 = lines[i - 1]
+            a2, b2, c2 = lines[i]
+            det = a1 * b2 - a2 * b1
+            if det == 0:
+                raise ValueError("shell: degenerate inset corner")
+            inset.append(((c1 * b2 - c2 * b1) / det,
+                          (a1 * c2 - a2 * c1) / det))
+        # validity: the inset must still be a CCW convex polygon
+        in_area2 = sum(inset[i][0] * inset[(i + 1) % n][1]
+                       - inset[(i + 1) % n][0] * inset[i][1] for i in range(n))
+        if in_area2 <= 0:
+            raise ValueError("shell too thick: inset profile collapses")
+        void = self._fk.prism(inset, z1 - z0 - 2 * t)
+        void = self._fk.translate(void, 0, 0, z0 + t)
+        return self._fk.boolean("cut", shape, void)
+
     def _box_check(self, shape):
         lo, hi = shape.bbox()
         corners = {(lo[0], lo[1]), (hi[0], lo[1]), (hi[0], hi[1]), (lo[0], hi[1])}
@@ -479,10 +579,19 @@ class RefKernel:
         from forgekernel.kernel import shell as fk_shell
 
         if not isinstance(shape, Solid):
-            _nope("shell(non-planar base)", "K4.1 (offset surfaces)")
+            _nope("shell(non-planar base)", "K4.2 (offset surfaces)")
         if not remove_faces:
             try:
                 return fk_shell(shape, thickness)
+            except ValueError:
+                pass                       # not a box → try the prism path
+            # K4.1: closed shell of a right PRISM — the void is the prism
+            # of the exact inward polygon inset (half-plane intersection),
+            # from z0+t to z1−t, cut with the exact boolean engine.
+            # Convex Pythagorean-edge profiles only (the inward unit
+            # normal must be rational); everything else → K4.2.
+            try:
+                return self._prism_shell(shape, Fraction(thickness))
             except ValueError as exc:
                 raise KernelError(str(exc), FailureSignature(
                     op="shell", diagnostic="NotYetImplemented", kernel="ref"))
