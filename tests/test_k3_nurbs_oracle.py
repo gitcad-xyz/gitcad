@@ -233,3 +233,64 @@ def test_step_roundtrip_forge_reads_occt_export_exactly(tmp_path) -> None:
                         abs(float(fx[1]) - ox.Y()), abs(float(fx[2]) - ox.Z()))
     assert worst == 0.0                        # bitwise, not just close
     assert s.cp[1][1] == (1, 1, Fraction(3, 8))  # exact rational recovered
+
+
+@pytest.mark.occt
+def test_full_pipeline_step_to_ssi(tmp_path) -> None:
+    """The K3 capstone: OCCT exports a freeform B-spline face to STEP →
+    forge's native reader imports it EXACTLY → forge's SSI intersects it
+    with a plane, finding the branch with certified points. STEP in,
+    certified intersection out — no OCCT in the loop after export."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+    from OCP.Geom import Geom_BSplineSurface
+    from OCP.gp import gp_Pnt
+    from OCP.STEPControl import STEPControl_StepModelType, STEPControl_Writer
+    from OCP.TColgp import TColgp_Array2OfPnt
+    from OCP.TColStd import TColStd_Array1OfInteger, TColStd_Array1OfReal
+
+    from forgekernel.nurbs import BSplineSurface
+    from forgekernel.ssi import ssi_surfaces
+    from forgekernel.stepio import read_step_geometry
+
+    # a sheet rising through z=0: z = u - 1 over u in [0,2] (interior knot)
+    net = [[(x, y, Fraction(2 * x - 3, 3)) for y in range(3)] for x in range(4)]
+    poles = TColgp_Array2OfPnt(1, 4, 1, 3)
+    for i in range(4):
+        for j in range(3):
+            x, y, z = net[i][j]
+            poles.SetValue(i + 1, j + 1, gp_Pnt(float(x), float(y), float(z)))
+    uk = TColStd_Array1OfReal(1, 3)
+    for i, v in enumerate((0.0, 1.0, 2.0)):
+        uk.SetValue(i + 1, v)
+    um = TColStd_Array1OfInteger(1, 3)
+    for i, v in enumerate((3, 1, 3)):
+        um.SetValue(i + 1, v)
+    vk = TColStd_Array1OfReal(1, 2)
+    for i, v in enumerate((0.0, 1.0)):
+        vk.SetValue(i + 1, v)
+    vm = TColStd_Array1OfInteger(1, 2)
+    for i, v in enumerate((3, 3)):
+        vm.SetValue(i + 1, v)
+    face = BRepBuilderAPI_MakeFace(
+        Geom_BSplineSurface(poles, uk, vk, um, vm, 2, 2), 1e-7).Face()
+    path = str(tmp_path / "sheet.step")
+    w = STEPControl_Writer()
+    w.Transfer(face, STEPControl_StepModelType.STEPControl_AsIs)
+    w.Write(path)
+
+    with open(path, encoding="utf-8", errors="replace") as f:
+        imported = read_step_geometry(f.read())["surfaces"][0]
+    plane = BSplineSurface(1, 1, [[(0, 0, 0), (0, 2, 0)],
+                                  [(3, 0, 0), (3, 2, 0)]],
+                          [0, 0, 3, 3], [0, 0, 2, 2])
+    r = ssi_surfaces(plane, imported, depth=4)
+    assert r["branches"] == 1                     # the z=0 crossing line
+    assert r["uncertified"] == 0
+    assert len(r["points"]) > 0
+    # certified points sit on the plane z=0 by construction; the sheet's
+    # z=0 line lives where its z(u)=0 — check in SPACE via the plane side
+    for u, v, s, t in r["points"]:
+        pa = plane.eval(u, v)
+        pb = imported.eval(s, t)
+        d2 = sum((pa[c] - pb[c]) ** 2 for c in range(3))
+        assert d2 < Fraction(1, 10 ** 20)         # exact certificate re-check
