@@ -90,7 +90,7 @@ Status is honest: ✅ shipped · 🟡 partial · ❌ missing · — non-goal.
 | Dimensions + relations | ADR-0013 constraint solver (declared, not inferred) | ✅ |
 | Auto-relation inference | — agents declare intent; inference is a mouse optimization | — |
 | Sketch on face | ✅ | ✅ |
-| 3D sketch | 3D polyline/curve paths (sweeps, weldments need it) | ❌ P5 |
+| 3D sketch | 3D wire frame (Sketch3D: named vertices + segments) | 🟡 |
 | Convert/offset entities | `Profile.offset` (exact parallel offset, convex) + `Profile.from_loop` | ✅ |
 | Sketch text | ✅ `engrave` op: shared stroke font (moved to gitcad-core, same glyphs as silkscreen) cut as grooves; OCCT volume-verified | ✅ |
 
