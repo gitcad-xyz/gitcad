@@ -49,6 +49,14 @@ backend behind the seam.
    be quarantined per the constitution; `invariants/` + `golden/` stay
    green throughout.
 
+6. **Repo split.** The kernel lives in its own unencumbered repo,
+   **github.com/gitcad-xyz/forge** (Apache-2.0, distribution
+   `forgekernel`): `src/forgekernel/` Python reference, `rust/` port
+   later; it never depends on gitcad. gitcad hosts the seam shim
+   (`gitcad.kernel.ref` importing forgekernel), the benchmark corpus/
+   scorecard, and the bench/ trend history — the harness needs gitcad
+   documents, the kernel does not.
+
 ## Consequences
 
 - Two kernels to maintain during the (long) transition; the seam
