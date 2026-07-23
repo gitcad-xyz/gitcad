@@ -362,3 +362,107 @@ def test_gaussian_curvature_matches_occt_slprops() -> None:
     cyl = bezier_surface([[(Fraction(i, 2), j, B[i]) for j in range(2)]
                           for i in range(3)])
     assert gaussian_curvature(cyl, Fraction(1, 3), Fraction(2, 7)) == 0
+
+
+@pytest.mark.occt
+def test_freeform_solid_volume_exact_vs_occt(tmp_path) -> None:
+    """K7.0: forge computes the volume of a Bézier-patch-bounded solid as
+    an EXACT rational (divergence-theorem flux of a polynomial integrand);
+    OCCT sews the same 6 faces and integrates numerically. They agree, but
+    forge's answer is a Fraction, not a float."""
+    from OCP.BRepBuilderAPI import (BRepBuilderAPI_MakeFace,
+                                    BRepBuilderAPI_MakeSolid,
+                                    BRepBuilderAPI_Sewing)
+    from OCP.BRepGProp import BRepGProp
+    from OCP.Geom import Geom_BezierSurface
+    from OCP.gp import gp_Pnt
+    from OCP.GProp import GProp_GProps
+    from OCP.TColgp import TColgp_Array2OfPnt
+    from OCP.TopAbs import TopAbs_SHELL
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    from forgekernel.bsolid import PatchSolid, box_patches
+    from forgekernel.nurbs import bezier_surface
+
+    xs, ys = [Fraction(0), Fraction(3, 2), Fraction(3)], \
+        [Fraction(0), Fraction(2), Fraction(4)]
+    znet = [[5, 5, 5], [5, 8, 5], [5, 5, 5]]
+    top = bezier_surface([[(xs[i], ys[j], znet[i][j]) for j in range(3)]
+                          for i in range(3)])
+    patches = box_patches(3, 4, 5)
+    patches[1] = top
+    v_ref = PatchSolid(patches).volume()
+    assert isinstance(v_ref, Fraction)              # EXACT
+
+    def occ_face(patch):
+        net = patch.cp
+        a = TColgp_Array2OfPnt(1, len(net), 1, len(net[0]))
+        for i, row in enumerate(net):
+            for j, pt in enumerate(row):
+                a.SetValue(i + 1, j + 1,
+                           gp_Pnt(float(pt[0]), float(pt[1]), float(pt[2])))
+        return BRepBuilderAPI_MakeFace(Geom_BezierSurface(a), 1e-7).Face()
+
+    sew = BRepBuilderAPI_Sewing(1e-6)
+    for p in patches:
+        sew.Add(occ_face(p))
+    sew.Perform()
+    exp = TopExp_Explorer(sew.SewedShape(), TopAbs_SHELL)
+    solid = BRepBuilderAPI_MakeSolid(TopoDS.Shell_s(exp.Current())).Solid()
+    g = GProp_GProps()
+    BRepGProp.VolumeProperties_s(solid, g)
+    assert abs(float(v_ref) - abs(g.Mass())) < 1e-6
+
+
+@pytest.mark.occt
+def test_freeform_inertia_tensor_matches_occt() -> None:
+    """K7.0b: forge's EXACT rational inertia tensor of a bulged freeform
+    solid vs OCCT's float MatrixOfInertia (about the centre of mass)."""
+    from OCP.BRepBuilderAPI import (BRepBuilderAPI_MakeFace,
+                                    BRepBuilderAPI_MakeSolid,
+                                    BRepBuilderAPI_Sewing)
+    from OCP.BRepGProp import BRepGProp
+    from OCP.Geom import Geom_BezierSurface
+    from OCP.gp import gp_Pnt
+    from OCP.GProp import GProp_GProps
+    from OCP.TColgp import TColgp_Array2OfPnt
+    from OCP.TopAbs import TopAbs_SHELL
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    from forgekernel.bsolid import PatchSolid, box_patches, mass_properties
+    from forgekernel.nurbs import bezier_surface
+
+    xs, ys = [Fraction(0), Fraction(3, 2), Fraction(3)], \
+        [Fraction(0), Fraction(2), Fraction(4)]
+    top = bezier_surface([[(xs[i], ys[j], [[5, 5, 5], [5, 8, 5], [5, 5, 5]][i][j])
+                           for j in range(3)] for i in range(3)])
+    patches = box_patches(3, 4, 5)
+    patches[1] = top
+    mp = mass_properties(PatchSolid(patches))
+    assert all(isinstance(mp["inertia"][i][j], Fraction)
+               for i in range(3) for j in range(3))          # EXACT
+
+    def occ_face(patch):
+        net = patch.cp
+        a = TColgp_Array2OfPnt(1, len(net), 1, len(net[0]))
+        for i, row in enumerate(net):
+            for j, pt in enumerate(row):
+                a.SetValue(i + 1, j + 1,
+                           gp_Pnt(float(pt[0]), float(pt[1]), float(pt[2])))
+        return BRepBuilderAPI_MakeFace(Geom_BezierSurface(a), 1e-7).Face()
+
+    sew = BRepBuilderAPI_Sewing(1e-6)
+    for p in patches:
+        sew.Add(occ_face(p))
+    sew.Perform()
+    exp = TopExp_Explorer(sew.SewedShape(), TopAbs_SHELL)
+    solid = BRepBuilderAPI_MakeSolid(TopoDS.Shell_s(exp.Current())).Solid()
+    g = GProp_GProps()
+    BRepGProp.VolumeProperties_s(solid, g)
+    m = g.MatrixOfInertia()             # about the centre of mass
+    ref = mp["inertia"]
+    for i in range(3):
+        for j in range(3):
+            assert abs(float(ref[i][j]) - m.Value(i + 1, j + 1)) < 1e-6
