@@ -119,8 +119,23 @@ def to_ipc2581(board: Board, *, origination: str = "1970-01-01T00:00:00") -> str
     for layer in copper:
         x.append(f'<Layer name="{escape(layer)}" layerFunction="CONDUCTOR" '
                  f'side="{side_of(layer)}" polarity="POSITIVE"/>')
+    # Drill layers: one per distinct span, each with a Span child — the shape
+    # KiCad's own IPC-2581 export uses ("F.Cu_In1.Cu" etc.). The full-stack
+    # span keeps the name "drill" (PTH pads + through vias + NPTH live there).
+    copper_index = {name: i for i, name in enumerate(copper)}
+    bb_spans = sorted(
+        {(v.layer_from, v.layer_to) for v in board.vias
+         if v.span(copper) and v.kind(copper) != "through"},
+        key=lambda s: (copper_index[s[0]], copper_index[s[1]]))
     x.append(f'<Layer name="drill" layerFunction="DRILL" side="ALL" '
-             f'polarity="POSITIVE"/>')
+             f'polarity="POSITIVE">'
+             f'<Span fromLayer="{escape(copper[0])}" toLayer="{escape(copper[-1])}"/>'
+             f'</Layer>')
+    for a, b in bb_spans:
+        x.append(f'<Layer name="drill_{escape(a)}_{escape(b)}" '
+                 f'layerFunction="DRILL" side="ALL" polarity="POSITIVE">'
+                 f'<Span fromLayer="{escape(a)}" toLayer="{escape(b)}"/>'
+                 f'</Layer>')
     # Stackup: copper foils + equal dielectrics summing to board thickness
     x.append(f'<Stackup name="Primary_Stackup" '
              f'overallThickness="{board.thickness:.4f}" tolPlus="0" tolMinus="0" '
@@ -196,6 +211,8 @@ def to_ipc2581(board: Board, *, origination: str = "1970-01-01T00:00:00") -> str
                          f'<StandardPrimitiveRef id="PRIM_{pad_keys[key]}"/>'
                          f'</Pad></Set>')
         for via in board.vias:
+            if layer not in via.span(copper):   # barrel only touches its span
+                continue
             key = ("circle", via.diameter, via.diameter)
             x.append(f'<Set net="{escape(via.net)}" padUsage="VIA"><Pad>'
                      f'<Location x="{via.x:.6f}" y="{via.y:.6f}"/>'
@@ -231,6 +248,8 @@ def to_ipc2581(board: Board, *, origination: str = "1970-01-01T00:00:00") -> str
                          f'diameter="{pad.drill:.6f}" platingStatus="PLATED" '
                          f'plusTol="0" minusTol="0" x="{bx:.6f}" y="{by:.6f}"/></Set>')
     for i, via in enumerate(board.vias):
+        if via.kind(copper) != "through":
+            continue                     # blind/buried drill in their span layer
         x.append(f'<Set net="{escape(via.net)}" padUsage="VIA">'
                  f'<Hole name="via{i}" diameter="{via.drill:.6f}" '
                  f'platingStatus="VIA" plusTol="0" minusTol="0" '
@@ -240,6 +259,19 @@ def to_ipc2581(board: Board, *, origination: str = "1970-01-01T00:00:00") -> str
                  f'diameter="{mh.drill:.6f}" platingStatus="NONPLATED" '
                  f'plusTol="0" minusTol="0" x="{mh.x:.6f}" y="{mh.y:.6f}"/></Set>')
     x.append('</LayerFeature>')
+
+    # blind/buried spans: one LayerFeature per span, holes only (the oracle
+    # shape — KiCad puts exactly the span's via holes there)
+    for a, b in bb_spans:
+        x.append(f'<LayerFeature layerRef="drill_{escape(a)}_{escape(b)}">')
+        for i, via in enumerate(board.vias):
+            if (via.layer_from, via.layer_to) != (a, b):
+                continue
+            x.append(f'<Set net="{escape(via.net)}" padUsage="VIA">'
+                     f'<Hole name="via{i}" diameter="{via.drill:.6f}" '
+                     f'platingStatus="VIA" plusTol="0" minusTol="0" '
+                     f'x="{via.x:.6f}" y="{via.y:.6f}"/></Set>')
+        x.append('</LayerFeature>')
 
     x.append('</Step></CadData></Ecad>')
     x.append('</IPC-2581>')

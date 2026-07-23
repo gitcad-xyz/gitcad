@@ -78,11 +78,38 @@ class Track:
 
 @dataclass
 class Via:
+    """A plated barrel connecting copper layers. ``layer_from``/``layer_to``
+    are the outermost copper layers the barrel touches, ordered outside-in
+    (top before in1 before ... before bottom). The defaults make a classic
+    through via; anything narrower is a blind via (touches exactly one outer
+    surface) or a buried via (touches neither)."""
     x: float
     y: float
     drill: float = 0.4
     diameter: float = 0.8
     net: str = ""
+    layer_from: str = "top"
+    layer_to: str = "bottom"
+
+    def span(self, copper_layers: list[str]) -> list[str]:
+        """Copper layers this barrel touches, outside-in — or [] when the
+        span doesn't resolve in this stack (validate() reports which)."""
+        try:
+            i = copper_layers.index(self.layer_from)
+            j = copper_layers.index(self.layer_to)
+        except ValueError:
+            return []
+        return copper_layers[i:j + 1] if i < j else []
+
+    def kind(self, copper_layers: list[str]) -> str:
+        """through | blind | buried | invalid — derived, never stored."""
+        s = self.span(copper_layers)
+        if not s:
+            return "invalid"
+        outer = (s[0] == copper_layers[0], s[-1] == copper_layers[-1])
+        if all(outer):
+            return "through"
+        return "blind" if any(outer) else "buried"
 
 
 @dataclass
@@ -115,9 +142,10 @@ class MountingHole:
 @dataclass
 class Board:
     """A complete board: 2 copper layers by default, up to 16 (``layers``).
-    Copper layer names: ``top``, ``in1``..``in{n-2}``, ``bottom``. Vias are
-    through-hole (span all layers) — blind/buried vias are a later stage,
-    refused honestly rather than modeled wrong."""
+    Copper layer names: ``top``, ``in1``..``in{n-2}``, ``bottom``. Vias
+    default to through-hole; a narrower ``layer_from``/``layer_to`` span
+    makes them blind or buried (every consumer — Gerber, drill, DRC,
+    connectivity, IPC-2581 — honors the span)."""
 
     name: str
     outline: list[tuple[float, float]]   # closed polygon (first != last is fine)
@@ -220,9 +248,14 @@ class Board:
                     violations.append(f"pad-outside-outline:{comp.ref}.{pad.name}")
                 if pad.drill is not None and pad.drill >= min(pad.w, pad.h):
                     violations.append(f"drill-exceeds-pad:{comp.ref}.{pad.name}")
+        copper_names = self.copper_layers()
         for i, via in enumerate(self.vias):
             if via.drill >= via.diameter:
                 violations.append(f"via-drill-exceeds-diameter:{i}")
+            if via.layer_from not in valid_layers or via.layer_to not in valid_layers:
+                violations.append(f"via-bad-layer:{i}")
+            elif not via.span(copper_names):
+                violations.append(f"via-span-inverted:{i}")
         for i, t in enumerate(self.tracks):
             if t.width <= 0:
                 violations.append(f"track-zero-width:{i}")

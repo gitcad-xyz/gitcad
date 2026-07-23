@@ -30,15 +30,35 @@ def _render(holes: list[tuple[float, float, float]]) -> str:
 
 
 def drills(board: Board) -> str:
-    """Plated holes (through-hole pads + vias), one METRIC Excellon file."""
+    """Plated through holes (through-hole pads + full-span vias), one METRIC
+    Excellon file. Blind/buried vias are separate drilling operations —
+    ``span_drills`` emits those."""
+    copper = board.copper_layers()
     holes: list[tuple[float, float, float]] = []  # (diameter, x, y)
     for comp in board.components:
         for pad, bx, by, _ in comp.placed_pads():
             if pad.drill is not None:
                 holes.append((pad.drill, bx, by))
     for v in board.vias:
-        holes.append((v.drill, v.x, v.y))
+        if v.kind(copper) == "through":
+            holes.append((v.drill, v.x, v.y))
     return _render(holes)
+
+
+def span_drills(board: Board) -> dict[tuple[str, str], str]:
+    """Blind/buried drill files, one per distinct span — each span is a
+    separate drilling (or lamination-stage) operation at the fab. Empty on
+    all-through boards, so 2-layer output is untouched."""
+    copper = board.copper_layers()
+    by_span: dict[tuple[str, str], list[tuple[float, float, float]]] = {}
+    for v in board.vias:
+        if v.span(copper) and v.kind(copper) != "through":
+            by_span.setdefault((v.layer_from, v.layer_to), []).append(
+                (v.drill, v.x, v.y))
+    order = {name: i for i, name in enumerate(copper)}
+    return {span: _render(holes)
+            for span, holes in sorted(by_span.items(),
+                                      key=lambda kv: (order[kv[0][0]], order[kv[0][1]]))}
 
 
 def npth_drills(board: Board) -> str:

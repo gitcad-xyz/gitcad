@@ -56,6 +56,9 @@ def export_fab(board: Board, outdir: str) -> dict[str, str]:
         "silk_top": (f"{n}.gto", gerber.silkscreen(board, "top")),
         "profile": (f"{n}.gko", gerber.profile(board)),
         "drill": (f"{n}.drl", excellon.drills(board)),
+        # blind/buried spans drill separately: {name}-top-in1.drl etc.
+        **{f"drill_{a}_{b}": (f"{n}-{a}-{b}.drl", text)
+           for (a, b), text in excellon.span_drills(board).items()},
         "drill_npth": (f"{n}-npth.drl", excellon.npth_drills(board)),
         "pick_and_place": (f"{n}-pnp.csv", pick_and_place(board)),
         "ipc2581": (f"{n}-ipc2581.xml", _ipc2581_text(board)),
@@ -69,7 +72,7 @@ def export_fab(board: Board, outdir: str) -> dict[str, str]:
     manifest = {
         "board": n,
         "generator": f"gitcad {_gitcad_version}",
-        "layers": 2,
+        "layers": board.layers,
         "files": {k: Path(v).name for k, v in written.items()},
         "checks": report.checks,
     }

@@ -51,6 +51,9 @@ def board_stats(board: Board) -> dict:
         "nets": len(nets),
         "tracks": {"count": len(board.tracks), "length_mm": round(track_len, 3)},
         "vias": len(board.vias),
+        "via_kinds": {k: sum(1 for v in board.vias
+                             if v.kind(board.copper_layers()) == k)
+                      for k in ("through", "blind", "buried")},
         "zones": sum(1 for z in board.zones if z.kind == "copper"),
         "keepouts": sum(1 for z in board.zones if z.kind == "keepout"),
         "mounting_holes": len(board.mounting_holes),

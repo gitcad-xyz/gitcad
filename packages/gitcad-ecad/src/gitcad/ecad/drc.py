@@ -148,8 +148,11 @@ class _Item:
     box: tuple | None = None      # (minx,miny,maxx,maxy) for pads/vias
     poly: list | None = None      # closed polygon for zones
     owner: str = ""               # component ref for pads (intra-footprint skip)
+    span: frozenset | None = None  # blind/buried vias: exact copper layers touched
 
     def on(self, layer: str) -> bool:
+        if self.span is not None:
+            return layer in self.span
         return self.layer in (layer, "both")
 
 
@@ -167,10 +170,13 @@ def _items(board: Board) -> list[_Item]:
                        box=(bx - w / 2, by - h / 2, bx + w / 2, by + h / 2))
             it.owner = comp.ref
             out.append(it)
+    copper_names = board.copper_layers()
     for i, v in enumerate(board.vias):
         r = v.diameter / 2
+        sp = v.span(copper_names)
         out.append(_Item("via", v.net, "both", f"via[{i}]",
-                         box=(v.x - r, v.y - r, v.x + r, v.y + r)))
+                         box=(v.x - r, v.y - r, v.x + r, v.y + r),
+                         span=frozenset(sp) if sp else None))
     for i, z in enumerate(board.zones):
         if z.kind != "copper":
             continue                     # keepouts are rules, not copper

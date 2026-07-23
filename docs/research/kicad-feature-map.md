@@ -101,7 +101,8 @@ state — updated statuses for the previously-missing rows:
 | Sheet text annotations | ✅ | authoring + import + render |
 | Eagle import | 🟡 | .sch netlist-level (explicit XML nets); board geometry later |
 | Sheet reuse (file instanced twice) | ⏸ deferred | needs a ref-instancing model (KiCad `instances` semantics); fails loud today |
-| Multi-layer (2–16 copper) | ✅ | top/in1..inN/bottom; per-layer DRC/connectivity/Gerbers; through-vias (blind/buried deferred) |
+| Multi-layer (2–16 copper) | ✅ | top/in1..inN/bottom; per-layer DRC/connectivity/Gerbers |
+| Blind/buried vias | ✅ | `Via.layer_from/layer_to` span; span-aware Gerber flash, per-span drill files, DRC/connectivity, KiCad import, IPC-2581 `<Span>` drill layers (kicad-cli oracle-matched) |
 | IPC-2581 (rev C) | ✅ | conformance-benchmarked element-for-element vs kicad-cli's own export on the real board (holes 58=58, components identical, nets consistent); in the fab package |
 | ODB++ / GenCAD | ⏸ deferred | IPC-2581 covers the modern-exchange need; these on demand |
 | Altium binary import | ⏸ deferred | OLE compound format; route through Altium→KiCad conversion meanwhile |

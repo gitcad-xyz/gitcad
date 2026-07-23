@@ -112,7 +112,8 @@ def copper(board: Board, side: str) -> str:
         if t.layer == side:
             g.line(f"C,{t.width:.6f}", t.x1, t.y1, t.x2, t.y2)
     for v in board.vias:
-        g.flash(f"C,{v.diameter:.6f}", v.x, v.y)
+        if side in v.span(names):     # blind/buried barrels only touch their span
+            g.flash(f"C,{v.diameter:.6f}", v.x, v.y)
     for z in board.zones:
         if z.layer == side and z.kind == "copper":   # keepouts never emit
             g.region(z.polygon)

@@ -170,13 +170,28 @@ def import_kicad_pcb(path: str) -> tuple[Board, ImportReport]:
             layer, net))
         report.count("tracks", 1)
 
+    stack_order = {name: i for i, name in enumerate(board.copper_layers())}
     for via_node in find_all(root, "via"):
         at = find_one(via_node, "at")
+        # (layers "F.Cu" "In1.Cu") — blind/micro/buried spans; absent = through
+        layer_from, layer_to = "top", "bottom"
+        pair = find_one(via_node, "layers")
+        if pair is not None and len(pair) >= 3:
+            a, b = map_layer(str(pair[1])), map_layer(str(pair[2]))
+            if a is None or b is None:
+                report.dropped.append(
+                    f"via at ({at[1]},{at[2]}): span {pair[1]!r}->{pair[2]!r} "
+                    f"outside the {layer_count}-layer stack")
+                continue
+            layer_from, layer_to = sorted((a, b), key=stack_order.__getitem__)
+        if layer_from != "top" or layer_to != "bottom":
+            report.count("blind_buried_vias", 1)
         board.vias.append(Via(
             cx(float(at[1])), cy(float(at[2])),
             drill=float(value_of(via_node, "drill", default=0.4)),
             diameter=float(value_of(via_node, "size", default=0.8)),
-            net=net_names.get(value_of(via_node, "net", default=-1.0), "")))
+            net=net_names.get(value_of(via_node, "net", default=-1.0), ""),
+            layer_from=layer_from, layer_to=layer_to))
         report.count("vias", 1)
 
     # -- zones: the real routing strategy of pour-based boards ----------------
