@@ -159,11 +159,11 @@ class RefKernel:
         from forgekernel.quadric import Cyl, DrilledSolid
 
         from forgekernel.quadric import (AxisStack, Cone, DisjointUnion,
-                                         RevolveSolid, Sphere)
+                                         RevolveSolid, RoundedBox, Sphere)
 
         if isinstance(shape, (Cone, Sphere)):
             shape = AxisStack(shape.cx, shape.cy, [shape])
-        if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion)):
+        if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion, RoundedBox)):
             cx, cy, cz = shape.centroid_f()
             return {"volume": float(shape.volume()),
                     "cx": cx, "cy": cy, "cz": cz}
@@ -180,6 +180,7 @@ class RefKernel:
     def bbox(self, shape):
         from forgekernel.quadric import AxisStack, Cone, Sphere
 
+        from forgekernel.quadric import RoundedBox
         if isinstance(shape, (Cone, Sphere)):
             shape = AxisStack(shape.cx, shape.cy, [shape])
         lo, hi = shape.bbox()
@@ -202,6 +203,9 @@ class RefKernel:
 
         if kind != "face":
             raise NotImplementedError("ref enumerates faces only")
+        from forgekernel.quadric import RoundedBox
+        if isinstance(shape, RoundedBox):
+            return [{"surface": "rounded-box"}]
         if isinstance(shape, DisjointUnion):
             out = []
             for m in shape.members:
@@ -231,9 +235,9 @@ class RefKernel:
         from forgekernel.quadric import Cyl, DrilledSolid
 
         from forgekernel.quadric import (AxisStack, Cone, DisjointUnion,
-                                         RevolveSolid, Sphere)
+                                         RevolveSolid, RoundedBox, Sphere)
 
-        if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion)):
+        if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion, RoundedBox)):
             return ValidationReport(ok=True, checks={"method": "analytic"},
                                     violations=[])
         if isinstance(shape, DrilledSolid):
@@ -276,7 +280,24 @@ class RefKernel:
         _nope("sweep", _K3)
 
     def fillet(self, shape, edges, radius):
-        _nope("fillet", _K5)
+        from forgekernel.brep import Solid
+        from forgekernel.kernel import fillet_box
+
+        if edges or not isinstance(shape, Solid):
+            _nope("fillet(selected edges or non-box)", "K5 (general blends)")
+        lo, hi = shape.bbox()
+        # box-only fillet: all edges rounded (the rounded-box Steiner form)
+        corners = {(lo[0], lo[1]), (hi[0], lo[1]), (hi[0], hi[1]), (lo[0], hi[1])}
+        for pp in shape.polys:
+            for vx, vy, vz in pp.verts:
+                if (vx, vy) not in corners or vz not in (lo[2], hi[2]):
+                    _nope("fillet(non-box)", "K5 (general blends)")
+        try:
+            return fillet_box(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2],
+                              radius, (lo[0], lo[1], lo[2]))
+        except ValueError as exc:
+            raise KernelError(str(exc), FailureSignature(
+                op="fillet", diagnostic="NotYetImplemented", kernel="ref"))
 
     def chamfer(self, shape, edges, distance):
         if edges:

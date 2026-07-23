@@ -27,8 +27,8 @@ def test_ref_refuses_unearned_ops_with_stage() -> None:
     k = RefKernel()
     with pytest.raises(KernelError, match="K3"):
         k.loft([], ruled=False)          # cylinder K2.0, sphere/cone K2.1
-    with pytest.raises(KernelError, match="K5"):
-        k.fillet(k.box(1, 1, 1), None, 0.5)
+    with pytest.raises(KernelError, match="K3"):
+        k.sweep({}, [])                  # sweep/loft hold the K3 line
 
 
 def test_ref_drills_holes_exactly() -> None:
