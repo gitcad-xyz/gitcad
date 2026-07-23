@@ -52,8 +52,9 @@ def test_sheet_pin_bridges_parent_wire_to_child_net() -> None:
 
 def test_authored_hierarchy_equals_imported_hierarchy(tmp_path) -> None:
     """The oracle: same design through both paths, identical netlist."""
+    from test_sheet_reuse import _write_project
+
     from gitcad.importers.kicad_sch import import_kicad_sch
-    from tests.test_sheet_reuse import _write_project
 
     imported, _ = import_kicad_sch(_write_project(tmp_path))
     authored = _two_channel_system().finish()
