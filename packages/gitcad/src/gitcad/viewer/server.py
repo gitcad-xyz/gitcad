@@ -231,6 +231,55 @@ def resolve_import_paths(doc: Document, base: Path) -> Document:
     return doc
 
 
+def run_checks_for(path: Path, kernel: Kernel) -> dict:
+    """The design's live check suite, by kind — the viewer's checks panel.
+
+    Every result is {check: name, ok, violations}; the rollup is honest
+    about coverage (what ran is listed, not implied)."""
+    text = path.read_text(encoding="utf-8")
+    kind = detect_kind(text)
+    results: list[dict] = []
+
+    def add(name: str, report) -> None:
+        results.append({"check": name, "ok": report.ok,
+                        "violations": list(report.violations)})
+
+    if kind == "board":
+        from gitcad.ecad import Board, check_connectivity
+        from gitcad.ecad.drc import run_drc
+
+        board = Board.loads(text)
+        add("validate", board.validate())
+        add("drc", run_drc(board))
+        add("connectivity", check_connectivity(board))
+    elif kind == "schematic":
+        from gitcad.ecad import Schematic, check_envelopes
+
+        sch = Schematic.loads(text)
+        add("erc", sch.erc())
+        add("envelope", check_envelopes(sch))
+    elif kind == "pcba":
+        from gitcad.pcba import pcba_verify
+
+        r = pcba_verify(text, str(path.parent))
+        results.append({"check": "pcba", "ok": r["ok"],
+                        "violations": r["violations"]})
+    elif kind == "assembly":
+        from gitcad.part.interference import check_interference
+
+        resolved = resolve_assembly_shapes(path, kernel)
+        instances = {n: (s, t, r) for n, (s, t, r, _p) in resolved.items()}
+        add("interference", check_interference(kernel, instances))
+    elif kind == "model":
+        doc = resolve_import_paths(Document.loads(text), path.parent)
+        shape = doc.build(kernel).final(doc)
+        add("geometry", kernel.validate(shape))
+
+    ok = all(r["ok"] for r in results)
+    return {"kind": kind, "ok": ok, "results": results,
+            "total_violations": sum(len(r["violations"]) for r in results)}
+
+
 def discover_schematics(root: Path, limit: int = 12) -> list[dict]:
     """The schematics that make up a design, rendered for review.
 
@@ -308,6 +357,10 @@ class _Handler(BaseHTTPRequestHandler):
                                              self.path_watched.parent),
                         self.kernel)
                 self._send(200, json.dumps(payload).encode(), "application/json")
+            elif self.path == "/api/checks":
+                self._send(200, json.dumps(
+                    run_checks_for(self.path_watched, self.kernel)).encode(),
+                    "application/json")
             elif self.path == "/api/schematics":
                 sheets = discover_schematics(self.path_watched.parent)
                 self._send(200, json.dumps({"sheets": sheets}).encode(),

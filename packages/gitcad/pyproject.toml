@@ -28,6 +28,7 @@ gitcad-lot = "gitcad.lots:main"
 gitcad-init = "gitcad.init:main"
 gitcad-render = "gitcad.render:main"
 gitcad-convert = "gitcad.convert:main"
+gitcad-explore = "gitcad.explore:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gitcad"]

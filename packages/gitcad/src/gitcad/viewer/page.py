@@ -36,11 +36,19 @@ PAGE = r"""<!DOCTYPE html>
   #err{position:fixed;top:38px;left:12px;color:#f85149;white-space:pre-wrap}
   #logo{position:fixed;right:12px;top:10px;color:var(--acc);font-weight:700}
   #sel{position:fixed;left:12px;bottom:64px;color:#d29922;pointer-events:none;white-space:pre}
+  #checks{position:fixed;inset:0;display:none;overflow:auto;padding:44px 24px 24px;
+          font-size:13px}
+  .chk{max-width:900px;margin:0 auto 14px;border:1px solid var(--line);
+       border-radius:6px;padding:10px 14px}
+  .chk h3{margin:0 0 6px;font-size:13px}
+  .chk .ok{color:#3fb950} .chk .bad{color:#f85149}
+  .chk li{color:#f85149;margin-left:1.2em;list-style:disc}
   #explodebox{position:fixed;right:12px;top:40px;display:none;align-items:center;
               gap:8px;color:var(--dim);z-index:5}
   #explodebox input{width:140px;accent-color:var(--acc)}
 </style></head><body>
 <canvas id="gl"></canvas><div id="board"></div><div id="sheets"></div>
+<div id="checks"></div>
 <div id="tabs"></div>
 <div id="explodebox"><span>explode</span>
   <input id="explodeslider" type="range" min="0" max="100" value="0"></div>
@@ -376,7 +384,8 @@ addEventListener("keydown", e => { if(e.key === "Escape"){ picks = []; updateMea
 
 // -- tabs ---------------------------------------------------------------------
 const tabsEl = document.getElementById("tabs");
-let activeTab = location.hash === "#sheets" ? "sheets" : "3d", sheetCount = 0;
+let activeTab = location.hash === "#sheets" ? "sheets"
+  : location.hash === "#checks" ? "checks" : "3d", sheetCount = 0;
 function renderTabs(){
   tabsEl.innerHTML = "";
   const mk = (id, label, cls) => {
@@ -392,14 +401,45 @@ function renderTabs(){
   };
   mk("3d", "3d");
   if(sheetCount) mk("sheets", `schematics (${sheetCount})`);
+  if(checksState) mk("checks",
+    checksState.ok ? "checks ✓" : `checks (${checksState.total_violations})`);
   if(activeTab === "3d") mk("measure", "measure", "tool");
 }
 function showTab(){
   document.getElementById("sheets").style.display = activeTab === "sheets" ? "block" : "none";
+  document.getElementById("checks").style.display = activeTab === "checks" ? "block" : "none";
   const three = activeTab === "3d";
   canvas.style.display = three ? "block" : "none";
   hud.style.display = three ? "block" : "none";
   measureHud.style.display = three ? "block" : "none";
+}
+let checksState = null;
+async function loadChecks(){
+  try {
+    checksState = await (await fetch("/api/checks")).json();
+    if(checksState.error) throw new Error(checksState.error);
+    const el = document.getElementById("checks");
+    el.innerHTML = "";
+    for(const r of checksState.results){
+      const card = document.createElement("div");
+      card.className = "chk";
+      const h = document.createElement("h3");
+      h.innerHTML = `${r.check} <span class="${r.ok ? "ok" : "bad"}">` +
+        `${r.ok ? "✓ pass" : r.violations.length + " violation(s)"}</span>`;
+      card.appendChild(h);
+      if(!r.ok){
+        const ul = document.createElement("ul");
+        for(const v of r.violations.slice(0, 200)){
+          const li = document.createElement("li");
+          li.textContent = v;
+          ul.appendChild(li);
+        }
+        card.appendChild(ul);
+      }
+      el.appendChild(card);
+    }
+    renderTabs();
+  } catch(e){ checksState = null; }
 }
 async function loadSheets(){
   try {
@@ -459,6 +499,7 @@ async function poll(){
         showTab();
       }
       loadSheets();
+      loadChecks();
     }
   } catch(e){ err.textContent = String(e); }
   setTimeout(poll, 1000);
