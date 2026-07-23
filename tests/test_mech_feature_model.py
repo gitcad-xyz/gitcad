@@ -99,3 +99,37 @@ def test_degenerate_extrude_profile_is_a_kernel_error() -> None:
     with pytest.raises(KernelError):
         k.extrude({"start": [0, 0], "segments": [
             {"kind": "line", "to": [5, 0]}, {"kind": "line", "to": [0, 0]}]}, 5)
+
+
+def _area(p):
+    from gitcad.sketch import Profile  # noqa
+    pts = [tuple(p.start)] + [tuple(s["to"]) for s in p.segments]
+    if pts[0] == pts[-1]:
+        pts = pts[:-1]
+    n = len(pts)
+    return abs(sum(pts[i][0] * pts[(i + 1) % n][1]
+                   - pts[(i + 1) % n][0] * pts[i][1] for i in range(n))) / 2
+
+
+def test_profile_offset_grows_and_shrinks() -> None:
+    from gitcad.sketch import Profile
+    sq = Profile.rectangle(10, 10)
+    assert _area(sq.offset(2)) == 196.0        # 14×14
+    assert _area(sq.offset(-2)) == 36.0        # 6×6
+    # offset then extrude is exact through ref
+    v = RefKernel().extrude(sq.offset(2).to_params(), 5).volume()
+    assert v == 980                            # 14·14·5
+
+
+def test_profile_offset_collapse_refuses() -> None:
+    from gitcad.errors import GitcadError
+    from gitcad.sketch import Profile
+    with pytest.raises(GitcadError, match="collapse"):
+        Profile.rectangle(10, 10).offset(-6)
+
+
+def test_convert_entities_from_loop() -> None:
+    from gitcad.sketch import Profile
+    prof = Profile.from_loop([(0, 0), (3, 0), (3, 4), (0, 4)])
+    assert _area(prof) == 12.0
+    assert RefKernel().extrude(prof.to_params(), 2).volume() == 24

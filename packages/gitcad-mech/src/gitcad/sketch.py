@@ -89,6 +89,70 @@ class Profile:
 
     # -- conveniences ---------------------------------------------------------
 
+    def offset(self, distance: float) -> "Profile":
+        """Parallel offset of a closed straight-segment profile: every edge
+        moves ``distance`` along its outward normal (positive grows the
+        loop, negative shrinks it), adjacent edges re-intersected exactly.
+        Convex loops only — a concave inset can self-intersect (raises).
+        The 'offset entities' sketch tool."""
+        self.validate()
+        if any(s["kind"] != "line" for s in self.segments):
+            raise GitcadError("offset: straight-segment profiles only")
+        pts = [tuple(self.start)] + [tuple(s["to"]) for s in self.segments]
+        if pts[0] == pts[-1]:
+            pts = pts[:-1]
+        n = len(pts)
+        # signed area → orientation (CCW positive); outward normal is to the
+        # RIGHT of the edge direction for a CCW loop
+        area2 = sum(pts[i][0] * pts[(i + 1) % n][1]
+                    - pts[(i + 1) % n][0] * pts[i][1] for i in range(n))
+        sgn = 1.0 if area2 > 0 else -1.0
+        lines = []
+        for i in range(n):
+            (x1, y1), (x2, y2) = pts[i], pts[(i + 1) % n]
+            dx, dy = x2 - x1, y2 - y1
+            length = math.hypot(dx, dy)
+            if length == 0:
+                raise GitcadError("offset: zero-length edge")
+            nx, ny = sgn * dy / length, -sgn * dx / length      # outward normal
+            # line a·x + b·y = c shifted outward by `distance`
+            lines.append((nx, ny, nx * x1 + ny * y1 + distance))
+        out = []
+        for i in range(n):
+            a1, b1, c1 = lines[i - 1]
+            a2, b2, c2 = lines[i]
+            det = a1 * b2 - a2 * b1
+            if abs(det) < 1e-12:
+                raise GitcadError("offset: degenerate corner (collinear edges)")
+            out.append(((c1 * b2 - c2 * b1) / det, (a1 * c2 - a2 * c1) / det))
+        # collapse guard: an over-large inset makes offset edges reverse
+        # direction (crossed offset lines still form a same-winding polygon,
+        # so the area sign alone can't catch it) — check each edge kept its
+        # original heading.
+        for i in range(n):
+            ox1, oy1 = out[i]
+            ox2, oy2 = out[(i + 1) % n]
+            dx0, dy0 = pts[(i + 1) % n][0] - pts[i][0], pts[(i + 1) % n][1] - pts[i][1]
+            if (ox2 - ox1) * dx0 + (oy2 - oy1) * dy0 <= 0:
+                raise GitcadError(
+                    "offset: distance collapses/inverts the profile")
+        prof = Profile(start=out[0])
+        for p in out[1:]:
+            prof.line_to(*p)
+        return prof.close()
+
+    @classmethod
+    def from_loop(cls, points) -> "Profile":
+        """Convert entities: build a profile from an ordered point loop
+        (e.g. a face boundary extracted from existing geometry)."""
+        pts = list(points)
+        if len(pts) < 3:
+            raise GitcadError("from_loop needs at least 3 points")
+        prof = cls(start=tuple(pts[0]))
+        for p in pts[1:]:
+            prof.line_to(*p)
+        return prof.close()
+
     @classmethod
     def rectangle(cls, w: float, h: float) -> "Profile":
         return cls((0, 0)).line_to(w, 0).line_to(w, h).line_to(0, h).close()
