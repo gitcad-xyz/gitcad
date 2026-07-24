@@ -264,6 +264,24 @@ class RefKernel:
                 raise KernelError(str(exc), FailureSignature(
                     op="boolean.union", diagnostic="NotYetImplemented",
                     kernel="ref"))
+        if isinstance(b, Cyl) and op == "cut" and isinstance(a, DisjointUnion):
+            # (A ∪ B) ∖ C distributes over disjoint members (K2.3): the boss
+            # standing on a plate keeps its pilot bore exact.
+            try:
+                return a.cut(b)
+            except ValueError as exc:
+                raise KernelError(str(exc), FailureSignature(
+                    op="boolean.cut", diagnostic="NotYetImplemented",
+                    kernel="ref"))
+        if isinstance(b, Cyl) and op == "cut" and isinstance(a, Cyl):
+            from forgekernel.quadric import bore_cyl
+
+            try:
+                return bore_cyl(a, b)
+            except ValueError as exc:
+                raise KernelError(str(exc), FailureSignature(
+                    op="boolean.cut", diagnostic="NotYetImplemented",
+                    kernel="ref"))
         if isinstance(b, Cyl) and op == "cut":
             base = (DrilledSolid(a, []) if isinstance(a, Solid)
                     else a if isinstance(a, DrilledSolid) else None)

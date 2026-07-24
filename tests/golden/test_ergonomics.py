@@ -127,7 +127,6 @@ def test_cylinder_axis_param() -> None:
 
 # -- boss feature (friction: ports with no geometry) --------------------------
 
-@pytest.mark.forge_gap
 def test_boss_with_pilot_volume_oracle() -> None:
     import math
 
