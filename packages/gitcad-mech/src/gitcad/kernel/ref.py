@@ -259,6 +259,11 @@ class RefKernel:
                 f"boolean {op} failed closure: {exc}",
                 FailureSignature(op=f"boolean.{op}",
                                  diagnostic="ClosureViolation", kernel="ref"))
+        except ValueError as exc:
+            # operands whose exact coordinates live in different quadratic
+            # fields (e.g. a 45°-rotated ℚ[√2] body vs a 30°-rotated ℚ[√3] one)
+            # need a bigger field — refuse honestly rather than leak (K3.1).
+            _nope(f"boolean.{op} across mixed radicals ({exc})", "K3.1")
 
     def compound(self, shapes: list):
         from forgekernel.brep import Solid
