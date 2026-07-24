@@ -257,20 +257,29 @@ class RefKernel:
             # these carry their own (x, y, z) translate; the planar path would
             # hand them a single vector
             if rotate_deg:
-                _nope("transform(rotate a drilled/tube/revolved solid)", "K2.2")
+                return self._transform_via_body(
+                    "rotate a drilled/tube/revolved solid", shape,
+                    rotate_axis, rotate_deg, translate)
             return shape.translated(*translate)
         if isinstance(shape, DisjointUnion):
             # rigid translation of every member — disjointness is preserved
             if rotate_deg:
-                _nope("transform(rotate a disjoint union)", "K2.3")
+                return self._transform_via_body(
+                    "rotate a disjoint union", shape,
+                    rotate_axis, rotate_deg, translate)
             return DisjointUnion._unchecked(
                 [self._translate_any(m, translate) for m in shape.members])
         if isinstance(shape, (Cyl, Cone, Sphere)):
             if rotate_deg and (tuple(rotate_axis) != (0, 0, 1)):
-                _nope("transform(tilt a quadric)", "K2.2 (general axes)")
+                return self._transform_via_body(
+                    "tilt a quadric", shape, rotate_axis, rotate_deg, translate)
             return shape.translated(*translate)
         if isinstance(shape, AxisStack):
-            _nope("transform(AxisStack)", "K2.2")
+            if rotate_deg or any(translate):
+                return self._transform_via_body(
+                    "transform an AxisStack", shape,
+                    rotate_axis, rotate_deg, translate)
+            return shape
         out = shape
         if rotate_deg:
             axis = {(1, 0, 0): "x", (0, 1, 0): "y", (0, 0, 1): "z"}.get(
@@ -287,6 +296,25 @@ class RefKernel:
         if any(translate):
             out = self._fk.translate(out, *translate)
         return out
+
+    def _transform_via_body(self, what: str, shape, rotate_axis, rotate_deg,
+                            translate):
+        """Rotate through the canonical B-rep (ADR-0021).
+
+        Every representation that could not rotate itself used to refuse —
+        a drilled plate, a boss, a tilted cylinder. The canonical form rotates
+        EXACTLY for the ℚ[√d] angles (multiples of 30°/45°/90°), so the
+        refusal was about the representation, not about the geometry. Angles
+        outside the field still refuse, now from one place.
+        """
+        from forgekernel import body as B
+
+        def make(b):
+            out = b.transformed(B.Affine.rotation(tuple(rotate_axis), rotate_deg))
+            return (out.transformed(B.Affine.translation(*translate))
+                    if any(translate) else out)
+
+        return self._via_body(f"transform({what})", shape, make)
 
     def _via_body(self, op: str, shape, make):
         """ADR-0021 fallback: run an operation on the canonical B-rep when the
@@ -1071,12 +1099,18 @@ class RefKernel:
             base, bores = shape, ()
         elif isinstance(shape, DrilledSolid):
             base, bores = shape.base, shape.bores
-        elif isinstance(shape, Cyl):
-            # a bare cylinder: the drilled-solid writer needs a planar base, so
-            # a lone quadric has no planar faces to hang the topology on (K2.4)
-            _nope("export_step(bare cylinder)", "K2.4")
         else:
-            _nope("export_step(curved solid)", "K3.7")
+            # ADR-0021: everything else exports from the canonical B-rep, one
+            # writer for all representations. A bare cylinder, a boss and a
+            # bored boss all used to refuse for want of a planar base to hang
+            # the topology on — the canonical form has no such notion.
+            from forgekernel.stepbody import write_step_body
+
+            text = self._via_body("export_step", shape,
+                                  lambda b: write_step_body(b))
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+            return
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(write_step_planar_solid(base, bores=bores))
 
