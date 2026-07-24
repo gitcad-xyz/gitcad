@@ -1,0 +1,56 @@
+name: release
+
+# Build (and, on a version tag, publish) the four gitcad distributions:
+#   gitcad-core, gitcad-mech, gitcad-ecad, gitcad (metapackage).
+# Pushes/PRs build + `twine check` only. Publishing runs ONLY on a v* tag via
+# PyPI Trusted Publishing (OIDC) — no API tokens. Before the first tag, register
+# all four project names on PyPI and add this repo/workflow as a trusted
+# publisher for each (environment: pypi). See RELEASING.md.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build ${{ matrix.pkg }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pkg: [gitcad-core, gitcad-mech, gitcad-ecad, gitcad]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install build twine
+      - run: python -m build packages/${{ matrix.pkg }} --outdir dist
+      - run: twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.pkg }}
+          path: dist/*
+
+  publish:
+    name: publish to PyPI
+    needs: [build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write        # OIDC for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: staged
+      - name: Gather all four dists
+        run: mkdir -p dist && cp staged/dist-*/* dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist

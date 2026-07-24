@@ -6,17 +6,36 @@ build-backend = "hatchling.build"
 name = "gitcad"
 version = "0.3.0"
 description = "Agent-first, headless, git-native CAD (metapackage: core + mech + ecad + MCP + viewer + release)"
+readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
+authors = [{name = "Dan Willis", email = "danielcwillis@gmail.com"}]
 keywords = ["cad", "brep", "occt", "mcp", "agent", "headless", "git", "eda"]
-dependencies = ["gitcad-core==0.2.0", "gitcad-mech==0.2.0", "gitcad-ecad==0.2.0"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Manufacturing",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
+dependencies = ["gitcad-core==0.3.0", "gitcad-mech==0.3.0", "gitcad-ecad==0.3.0"]
 
 [project.optional-dependencies]
-occt = ["gitcad-mech[occt]==0.2.0"]
+# Native compiled accelerator (forgekernel_rs wheel) for the exact kernel.
+fast = ["gitcad-mech[fast]==0.3.0"]
+# OCCT oracle/fallback kernel.
+occt = ["gitcad-mech[occt]==0.3.0"]
+# Model Context Protocol server for agent hosts.
 mcp = ["mcp>=1.0"]
 
 [project.urls]
 Homepage = "https://gitcad.xyz"
+Repository = "https://github.com/gitcad-xyz/gitcad"
+Issues = "https://github.com/gitcad-xyz/gitcad/issues"
 
 [project.scripts]
 gitcad-mcp = "gitcad.mcp.server:main"

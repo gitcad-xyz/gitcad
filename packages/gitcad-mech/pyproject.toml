@@ -5,13 +5,36 @@ build-backend = "hatchling.build"
 [project]
 name = "gitcad-mech"
 version = "0.3.0"
-description = "gitcad mechanical: document model, OCCT kernel, sketches, drawings, mech importers"
+description = "gitcad mechanical: document model, exact B-rep kernel, sketches, drawings, mech importers"
+readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
-dependencies = ["gitcad-core==0.2.0"]
+authors = [{name = "Dan Willis", email = "danielcwillis@gmail.com"}]
+keywords = ["cad", "brep", "kernel", "nurbs", "exact-arithmetic", "sheet-metal", "step", "occt"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Manufacturing",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling",
+]
+# The exact forge kernel is the default backend (pure Python, lightweight).
+dependencies = ["gitcad-core==0.3.0", "forgekernel>=0.1.0"]
 
 [project.optional-dependencies]
+# Native compiled accelerator for the exact kernel's hot paths (same results).
+fast = ["forgekernel[rust]>=0.1.0"]
+# OCCT independent oracle / fallback kernel.
 occt = ["cadquery-ocp>=7.7"]
+
+[project.urls]
+Homepage = "https://gitcad.xyz"
+Repository = "https://github.com/gitcad-xyz/gitcad"
+Issues = "https://github.com/gitcad-xyz/gitcad/issues"
+"Kernel (forgekernel)" = "https://github.com/gitcad-xyz/forge"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gitcad"]
