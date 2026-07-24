@@ -25,7 +25,6 @@ def _final(kern, doc):
     return doc.build(kern).final(doc)
 
 
-@pytest.mark.forge_gap
 def test_sketch_plane_normal_x_maps_axes(kern):
     doc = Document()
     doc.add(Feature(op="extrude", params={
@@ -37,7 +36,6 @@ def test_sketch_plane_normal_x_maps_axes(kern):
     assert kern.measure(shape)["volume"] == pytest.approx(24.0, rel=1e-9)
 
 
-@pytest.mark.forge_gap
 def test_sketch_plane_normal_y_maps_axes(kern):
     doc = Document()
     doc.add(Feature(op="extrude", params={

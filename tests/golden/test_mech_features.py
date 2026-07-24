@@ -49,7 +49,6 @@ def test_linear_pattern(kernel) -> None:
     assert v == pytest.approx(4 * math.pi * 4 * 5, rel=1e-6)
 
 
-@pytest.mark.forge_gap
 def test_circular_pattern(kernel) -> None:
     doc = Document()
     b = doc.add(Feature(op="box", params={"dx": 5, "dy": 2, "dz": 3}))

@@ -181,9 +181,15 @@ class RefKernel:
         if rotate_deg:
             axis = {(1, 0, 0): "x", (0, 1, 0): "y", (0, 0, 1): "z"}.get(
                 tuple(rotate_axis))
-            if axis is None or rotate_deg % 90 != 0:
-                _nope(f"transform(rotate {rotate_deg} about {rotate_axis})", _K2)
-            out = self._fk.rotate_quarter(out, axis, int(rotate_deg // 90))
+            if axis is not None and rotate_deg % 90 == 0:
+                out = self._fk.rotate_quarter(out, axis, int(rotate_deg // 90))
+            else:
+                # K2.2: exact rotation about any axis by a ℚ[√d] angle (multiples
+                # of 30°/45°) — circular patterns and diagonal sketch planes.
+                try:
+                    out = self._fk.rotate(out, tuple(rotate_axis), rotate_deg)
+                except (ValueError, AttributeError):
+                    _nope(f"transform(rotate {rotate_deg} about {rotate_axis})", _K2)
         if any(translate):
             out = self._fk.translate(out, *translate)
         return out
