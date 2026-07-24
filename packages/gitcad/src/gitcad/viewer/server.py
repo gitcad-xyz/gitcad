@@ -40,11 +40,23 @@ def detect_kind(text: str) -> str:
     raise ValueError(f"cannot view schema {schema!r}")
 
 
+def _norm_mesh(mesh: dict) -> dict:
+    """Normalize a kernel's tessellation to the WebGL client's flat arrays.
+    Forge returns ``{"vertices": [[x,y,z]…], "triangles": [[i,j,k]…]}``; the
+    client wants a flat ``positions`` float array + flat ``indices``."""
+    if "positions" in mesh:
+        return mesh
+    return {
+        "positions": [c for v in mesh["vertices"] for c in v],
+        "indices": [i for t in mesh["triangles"] for i in t],
+    }
+
+
 def mesh_payload(doc: Document, kernel: Kernel) -> dict:
     """Everything the 3D client needs, JSON-able."""
     result = doc.build(kernel)
     shape = result.final(doc)
-    mesh = kernel.tessellate(shape)
+    mesh = _norm_mesh(kernel.tessellate(shape))
     lo, hi = kernel.bbox(shape)
     measures = kernel.measure(shape)
     return {
@@ -142,7 +154,7 @@ def pcba_mesh_payload(board, kernel: Kernel) -> dict:
     los, his = [], []
 
     def add_group(name: str, part: str, shape, color) -> None:
-        mesh = kernel.tessellate(shape)
+        mesh = _norm_mesh(kernel.tessellate(shape))
         lo, hi = kernel.bbox(shape)
         los.append(lo)
         his.append(hi)
@@ -398,6 +410,29 @@ class _Handler(BaseHTTPRequestHandler):
                 else:
                     svg = board_to_svg(Board.loads(text))
                 self._send(200, svg.encode(), "image/svg+xml")
+            elif self.path.startswith("/api/drawing."):
+                # the dimensioned 2D drawing — PDF is the deliverable, SVG the
+                # in-page render. Only for single-part model documents.
+                if detect_kind(text) != "model":
+                    self._send(404, b'{"error": "drawings are for model documents"}',
+                               "application/json")
+                    return
+                from gitcad.drawing import make_drawing
+                from gitcad.kernel import get_kernel
+
+                # HLR is OCCT-backed today (forge HLR is the chosen replacement);
+                # build the drawing shape with OCCT regardless of the viewer's
+                # default (forge) kernel.
+                dk = get_kernel(require="occt")
+                doc = resolve_import_paths(Document.loads(text),
+                                           self.path_watched.parent)
+                d = make_drawing(doc.build(dk).final(doc),
+                                 title=self.path_watched.stem,
+                                 notes=doc.tolerance_notes())
+                if self.path.startswith("/api/drawing.pdf"):
+                    self._send(200, d.to_pdf(), "application/pdf")
+                else:
+                    self._send(200, d.to_svg().encode("utf-8"), "image/svg+xml")
             else:
                 self._send(404, b"not found", "text/plain")
         except Exception as exc:  # surface errors to the page, never crash

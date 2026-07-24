@@ -265,7 +265,10 @@ def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3",
     doc = Document.loads(model)
     if not len(doc):
         raise ValueError("model has no features")
-    kernel = get_kernel()
+    # 2D drawings do hidden-line removal, which is OCCT-backed today; forge has
+    # no HLR yet (a native forge HLR is the chosen replacement — until it lands
+    # this path needs OCCT even though the default kernel is now forge).
+    kernel = get_kernel(require="occt")
     # thread specs on hole features surface in the hole callouts (SW-map P5);
     # positions resolve through the parameter table like the build does
     from gitcad.expr import resolve_value
@@ -290,6 +293,7 @@ def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3",
     d = make_drawing(doc.build(kernel).final(doc), title=title, sheet=sheet,
                      thread_specs=threads, notes=doc.tolerance_notes(),
                      details=details)
+    svg = d.to_svg()
     if path.lower().endswith(".pdf"):
         with open(path, "wb") as f:
             f.write(d.to_pdf())
@@ -297,8 +301,13 @@ def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3",
         # utf-8 explicitly: GD&T symbols are non-ASCII and Windows' locale
         # codec is not (the em-dash lesson, round two)
         with open(path, "w", newline="\n", encoding="utf-8") as f:
-            f.write(d.to_svg())
-    return {"path": path, "scale": d.scale, "sheet": d.sheet, "views": [v.name for v in d.views]}
+            f.write(svg)
+    result = {"path": path, "scale": d.scale, "sheet": d.sheet,
+              "views": [v.name for v in d.views]}
+    png = _svg_to_png_b64(svg)               # inline preview when a browser exists
+    if png:
+        result["image"] = {"png_base64": png, "mime": "image/png"}
+    return result
 
 
 @tool("board_pad_position")
@@ -1048,10 +1057,170 @@ def assembly_fasteners(assembly_body: dict[str, Any], parts: list[str],
             "ok": r.ok, "violations": r.violations}
 
 
+# -- visualization: inline images + the live web viewer -----------------------
+#
+# Render tools write files for the agent to re-ingest, but a human in an MCP
+# host (e.g. Claude Desktop) wants to SEE the design. These helpers produce an
+# inline PNG (rendered via a local headless browser) or launch the live viewer
+# and hand back its URL. The handlers stay mcp-free and JSON-able: an image is
+# carried as base64 under an ``"image"`` key, and the MCP bridge in ``main()``
+# turns it into a native ImageContent so the picture shows in the chat.
+
+
+def _svg_to_png_b64(svg: str, width: int = 1400, height: int = 900) -> str | None:
+    """Rasterize an SVG string to a base64 PNG via a local headless browser.
+    Returns None when no browser is available (caller keeps the file/SVG)."""
+    import base64
+    import tempfile
+    from pathlib import Path
+
+    from gitcad.render import _png_from_svg, find_browser
+
+    browser = find_browser()
+    if browser is None:
+        return None
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td) / "r.png"
+        _png_from_svg(svg, out, browser, width, height)
+        return base64.b64encode(out.read_bytes()).decode("ascii")
+
+
+def _design_to_png_b64(text: str, *, explode: float = 0.0, three: bool = False,
+                       width: int = 1400, height: int = 900) -> str | None:
+    """Render a design document (model/board/schematic/pcba/assembly text) to a
+    base64 PNG via ``gitcad.render``. Returns None when no browser is found."""
+    import base64
+    import tempfile
+    from pathlib import Path
+
+    from gitcad.render import find_browser, render
+    from gitcad.viewer.server import detect_kind
+
+    if find_browser() is None:
+        return None
+    ext = {"schematic": ".sch", "board": ".board", "pcba": ".pcba"}.get(
+        detect_kind(text), ".model")
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / f"design{ext}"
+        src.write_text(text, encoding="utf-8")
+        out = Path(td) / "design.png"
+        render(str(src), str(out), width=width, height=height,
+               explode=explode, three=three)
+        return base64.b64encode(out.read_bytes()).decode("ascii")
+
+
+@tool("visualize")
+def visualize(design: str, explode: float = 0.0, three: bool = False,
+              width: int = 1400, height: int = 900) -> dict[str, Any]:
+    """Render a design document (model, board, schematic, pcba, or assembly
+    text) to an inline PNG that displays directly in the chat. 3D kinds render
+    an isometric view; ``explode`` spreads an assembly along its axes; ``three``
+    forces the 3D board view. Rasterization uses a local Chrome/Edge — without
+    one this returns an actionable error rather than a silent downgrade."""
+    from gitcad.viewer.server import detect_kind
+
+    kind = detect_kind(design)
+    png = _design_to_png_b64(design, explode=explode, three=three,
+                             width=width, height=height)
+    if png is None:
+        return {"ok": False, "error": {"type": "NoBrowser", "message":
+                "inline PNG needs a local Chrome/Edge (headless screenshot); "
+                "none found. Install one, or use model_drawing/board_export_fab/"
+                "schematic_render to write a file."}}
+    return {"ok": True, "kind": kind, "width": width, "height": height,
+            "image": {"png_base64": png, "mime": "image/png"}}
+
+
+_VIEWERS: dict[str, dict[str, Any]] = {}
+
+
+@tool("viewer_open")
+def viewer_open(design: str = "", path: str = "", review_base: str = "",
+                port: int = 0) -> dict[str, Any]:
+    """Start the local gitcad web viewer for a design and return its URL, to
+    open in a browser (or an embedded webview) for interactive 3D, exploded
+    views, cross-probing, schematics, and live checks. Pass ``design`` text OR
+    an existing ``path``. ``review_base`` (a git ref) adds the in-app review
+    tab. The server runs in the background for the rest of the session; list or
+    stop servers with viewer_list / viewer_close."""
+    import tempfile
+    import threading
+    from pathlib import Path
+
+    from gitcad.viewer.server import detect_kind, serve
+
+    if not design and not path:
+        raise ValueError("viewer_open: pass a design string or a file path")
+    if path:
+        served = str(Path(path).resolve())
+        kind = None
+    else:
+        kind = detect_kind(design)
+        ext = {"schematic": ".sch", "board": ".board", "pcba": ".pcba",
+               "assembly": ".gitcad"}.get(kind, ".model")
+        served = str(Path(tempfile.gettempdir())
+                     / f"gitcad_view_{abs(hash(design)) & 0xffffffff:08x}{ext}")
+        Path(served).write_text(design, encoding="utf-8")
+    if served in _VIEWERS:
+        v = _VIEWERS[served]
+        return {"ok": True, "url": v["url"], "port": v["port"], "reused": True}
+    httpd = serve(served, port=port, review_base=review_base or None)
+    bound = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{bound}/"
+    _VIEWERS[served] = {"httpd": httpd, "port": bound, "url": url}
+    return {"ok": True, "url": url, "port": bound, "kind": kind,
+            "hint": "Open this URL in a browser to interact with the design."}
+
+
+@tool("viewer_list")
+def viewer_list() -> dict[str, Any]:
+    """List the viewer servers running in this session (path, URL, port)."""
+    return {"viewers": [{"path": p, "url": v["url"], "port": v["port"]}
+                        for p, v in _VIEWERS.items()]}
+
+
+@tool("viewer_close")
+def viewer_close(url: str = "", path: str = "") -> dict[str, Any]:
+    """Stop a running viewer server by its URL or served path (empty closes
+    all). Returns the number of servers stopped."""
+    stopped = 0
+    for p in list(_VIEWERS):
+        v = _VIEWERS[p]
+        if not url and not path or v["url"] == url or p == str(path):
+            v["httpd"].shutdown()
+            del _VIEWERS[p]
+            stopped += 1
+    return {"ok": True, "stopped": stopped}
+
+
+def _server_version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("gitcad")
+    except Exception:                # noqa: BLE001
+        return "unknown"
+
+
 def main() -> None:  # pragma: no cover - process entrypoint
-    """Serve the registry over MCP (requires the optional ``mcp`` dependency)."""
+    """Run the gitcad MCP server over stdio (requires the optional ``mcp``
+    dependency). Point an MCP client (e.g. Claude Desktop) at this command; it
+    speaks JSON-RPC on stdin/stdout. Handlers that return an ``"image"`` payload
+    are bridged to native ImageContent so the picture renders in the host."""
+    import argparse
+
+    ap = argparse.ArgumentParser(
+        prog="gitcad-mcp",
+        description="gitcad MCP server (stdio JSON-RPC). Configure it in your "
+                    "MCP client rather than running it by hand.")
+    ap.add_argument("--version", action="version",
+                    version=f"gitcad-mcp {_server_version()}")
+    ap.parse_args()                  # handles --help/--version, then falls through
+
     try:
         from mcp.server.fastmcp import FastMCP
+        from mcp.server.fastmcp import Image as _Image
     except Exception as exc:  # pragma: no cover
         raise SystemExit(
             "The MCP server needs the optional dependency. Install with:\n"
@@ -1061,5 +1230,61 @@ def main() -> None:  # pragma: no cover - process entrypoint
 
     server = FastMCP("gitcad")
     for name, fn in REGISTRY.items():
-        server.add_tool(fn, name=name)
+        server.add_tool(_image_bridge(fn, _Image), name=name)
     server.run()
+
+
+import contextlib
+
+
+@contextlib.contextmanager
+def _quiet_native_stdout():
+    """Redirect OS-level stdout (fd 1) to stderr for the duration. Geometry
+    C-libraries (the OCCT import banner, STEP-writer chatter) print to fd 1 and
+    would corrupt the stdio JSON-RPC stream. The MCP result is serialized AFTER
+    the handler returns — once fd 1 is restored — so the protocol stays clean."""
+    import os
+    import sys
+
+    sys.stdout.flush()
+    try:
+        saved = os.dup(1)
+    except (OSError, AttributeError, ValueError):
+        yield                        # no real fd (captured/redirected) — no-op
+        return
+    try:
+        os.dup2(2, 1)
+        yield
+    finally:
+        sys.stdout.flush()
+        os.dup2(saved, 1)
+        os.close(saved)
+
+
+def _image_bridge(fn: Handler, image_cls: Any) -> Handler:
+    """Wrap a handler so (a) any native-library chatter during the call is kept
+    off the JSON-RPC stdout stream, and (b) an ``"image"``/``"images"`` payload
+    in its result becomes native ImageContent (remaining fields as text).
+    Non-image results pass through unchanged."""
+    import base64
+    import functools
+
+    @functools.wraps(fn)
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        with _quiet_native_stdout():
+            r = fn(*args, **kwargs)
+        if not isinstance(r, dict):
+            return r
+        payloads = []
+        if isinstance(r.get("image"), dict):
+            payloads.append(r["image"])
+        if isinstance(r.get("images"), list):
+            payloads += [p for p in r["images"] if isinstance(p, dict)]
+        imgs = [image_cls(data=base64.b64decode(p["png_base64"]), format="png")
+                for p in payloads if p.get("png_base64")]
+        if not imgs:
+            return r
+        meta = {k: v for k, v in r.items() if k not in ("image", "images")}
+        return [*imgs, meta]
+
+    return wrapped

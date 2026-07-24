@@ -53,12 +53,17 @@ PAGE = r"""<!DOCTYPE html>
   .rev .pane{flex:1;min-width:300px;background:#fff;border-radius:4px;padding:6px}
   .rev .pane h4{color:#57606a;margin:0 0 4px;font-size:11px}
   .rev .pane svg{max-width:100%;height:auto;display:block}
+  #drawing{position:fixed;inset:0;display:none;background:#fff}
+  #drawing iframe{width:100%;height:100%;border:0}
+  #drawing .dbar{position:fixed;right:14px;top:10px;display:flex;gap:8px;z-index:6}
+  #drawing .dbar a{color:#0969da;font-size:12px;text-decoration:none;background:#fff;
+                   border:1px solid #d0d7de;border-radius:6px;padding:2px 9px}
   #explodebox{position:fixed;right:12px;top:40px;display:none;align-items:center;
               gap:8px;color:var(--dim);z-index:5}
   #explodebox input{width:140px;accent-color:var(--acc)}
 </style></head><body>
 <canvas id="gl"></canvas><div id="board"></div><div id="sheets"></div>
-<div id="checks"></div><div id="review"></div>
+<div id="checks"></div><div id="review"></div><div id="drawing"></div>
 <div id="tabs"></div>
 <div id="explodebox"><span>explode</span>
   <input id="explodeslider" type="range" min="0" max="100" value="0"></div>
@@ -429,18 +434,28 @@ function renderTabs(){
     checksState.ok ? "checks ✓" : `checks (${checksState.total_violations})`);
   if(reviewState) mk("review",
     reviewState.gate_ok ? "review ✓" : `review (${reviewState.summary.introduced})`);
+  if(drawingAvail) mk("drawing", "drawing");
   if(activeTab === "3d") mk("measure", "measure", "tool");
+}
+function loadDrawing(){
+  const v = version || "";
+  document.getElementById("drawing").innerHTML =
+    `<div class="dbar"><a href="/api/drawing.pdf?v=${v}" target="_blank">open PDF ⤢</a>` +
+    `<a href="/api/drawing.svg?v=${v}" target="_blank">SVG</a></div>` +
+    `<iframe src="/api/drawing.pdf?v=${v}"></iframe>`;
 }
 function showTab(){
   document.getElementById("sheets").style.display = activeTab === "sheets" ? "block" : "none";
   document.getElementById("checks").style.display = activeTab === "checks" ? "block" : "none";
   document.getElementById("review").style.display = activeTab === "review" ? "block" : "none";
+  document.getElementById("drawing").style.display = activeTab === "drawing" ? "block" : "none";
+  if(activeTab === "drawing") loadDrawing();
   const three = activeTab === "3d";
   canvas.style.display = three ? "block" : "none";
   hud.style.display = three ? "block" : "none";
   measureHud.style.display = three ? "block" : "none";
 }
-let checksState = null, reviewState = null;
+let checksState = null, reviewState = null, drawingAvail = false;
 async function loadReview(baseRef){
   if(!baseRef){ reviewState = null; return; }
   try {
@@ -538,6 +553,9 @@ async function poll(){
     if(v.version !== version){
       version = v.version;
       err.textContent = "";
+      drawingAvail = v.kind === "model";
+      if(activeTab === "drawing") loadDrawing();
+      renderTabs();
       if(v.kind === "board" || v.kind === "schematic"){
         const svg = await (await fetch("/api/board.svg")).text();
         document.getElementById("board").innerHTML = svg;
