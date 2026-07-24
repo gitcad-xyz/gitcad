@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "gitcad"
 version = "0.7.7"
-description = "Agent-first, headless, git-native CAD (metapackage: core + mech + ecad + MCP + viewer + release)"
+description = "Headless, git-native B-rep CAD (metapackage: core, mechanical, and electrical)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [{name = "Dan Willis", email = "danielcwillis@gmail.com"}]
-keywords = ["cad", "brep", "occt", "mcp", "agent", "headless", "git", "eda"]
+keywords = ["cad", "brep", "mcp", "headless", "git", "eda"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",

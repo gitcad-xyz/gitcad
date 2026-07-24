@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "gitcad-mech"
 version = "0.7.7"
-description = "gitcad mechanical: document model, exact B-rep kernel, sketches, drawings, mech importers"
+description = "gitcad mechanical: document model, exact B-rep kernel, sketches, drawings, importers"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [{name = "Dan Willis", email = "danielcwillis@gmail.com"}]
-keywords = ["cad", "brep", "kernel", "nurbs", "exact-arithmetic", "sheet-metal", "step", "occt"]
+keywords = ["cad", "brep", "kernel", "nurbs", "exact-arithmetic", "sheet-metal", "step"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",

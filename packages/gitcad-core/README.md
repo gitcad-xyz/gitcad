@@ -1,19 +1,18 @@
 # gitcad-core
 
-Core of [**gitcad**](https://gitcad.xyz) — the agent-first, headless, git-native
-CAD substrate. This package is the dependency-free foundation the mechanical and
-electrical domains build on:
+Core package of gitcad, a headless, git-native B-rep CAD system.
 
-- **Canonical text** — every model serializes to byte-stable, diff-friendly
-  source; geometry is a build artifact, never committed.
-- **Stable identity** — entity and feature ids derive from construction lineage
-  and geometric fingerprint, never from ordinal position.
-- **The Part standard** — one manifest/interface/semver/lockfile model that lets
-  mechanical parts, boards, and assemblies compose across domains.
-- **Report pipeline** — the verification/render loop that turns a build into a
-  reviewable artifact.
+Provides:
 
-Pure Python, no third-party runtime dependencies. Install the full system with
-`pip install gitcad`.
+- Canonical text serialization of models.
+- Entity and feature identity derived from construction lineage and geometric
+  fingerprint.
+- The Part standard: manifest, interface, semantic version, and lockfile,
+  shared by the mechanical and electrical packages.
+- The report pipeline used to verify and render a build.
 
-Apache-2.0 · https://github.com/gitcad-xyz/gitcad
+Pure Python, no third-party runtime dependencies.
+
+Install the full system with `pip install gitcad`.
+
+License: Apache-2.0. Source: https://github.com/gitcad-xyz/gitcad

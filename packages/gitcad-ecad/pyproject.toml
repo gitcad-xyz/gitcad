@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "gitcad-ecad"
 version = "0.7.7"
-description = "gitcad electrical: schematic+ERC, board, DRC, connectivity, fab outputs, KiCad import"
+description = "gitcad electrical: schematic and ERC, board and DRC, connectivity, fabrication outputs"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [{name = "Dan Willis", email = "danielcwillis@gmail.com"}]
-keywords = ["eda", "ecad", "pcb", "schematic", "gerber", "drc", "erc", "kicad", "ipc-2581"]
+keywords = ["eda", "ecad", "pcb", "schematic", "gerber", "drc", "erc", "ipc-2581"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
