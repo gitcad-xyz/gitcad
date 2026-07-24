@@ -288,17 +288,42 @@ class RefKernel:
             out = self._fk.translate(out, *translate)
         return out
 
+    def _via_body(self, op: str, shape, make):
+        """ADR-0021 fallback: run an operation on the canonical B-rep when the
+        representation has no specialised path. Native paths keep priority —
+        this only ever turns a refusal into a result, never the reverse."""
+        from forgekernel import body as B
+
+        try:
+            return make(B.to_body(shape))
+        except (ValueError, AttributeError, TypeError) as exc:
+            _nope(f"{op} on {type(shape).__name__} ({exc})", "K3.7 (canonical B-rep)")
+
     def scale(self, shape, fx: float, fy=None, fz=None):
-        return self._fk.scale(shape, fx, fy, fz)
+        from forgekernel import body as B
+        from forgekernel.brep import Solid
+
+        if isinstance(shape, Solid):
+            return self._fk.scale(shape, fx, fy, fz)
+        fy = fx if fy is None else fy
+        fz = fx if fz is None else fz
+        return self._via_body(
+            "scale", shape, lambda b: b.transformed(B.Affine.scaling(fx, fy, fz)))
 
     def mirror(self, shape, plane: str):
+        from forgekernel import body as B
+        from forgekernel.brep import Solid
+
         axis = {"yz": "x", "xz": "y", "xy": "z"}.get(plane)
         if axis is None:
             raise KernelError(
                 f"mirror plane must be xy|xz|yz, got {plane!r}",
                 FailureSignature(op="mirror", diagnostic="BadInput",
                                  kernel="ref"))
-        return self._fk.mirror(shape, axis)
+        if isinstance(shape, Solid):
+            return self._fk.mirror(shape, axis)
+        return self._via_body(
+            "mirror", shape, lambda b: b.transformed(B.Affine.mirror(axis)))
 
     def boolean(self, op: str, a, b):
         from forgekernel.brep import Solid
@@ -385,6 +410,15 @@ class RefKernel:
     # -- metrics --------------------------------------------------------------
 
     def mass_props(self, shape) -> dict[str, float]:
+        from forgekernel import body as B
+
+        if isinstance(shape, B.Body):
+            # exact volume today; the per-face centroid integrals are the next
+            # canonical-form increment, so report the bbox centre honestly
+            (lo, hi) = B.bbox(shape)
+            c = tuple((lo[i] + hi[i]) / 2 for i in range(3))
+            return _mp(float(B.volume(shape)), c[0], c[1], c[2],
+                       centroid_is_bbox_centre=True)
         from forgekernel.quadric import Cyl, DrilledSolid
         from forgekernel.curve import TubeSolid
 
@@ -414,6 +448,12 @@ class RefKernel:
 
     def measure(self, shape) -> dict[str, float]:
         from forgekernel.quadric import AxisStack, Cone, Sphere
+        from forgekernel import body as B
+
+        if isinstance(shape, B.Body):                 # ADR-0021 canonical form
+            (x0, y0, z0), (x1, y1, z1) = B.bbox(shape)
+            return {"volume": float(B.volume(shape)),
+                    "dx": x1 - x0, "dy": y1 - y0, "dz": z1 - z0}
 
         (x0, y0, z0), (x1, y1, z1) = self.bbox(shape)
         vshape = (AxisStack(shape.cx, shape.cy, [shape])
@@ -427,6 +467,10 @@ class RefKernel:
                 "dz": float(z1 - z0)}
 
     def bbox(self, shape):
+        from forgekernel import body as B
+
+        if isinstance(shape, B.Body):
+            return B.bbox(shape)
         from forgekernel.quadric import AxisStack, Cone, Sphere
         from forgekernel.curve import TubeSolid
 
@@ -555,6 +599,10 @@ class RefKernel:
                                 violations=list(bad))
 
     def tessellate(self, shape, *, deflection: float = 0.2) -> dict[str, list]:
+        from forgekernel import body as B
+
+        if isinstance(shape, B.Body):
+            return B.tessellate(shape, deflection)
         # planar solids mesh exactly; analytic composites mesh to a
         # bounded-error view (deflection = max chord error)
         if hasattr(shape, "tessellate"):
