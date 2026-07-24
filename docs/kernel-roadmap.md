@@ -31,7 +31,8 @@ regenerable — no more discovering fundamentals by accident.
 
 ## Current state
 
-**218/345 (63%) working · 127 honest gaps · 0 crashes.**
+**247/345 (71.6%) working · 98 honest gaps · 0 crashes.**
+(Was 218/345 when this document was written; 236 after ADR-0021 landed.)
 
 Rules this establishes:
 
@@ -49,17 +50,33 @@ Rules this establishes:
 So: measuring, viewing, 2D drawings and mesh export are universal. That is the
 verify/render loop the product is built on, and it is complete.
 
+**A cell being green is not the same as it being right.** Two of these were
+green while returning wrong numbers: `mass_props` substituted the bbox centre
+for a real centroid behind a flag no caller read, and `tessellate` returned
+meshes with hairline cracks whose volume was nonetheless correct. Neither the
+matrix nor the suite can see that — only an oracle that knows the true answer
+can. Pair every coverage push with one.
+
 ## The gaps, in priority order
 
 Priority = (how common the part is) × (how blocking the loss is).
 
-### P1 — rigid transforms on curved/composite solids
-`mirror` and `scale` refuse on every non-planar representation; `rotate` refuses
-on drilled/composite ones. This blocks symmetric parts, mirrored brackets and
-unit changes for anything with a hole — the most common shapes there are.
-*Tractable:* mirror/scale of a `DrilledSolid` is mirror/scale of its base plus
-each bore, all exact. Same for `DisjointUnion` (per member) and `RevolveSolid`
-(profile). Mostly plumbing, little new math.
+### P1 — rigid transforms on curved/composite solids — MOSTLY DONE
+Transforms now route through the canonical B-rep (ADR-0021), which rotates
+exactly for the ℚ[√d] angles. `rotate` went from 14 refusals to 3, and what is
+left is **not a transform problem at all**: it is four missing `Body`
+converters. Every remaining `mirror`/`scale`/`rotate`/`export_step` refusal on
+a curved solid reduces to one of
+
+| missing converter | unlocks (cells) |
+|---|---|
+| `Cone` | mirror, scale, export_step |
+| `RevolveSolid` | rotate ×2, mirror, scale, export_step, entities(edge) |
+| `RoundedBox` (filleted box) | translate, rotate ×2, mirror, scale, export_step, export_stl |
+| `DisjointUnion` with a `DrilledSolid` member | rotate ×2, mirror, scale, export_step |
+
+That is ~22 cells behind four converters — the highest-leverage work left, and
+the O(reps) half of ADR-0021 rather than new mathematics.
 
 ### P2 — booleans on curved operands (K2.2/K2.3)
 `cut box` and `union box` refuse on quadrics; `cut cylinder` refuses on spheres
@@ -81,11 +98,19 @@ already exists in `cylinder_faces()`.
 P1–P3 and do not let it block them.
 
 ### P5 — `export_step`/`export_brep` on the remaining representations
-Drilled solids now export exactly (0.9.5); bare cylinders, revolves, lofts and
-disjoint unions still refuse. *Tractable:* the STEP writer already emits
-`CYLINDRICAL_SURFACE` + `CIRCLE`; a bare `Cyl` is two disks and a wall, and a
-`RevolveSolid` is a lathe of the same primitives. `export_brep` needs the forge
-text format to describe non-planar solids at all.
+STEP is now written **once** against the canonical B-rep
+(`forgekernel.stepbody`), emitting `PLANE`, `CYLINDRICAL_SURFACE` and
+`SPHERICAL_SURFACE` analytically with shared edges. Bare cylinders, bosses and
+spheres export; what still refuses is the same four converters as P1, plus
+`CONICAL_SURFACE`. The acceptance test is a manifold oracle **on the emitted
+file** — every `EDGE_CURVE` used by exactly two faces, in opposite directions
+once `ADVANCED_FACE`'s same_sense flag is folded in. A file that merely opens
+proves nothing; one that fails this will not boolean, mesh for CAM, or import
+as a solid.
+
+`export_brep` (10 refusals) needs the forge text format to describe non-planar
+solids at all — that is a format decision, not a geometry one, and it should
+follow ADR-0004's byte-canonical rule.
 
 ### Deliberately deferred
 - **engrave** — text strokes rotate by arbitrary angles, which leave ℚ[√d]
