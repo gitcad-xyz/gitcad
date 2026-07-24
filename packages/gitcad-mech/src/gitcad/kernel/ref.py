@@ -413,12 +413,12 @@ class RefKernel:
         from forgekernel import body as B
 
         if isinstance(shape, B.Body):
-            # exact volume today; the per-face centroid integrals are the next
-            # canonical-form increment, so report the bbox centre honestly
-            (lo, hi) = B.bbox(shape)
-            c = tuple((lo[i] + hi[i]) / 2 for i in range(3))
-            return _mp(float(B.volume(shape)), c[0], c[1], c[2],
-                       centroid_is_bbox_centre=True)
+            # exact volume, and a real centre of mass from the same per-face
+            # cone decomposition. This used to substitute the BBOX CENTRE and
+            # flag it with a key no caller read — for an L-bracket that is off
+            # by a fifth of the part, reported as fact.
+            cx, cy, cz = B.centroid(shape)
+            return _mp(float(B.volume(shape)), cx, cy, cz)
         from forgekernel.quadric import Cyl, DrilledSolid
         from forgekernel.curve import TubeSolid
 
