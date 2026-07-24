@@ -101,8 +101,11 @@ def make_section_drawing(shape, kernel=None, *, axis: str = "x",
     ax_i = {"x": 0, "y": 1, "z": 2}[axis]
     box = kernel.box(*[pad * 3] * 3)
     shift = [lo[i] - pad for i in range(3)]
-    # Viewer side = +direction: half-space starts at the plane and extends +.
-    shift[ax_i] = offset if direction[ax_i] > 0 else offset - pad * 3
+    # The viewer is on the -direction side (hlr: smaller dot(P,direction) is
+    # nearer). Remove the NEAR half so the cut face is revealed, not occluded:
+    # for +direction axes the near half is coord < offset (tool below the
+    # plane); for -direction axes it is coord > offset (tool above).
+    shift[ax_i] = offset - pad * 3 if direction[ax_i] > 0 else offset
     tool = kernel.transform(box, translate=tuple(shift))
     # Half-space cut-away removes the material between viewer and plane so the
     # projection reveals the interior. Forge can't yet half-space-cut a solid

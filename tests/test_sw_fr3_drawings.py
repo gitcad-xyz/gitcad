@@ -44,6 +44,29 @@ def test_section_through_hole_yields_two_hatched_loops(kern, holed_box):
             assert min(ys) - 1e-6 <= y <= max(ys) + 1e-6
 
 
+def test_section_projects_the_far_half_not_the_near(kern):
+    # L-prism: x in [0,3] is tall (y 0..10); x in [3,10] is short (y 0..3).
+    # Sectioned at x=3 the view must reveal the FAR half (x>=3, the short strip),
+    # not the near/tall half occluding the cut face. The near half would project
+    # ~3x wider than the section outline; the far half matches it.
+    prof = {"start": [0, 0], "segments": [
+        {"kind": "line", "to": [10, 0]}, {"kind": "line", "to": [10, 3]},
+        {"kind": "line", "to": [3, 3]}, {"kind": "line", "to": [3, 10]},
+        {"kind": "line", "to": [0, 10]}, {"kind": "line", "to": [0, 0]}]}
+    from gitcad.drawing.sections import make_section_drawing
+
+    shape = kern.extrude(prof, 5)
+    d = make_section_drawing(shape, kern, axis="x", offset=3)
+    view = next(v for v in d.views if v.name == "section")
+    outline = next(v for v in d.views if v.name == "section-outline")
+    vx = [x for lp in (view.visible + view.hidden) for x, _ in lp]
+    ox = [x for lp in outline.visible for x, _ in lp]
+    assert vx and ox
+    # the projected view must not extend past the section outline in the cut
+    # direction — the tall near half would blow this by ~3x.
+    assert (max(vx) - min(vx)) <= (max(ox) - min(ox)) * 1.2 + 1e-6
+
+
 def test_section_svg_renders_and_labels(kern, holed_box):
     from gitcad.drawing.sections import make_section_drawing
 

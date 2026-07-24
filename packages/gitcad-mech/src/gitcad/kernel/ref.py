@@ -53,27 +53,47 @@ def _edge_length(e) -> float:
     return sum((a[i] - b[i]) ** 2 for i in range(3)) ** 0.5
 
 
+def _poly_area_centroid(verts) -> tuple[list[float], float]:
+    """Exact area and area-centroid of a planar polygon via fan triangulation
+    from ``verts[0]``. (The vertex mean is the centroid only for triangles and
+    parallelograms; forge's ``Polygon.area2()`` is ``4·area²``, so neither is a
+    substitute here.)"""
+    vs = [[float(c) for c in v] for v in verts]
+    if len(vs) < 3:
+        n = len(vs) or 1
+        return [sum(v[i] for v in vs) / n for i in range(3)], 0.0
+    v0 = vs[0]
+    acc, area = [0.0, 0.0, 0.0], 0.0
+    for i in range(1, len(vs) - 1):
+        a = [vs[i][k] - v0[k] for k in range(3)]
+        b = [vs[i + 1][k] - v0[k] for k in range(3)]
+        cr = (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
+              a[0] * b[1] - a[1] * b[0])
+        ta = 0.5 * (cr[0] ** 2 + cr[1] ** 2 + cr[2] ** 2) ** 0.5
+        tc = [(v0[k] + vs[i][k] + vs[i + 1][k]) / 3 for k in range(3)]
+        for k in range(3):
+            acc[k] += tc[k] * ta
+        area += ta
+    if area == 0:
+        n = len(vs)
+        return [sum(v[i] for v in vs) / n for i in range(3)], 0.0
+    return [acc[k] / area for k in range(3)], area
+
+
 def _face_area(frags) -> float:
-    def a2(p):
-        v = p.area2() if callable(getattr(p, "area2", None)) else p.area2
-        return abs(float(v))
-    return sum(a2(p) for p in frags) / 2.0
+    return sum(_poly_area_centroid(p.verts)[1] for p in frags)
 
 
 def _face_centroid(frags) -> list[float]:
-    """Area-weighted centroid of a logical face's convex fragments, for
-    geometry-based face selection."""
+    """Area-weighted centroid of a logical face's fragments (each a true
+    polygon centroid weighted by true area), for geometry-based face selection."""
     acc, tot = [0.0, 0.0, 0.0], 0.0
     for p in frags:
-        vs = [[float(c) for c in v] for v in p.verts]
-        n = len(vs) or 1
-        c = [sum(v[i] for v in vs) / n for i in range(3)]
-        area2 = p.area2() if callable(getattr(p, "area2", None)) else p.area2
-        a = abs(float(area2)) or 1e-9
-        for i in range(3):
-            acc[i] += c[i] * a
+        c, a = _poly_area_centroid(p.verts)
+        for k in range(3):
+            acc[k] += c[k] * a
         tot += a
-    return [acc[i] / tot for i in range(3)] if tot else [0.0, 0.0, 0.0]
+    return [acc[k] / tot for k in range(3)] if tot else [0.0, 0.0, 0.0]
 
 
 class RefKernel:
@@ -275,7 +295,11 @@ class RefKernel:
         (x0, y0, z0), (x1, y1, z1) = self.bbox(shape)
         vshape = (AxisStack(shape.cx, shape.cy, [shape])
                   if isinstance(shape, (Cone, Sphere)) else shape)
-        return {"volume": float(vshape.volume()),
+        vol = vshape.volume()
+        # certified-provenance solids (TubeSolid) report volume as a CInterval;
+        # take its midpoint (no __float__, only to_float()).
+        vol = vol.to_float() if hasattr(vol, "to_float") else float(vol)
+        return {"volume": vol,
                 "dx": float(x1 - x0), "dy": float(y1 - y0),
                 "dz": float(z1 - z0)}
 
