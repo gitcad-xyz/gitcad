@@ -93,9 +93,28 @@ def _content_stream(d: Drawing) -> bytes:
             polyline([(x2 - a, y2 - a / 2), (x2, y2), (x2 - a, y2 + a / 2)], 0.13)
             text((x1 + x2) / 2 - 3, y1 + 1.2, 3.0, dim.text)
 
+    def circle(cx: float, cy: float, r: float) -> None:
+        k = 0.552284749 * r
+        s.append("0.13 w")
+        s.append("[] 0 d")
+        s.append(f"{cx + r:.3f} {cy:.3f} m")
+        s.append(f"{cx + r:.3f} {cy + k:.3f} {cx + k:.3f} {cy + r:.3f} {cx:.3f} {cy + r:.3f} c")
+        s.append(f"{cx - k:.3f} {cy + r:.3f} {cx - r:.3f} {cy + k:.3f} {cx - r:.3f} {cy:.3f} c")
+        s.append(f"{cx - r:.3f} {cy - k:.3f} {cx - k:.3f} {cy - r:.3f} {cx:.3f} {cy - r:.3f} c")
+        s.append(f"{cx + k:.3f} {cy - r:.3f} {cx + r:.3f} {cy - k:.3f} {cx + r:.3f} {cy:.3f} c")
+        s.append("S")
+
     for c in d.callouts:
         polyline([c.anchor, c.label], 0.13)
-        text(c.label[0] + 0.8, c.label[1], 3.0, c.text)
+        if getattr(c, "balloon", False):
+            circle(c.label[0], c.label[1], 2.6)
+            text(c.label[0] - 0.9 * len(c.text), c.label[1] - 1.0, 3.0, c.text)
+        else:
+            text(c.label[0] + 0.8, c.label[1], 3.0, c.text)
+
+    # notes (BOM tables, headers) — previously dropped on the PDF path
+    for nx, ny, value in d.notes:
+        text(nx, ny, 3.0, value)
 
     # Title block (bottom right)
     w, h = 92.0, 20.0

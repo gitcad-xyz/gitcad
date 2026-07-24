@@ -37,10 +37,12 @@ class Dimension:
 
 @dataclass
 class Callout:
-    """A leader annotation: anchor point on geometry, label offset away."""
+    """A leader annotation: anchor point on geometry, label offset away.
+    ``balloon`` renders the text circled — a BOM item balloon."""
     anchor: Point
     label: Point
     text: str
+    balloon: bool = False
 
 
 @dataclass
@@ -144,7 +146,8 @@ def _clip_poly_to_circle(poly, cx: float, cy: float, r: float):
 def make_drawing(shape, kernel=None, *, title: str = "part", sheet: str = "A3",
                  thread_specs: dict | None = None,
                  notes: list | None = None,
-                 details: list | None = None) -> Drawing:
+                 details: list | None = None,
+                 bom: list | None = None) -> Drawing:
     """Project ``shape`` into front/top/right/iso via the kernel's HLR engine,
     lay out third-angle on the sheet, add overall dimensions."""
     if kernel is None:
@@ -238,7 +241,43 @@ def make_drawing(shape, kernel=None, *, title: str = "part", sheet: str = "A3",
         ny = 28.0 + 5.0 * i
         d.callouts.append(Callout((MARGIN + 2.0, ny), (MARGIN + 2.0, ny),
                                   str(note)))
+    if bom:
+        _add_bom(d, bom, placements["front"], bb["front"], scale, w)
     return d
+
+
+def _add_bom(d: Drawing, bom: list, front_origin: Point, front_bounds,
+             scale: float, sheet_w: float) -> None:
+    """BOM table above the title block + numbered balloons on the front view.
+
+    ``bom`` lines come from :func:`gitcad.drawing.bom.model_bom`: item, qty,
+    label, and world-mm anchors. Balloons land on the front view (front u = X,
+    v = Z per :data:`hlr.VIEWS`), so the balloon numbers and the table can
+    never disagree — same list, same order.
+    """
+    fx, fy = front_origin
+    bx0, by0 = front_bounds[0], front_bounds[1]
+
+    max_rows = 14
+    rows = bom[:max_rows]
+    text_rows = ["ITEM QTY  PART"]
+    text_rows += [f"{ln['item']:<4} {ln['qty']:<4} {ln['label']}" for ln in rows]
+    if len(bom) > max_rows:
+        # no silent caps: the drop is written on the drawing itself
+        text_rows.append(f"... {len(bom) - max_rows} more lines not shown")
+    line_h = 3.6
+    x0 = sheet_w - 5.0 - 92.0 + 1.5      # aligned with the title block
+    y_top = 27.0 + line_h * len(text_rows)
+    for i, row in enumerate(text_rows):
+        d.notes.append((x0, y_top - line_h * i, row))
+
+    for ln in bom:
+        for k, (ax, _ay, az) in enumerate(ln.get("anchors", ())[:6]):
+            sx = fx + (ax - bx0) * scale
+            sy = fy + (az - by0) * scale
+            d.callouts.append(Callout(
+                (sx, sy), (sx + 8.0, sy + 8.0 + 3.0 * (k % 3)),
+                str(ln["item"]), balloon=True))
 
 
 def _add_hole_dimensions(d: Drawing, kernel, shape, top_origin: Point,
