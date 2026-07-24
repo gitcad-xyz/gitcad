@@ -68,11 +68,21 @@ machinery.
   ray parity in ℚ returning in / **on** / out — a boundary point is
   reported, never silently bucketed. No tolerance touches the topology
   decision (ADR-0019).
-- ⏳ Trimmed-patch volume via Green's theorem over trim loops, then the
-  boolean assembly. *Hard — the remaining freeform frontier.* Corpus
-  model + OCCT differential (expect to *win* near tangency). Note: the
-  trimmed *surface* measure is not exact while trim curves are polyline-
-  approximated in parameter space — that gap is this bullet, kept honest.
+- **✅ Trimmed-patch volume via Green's theorem** (done). `bsolid.
+  trimmed_patch_flux` reduces (1/3)∮∮_D S·(S_u×S_v) over a polygonal trim
+  region D to contour integrals over the loop edges + a nested exact
+  u-antiderivative — exact ℚ for polynomial patches. Validated three ways:
+  equals the tensor-quadrature `patch_flux` on the full rectangle (two
+  independent exact methods), additive over a triangulation, and holes
+  subtract by orientation. `trimmed_solid_volume` sums it over a closed
+  shell (box = 60 exactly); `TrimmedPatch.flux()` exposes it per face.
+- **✅ Boolean-assembly volume reduction** (done, the volume half). Volume
+  is Σ trimmed-face flux; proven invariant when a face is re-trimmed
+  (split by an added edge) — exactly the operation a boolean performs.
+  *Still open:* the full boolean topology build (classify + stitch the
+  trimmed faces into the result shell), and — the honest caveat — the flux
+  is exact for the given *polygon*, so a curved SSI trim carries the
+  boundary's polyline-discretization error, not a rounding one.
 
 ### K3.7 — the freeform import gap **[K]**
 - Freeform STEP **topology**: trimmed `ADVANCED_FACE` over B-spline
