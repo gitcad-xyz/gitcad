@@ -54,8 +54,12 @@ machinery.
 - **✅ K7.0c — native STEP AP214 export** (done). Full product structure,
   OCCT reads forge's file back exactly. With the K3.4/K3.6 reader, forge
   round-trips STEP with no OCCT in the loop.
-- ⏳ Ordered SSI curve output (chain certified points into parameter-
-  space polylines per branch; Rust marching). *Small.*
+- **✅ Ordered SSI curve output** (done). `ssi.ssi_curves` chains the
+  certified points into one parameter-space polyline **per branch**
+  (branch = connected component of surviving cells in A's domain),
+  ordered by nearest-neighbour with double-sweep endpoint seeding, and
+  flags branches that close on themselves. Points stay exact ℚ; the
+  ordering is a float render/report layer on top.
 - ⏳ Trimmed-patch representation (patch + parameter-space trim loops).
   *Medium.*
 - ⏳ Point-in-trimmed-region classification (exact ray parity). *Small.*
