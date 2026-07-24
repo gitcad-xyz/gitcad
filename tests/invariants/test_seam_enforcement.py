@@ -58,3 +58,18 @@ def test_core_is_self_contained() -> None:
         and _MECH_ECAD_IMPORT.search(p.read_text(encoding="utf-8"))
     ]
     assert offenders == [], f"core imports domain modules: {offenders}"
+
+
+def test_no_operation_crashes_through_the_kernel_seam() -> None:
+    """INVARIANT: every seam op on every representation either works or refuses
+    HONESTLY. A raw exception escaping the seam is always a defect — callers
+    cannot handle it, and it hides a capability gap from the census that drives
+    the roadmap (docs/kernel-roadmap.md). 55 such crashes once hid behind
+    duck-typing on the planar Solid API."""
+    from gitcad.bench.capability import probe
+
+    r = probe()
+    crashes = [(s, o, r["detail"].get((s, o), ""))
+               for s, row in r["grid"].items()
+               for o, v in row.items() if v == "CRASH"]
+    assert crashes == [], f"raw exceptions through the seam: {crashes[:5]}"

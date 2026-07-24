@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gitcad"
-version = "0.9.4"
+version = "0.9.5"
 description = "Headless, git-native B-rep CAD (metapackage: core, mechanical, and electrical)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -26,9 +26,9 @@ classifiers = [
 # compiled kernel (forgekernel_rs) is likewise a default dep of gitcad-mech on
 # mainstream architectures — no extra needed for either.
 dependencies = [
-    "gitcad-core==0.9.4",
-    "gitcad-mech==0.9.4",
-    "gitcad-ecad==0.9.4",
+    "gitcad-core==0.9.5",
+    "gitcad-mech==0.9.5",
+    "gitcad-ecad==0.9.5",
     "mcp>=1.0",
 ]
 

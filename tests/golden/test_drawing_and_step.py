@@ -28,7 +28,6 @@ def test_boolean_volume_is_exact(part) -> None:
     assert k.measure(shape)["volume"] == pytest.approx(expected, rel=1e-6)
 
 
-@pytest.mark.forge_gap
 def test_step_export_is_valid_iso10303(part, tmp_path) -> None:
     k, shape = part
     path = str(tmp_path / "part.step")

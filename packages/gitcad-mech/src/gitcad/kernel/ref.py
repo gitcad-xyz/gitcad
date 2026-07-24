@@ -26,6 +26,57 @@ def _nope(op: str, stage: str):
         FailureSignature(op=op, diagnostic="NotYetImplemented", kernel="ref"))
 
 
+_SEAM_OPS = (
+    "box", "cylinder", "sphere", "cone", "extrude", "revolve", "loft", "sweep",
+    "transform", "scale", "mirror", "boolean", "compound", "mass_props",
+    "measure", "bbox", "entities", "validate", "tessellate", "fillet",
+    "chamfer", "shell", "draft", "helix", "pipe", "hlr_project",
+    "section_polys", "export_step", "export_stl", "export_brep",
+    "import_step", "import_brep",
+)
+
+
+def _guard_seam(cls):
+    """Turn a representation mismatch into an HONEST REFUSAL at the seam.
+
+    Every forge representation (Solid, Cyl, DrilledSolid, RevolveSolid,
+    DisjointUnion, …) implements a different slice of the geometry protocol, and
+    an op written against the planar ``Solid`` API raises a bare
+    ``AttributeError`` when handed a quadric — a raw exception through the seam
+    that no caller can handle and that the capability matrix cannot tell apart
+    from a genuine gap. This wrapper converts those into a stage-named
+    ``NotYetImplemented`` KernelError naming BOTH the op and the representation,
+    so an unsupported combination is reported the same way a deliberate
+    ``_nope`` is.
+
+    It deliberately does NOT swallow anything else: KernelError, ValueError and
+    ArithmeticError keep their existing meanings, so real precondition failures
+    and closure violations still surface untouched.
+    """
+    import functools
+
+    def wrap(name, fn):
+        @functools.wraps(fn)
+        def inner(self, *args, **kwargs):
+            try:
+                return fn(self, *args, **kwargs)
+            except AttributeError as exc:
+                kinds = ", ".join(sorted({type(a).__name__ for a in args
+                                          if hasattr(a, "volume")})) or "shape"
+                raise KernelError(
+                    f"ref kernel does not implement {name} on {kinds} yet "
+                    f"— unsupported representation ({exc})",
+                    FailureSignature(op=name, diagnostic="NotYetImplemented",
+                                     kernel="ref"))
+        return inner
+
+    for name in _SEAM_OPS:
+        fn = getattr(cls, name, None)
+        if callable(fn):
+            setattr(cls, name, wrap(name, fn))
+    return cls
+
+
 def _mp(volume: float, cx: float, cy: float, cz: float, **extra) -> dict[str, Any]:
     """A mass-properties dict with the centroid available both as split
     ``cx/cy/cz`` scalars and as a ``centroid`` tuple (forge does not compute
@@ -120,6 +171,7 @@ def _face_centroid(frags) -> list[float]:
     return [acc[k] / tot for k in range(3)] if tot else [0.0, 0.0, 0.0]
 
 
+@_guard_seam
 class RefKernel:
     """K1: exact planar solids (box, line-profile extrude, quarter-turn
     rigid transforms, mirror, scale, booleans, exact mass properties)."""
@@ -186,15 +238,33 @@ class RefKernel:
 
     # -- transforms -----------------------------------------------------------
 
+    def _translate_any(self, m, t):
+        """Translate one solid whatever its representation: the planar Solid
+        takes a vector, the quadric/composite types take (x, y, z)."""
+        from forgekernel.brep import Solid
+
+        if isinstance(m, Solid):
+            return self._fk.translate(m, *t)
+        return m.translated(*t)
+
     def transform(self, shape, *, translate=(0, 0, 0),
                   rotate_axis=(0, 0, 1), rotate_deg: float = 0.0):
-        from forgekernel.quadric import AxisStack, Cone, Cyl, DrilledSolid, Sphere
+        from forgekernel.quadric import (AxisStack, Cone, Cyl, DisjointUnion,
+                                         DrilledSolid, RevolveSolid, Sphere)
         from forgekernel.curve import TubeSolid
 
-        if isinstance(shape, (TubeSolid, DrilledSolid)):
+        if isinstance(shape, (TubeSolid, DrilledSolid, RevolveSolid)):
+            # these carry their own (x, y, z) translate; the planar path would
+            # hand them a single vector
             if rotate_deg:
-                _nope("transform(rotate a drilled/tube solid)", "K2.2")
+                _nope("transform(rotate a drilled/tube/revolved solid)", "K2.2")
             return shape.translated(*translate)
+        if isinstance(shape, DisjointUnion):
+            # rigid translation of every member — disjointness is preserved
+            if rotate_deg:
+                _nope("transform(rotate a disjoint union)", "K2.3")
+            return DisjointUnion._unchecked(
+                [self._translate_any(m, translate) for m in shape.members])
         if isinstance(shape, (Cyl, Cone, Sphere)):
             if rotate_deg and (tuple(rotate_axis) != (0, 0, 1)):
                 _nope("transform(tilt a quadric)", "K2.2 (general axes)")
@@ -929,15 +999,25 @@ class RefKernel:
         return section_polys(shape, direction, xdir, offset, deflection=deflection)
 
     def export_step(self, shape, path):
-        # K7.0c: native AP214 export of a planar-faced solid — OCCT-free
-        # CAD exchange. Curved solids arrive at K3.7 (freeform topology).
+        # K7.0c: native AP214 export — OCCT-free CAD exchange. Planar solids and
+        # drilled solids (exact CYLINDRICAL_SURFACE bores, not facets) export;
+        # freeform topology arrives at K3.7.
         from forgekernel.brep import Solid
+        from forgekernel.quadric import Cyl, DrilledSolid
         from forgekernel.stepio import write_step_planar_solid
 
-        if not isinstance(shape, Solid):
+        if isinstance(shape, Solid):
+            base, bores = shape, ()
+        elif isinstance(shape, DrilledSolid):
+            base, bores = shape.base, shape.bores
+        elif isinstance(shape, Cyl):
+            # a bare cylinder: the drilled-solid writer needs a planar base, so
+            # a lone quadric has no planar faces to hang the topology on (K2.4)
+            _nope("export_step(bare cylinder)", "K2.4")
+        else:
             _nope("export_step(curved solid)", "K3.7")
         with open(path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(write_step_planar_solid(shape))
+            f.write(write_step_planar_solid(base, bores=bores))
 
     def export_stl(self, shape, path, *, deflection=0.1):
         from forgekernel import io
