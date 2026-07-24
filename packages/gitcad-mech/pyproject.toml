@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gitcad-mech"
-version = "0.9.3"
+version = "0.9.4"
 description = "gitcad mechanical: document model, exact B-rep kernel, sketches, drawings, importers"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,9 +27,9 @@ classifiers = [
 # is skipped only on exotic arches with no wheel — where forge auto-falls-back
 # to pure Python at runtime, so nothing breaks.
 dependencies = [
-    "gitcad-core==0.9.3",
-    "forgekernel>=0.9.2",
-    "forgekernel_rs>=0.9.2; platform_machine in 'x86_64 AMD64 aarch64 arm64'",
+    "gitcad-core==0.9.4",
+    "forgekernel>=0.9.4",
+    "forgekernel_rs>=0.9.4; platform_machine in 'x86_64 AMD64 aarch64 arm64'",
 ]
 
 [project.urls]
