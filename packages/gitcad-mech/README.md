@@ -16,8 +16,7 @@ model and geometry kernels.
 - **Importers** — STEP, FCStd (parametric tree), with verified feature recovery.
 
 ```bash
-pip install gitcad-mech          # exact forge kernel included
-pip install gitcad-mech[fast]    # + native forgekernel_rs accelerator (compiled)
+pip install gitcad-mech          # exact kernel + native accelerator (default where a wheel exists)
 pip install gitcad-mech[occt]    # + OCCT oracle/fallback (cadquery-ocp)
 ```
 

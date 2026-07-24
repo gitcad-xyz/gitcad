@@ -25,8 +25,8 @@ classifiers = [
 dependencies = ["gitcad-core==0.3.0", "gitcad-mech==0.3.0", "gitcad-ecad==0.3.0"]
 
 [project.optional-dependencies]
-# Native compiled accelerator (forgekernel_rs wheel) for the exact kernel.
-fast = ["gitcad-mech[fast]==0.3.0"]
+# The compiled kernel (forgekernel_rs) is a DEFAULT dependency of gitcad-mech
+# on mainstream architectures — no extra needed.
 # OCCT oracle/fallback kernel.
 occt = ["gitcad-mech[occt]==0.3.0"]
 # Model Context Protocol server for agent hosts.

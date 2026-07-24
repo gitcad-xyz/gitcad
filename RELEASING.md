@@ -10,9 +10,11 @@ Four distributions ship from `packages/`, all built with hatchling, released in
 | `gitcad-ecad` | schematic / board / DRC / fab | `gitcad-core` |
 | `gitcad` | metapackage (installs all three) | the three above |
 
-Extras: `gitcad[fast]` → `forgekernel_rs` (compiled kernel), `gitcad[occt]` →
-`cadquery-ocp`, `gitcad[mcp]` → the MCP server. `pip install gitcad` gives the
-**exact** pure-Python kernel out of the box; `[fast]` adds the native speed.
+The compiled kernel `forgekernel_rs` is a **default** dependency of `gitcad-mech`
+(via a `platform_machine` marker) on mainstream architectures — `pip install
+gitcad` gets the exact kernel *with* native speed out of the box, falling back to
+pure-Python only where no wheel exists. Extras: `gitcad[occt]` → `cadquery-ocp`,
+`gitcad[mcp]` → the MCP server.
 
 ## Version lockstep
 

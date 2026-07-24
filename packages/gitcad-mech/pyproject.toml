@@ -21,12 +21,18 @@ classifiers = [
     "Topic :: Scientific/Engineering",
     "Topic :: Multimedia :: Graphics :: 3D Modeling",
 ]
-# The exact forge kernel is the default backend (pure Python, lightweight).
-dependencies = ["gitcad-core==0.3.0", "forgekernel>=0.1.0"]
+# The exact forge kernel is the default backend. forgekernel (pure Python) is
+# the always-present floor; the native forgekernel_rs accelerator installs BY
+# DEFAULT on mainstream architectures (identical results, faster hot paths) and
+# is skipped only on exotic arches with no wheel — where forge auto-falls-back
+# to pure Python at runtime, so nothing breaks.
+dependencies = [
+    "gitcad-core==0.3.0",
+    "forgekernel>=0.1.0",
+    "forgekernel_rs>=0.1.0; platform_machine in 'x86_64 AMD64 aarch64 arm64'",
+]
 
 [project.optional-dependencies]
-# Native compiled accelerator for the exact kernel's hot paths (same results).
-fast = ["forgekernel[rust]>=0.1.0"]
 # OCCT independent oracle / fallback kernel.
 occt = ["cadquery-ocp>=7.7"]
 

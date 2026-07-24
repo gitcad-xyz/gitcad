@@ -18,8 +18,7 @@ This metapackage installs the whole system:
 ## Install
 
 ```bash
-pip install gitcad           # full system; exact forge kernel included (pure Python)
-pip install gitcad[fast]     # + native compiled accelerator (forgekernel_rs wheel)
+pip install gitcad           # full system; exact kernel + native accelerator (default)
 pip install gitcad[occt]     # + OCCT kernel oracle/fallback (cadquery-ocp)
 pip install gitcad[mcp]      # + Model Context Protocol server for agents
 ```
@@ -28,8 +27,9 @@ The mechanical kernel is **exact**: topological decisions are made in rational
 arithmetic (ℚ), never by a floating-point tolerance — see
 [`forgekernel`](https://pypi.org/project/forgekernel/) and the
 [benchmarks vs OCCT](https://github.com/gitcad-xyz/gitcad/blob/main/bench/RUST-vs-OCCT.md).
-`[fast]` adds the compiled Rust build of the hot paths; results are identical, only
-faster.
+The compiled Rust build of the hot paths installs **by default** on mainstream
+platforms (identical results, only faster); on an architecture with no wheel it is
+skipped and the kernel runs pure-Python — same answers, nothing breaks.
 
 ## Console tools
 
