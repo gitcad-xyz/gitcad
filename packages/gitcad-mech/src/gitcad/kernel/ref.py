@@ -732,8 +732,12 @@ class RefKernel:
             raise KernelError(str(exc), FailureSignature(
                 op="pipe", diagnostic="NotYetImplemented", kernel="ref"))
 
-    def hlr_project(self, shape, direction, up=None):
-        _nope("hlr_project", _K2)
+    def hlr_project(self, shape, direction, xdir, *, deflection=0.05):
+        # ADR-0020: native forge hidden-line removal — visibility is a display
+        # property (floats legal), the geometry drawn is the exact solid.
+        from forgekernel.hlr import hidden_line
+
+        return hidden_line(shape, direction, xdir, deflection=deflection)
 
     def export_step(self, shape, path):
         # K7.0c: native AP214 export of a planar-faced solid — OCCT-free

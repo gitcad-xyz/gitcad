@@ -153,7 +153,7 @@ def make_drawing(shape, kernel=None, *, title: str = "part", sheet: str = "A3",
     if kernel is None:
         from gitcad.kernel import get_kernel
 
-        kernel = get_kernel(require="occt")
+        kernel = get_kernel()          # forge HLR (ADR-0020) — no OCCT needed
     w, h = SHEETS[sheet]
 
     proj = {v: hlr.project(kernel, shape, v) for v in ("front", "top", "right", "iso")}

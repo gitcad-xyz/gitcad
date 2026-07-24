@@ -269,10 +269,7 @@ def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3",
     doc = Document.loads(model)
     if not len(doc):
         raise ValueError("model has no features")
-    # 2D drawings do hidden-line removal, which is OCCT-backed today; forge has
-    # no HLR yet (a native forge HLR is the chosen replacement — until it lands
-    # this path needs OCCT even though the default kernel is now forge).
-    kernel = get_kernel(require="occt")
+    kernel = get_kernel()              # forge HLR (ADR-0020)
     # thread specs on hole features surface in the hole callouts (SW-map P5);
     # positions resolve through the parameter table like the build does
     from gitcad.expr import resolve_value

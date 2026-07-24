@@ -420,13 +420,9 @@ class _Handler(BaseHTTPRequestHandler):
                 from gitcad.drawing import make_drawing
                 from gitcad.kernel import get_kernel
 
-                # HLR is OCCT-backed today (forge HLR is the chosen replacement);
-                # build the drawing shape with OCCT regardless of the viewer's
-                # default (forge) kernel.
-                dk = get_kernel(require="occt")
                 doc = resolve_import_paths(Document.loads(text),
                                            self.path_watched.parent)
-                d = make_drawing(doc.build(dk).final(doc),
+                d = make_drawing(doc.build(self.kernel).final(doc),
                                  title=self.path_watched.stem,
                                  notes=doc.tolerance_notes())
                 if self.path.startswith("/api/drawing.pdf"):
