@@ -18,10 +18,13 @@ This metapackage installs the whole system:
 ## Install
 
 ```bash
-pip install gitcad           # full system; exact kernel + native accelerator (default)
+pip install gitcad           # full system: both domains, exact+native kernel, MCP server
 pip install gitcad[occt]     # + OCCT kernel oracle/fallback (cadquery-ocp)
-pip install gitcad[mcp]      # + Model Context Protocol server for agents
 ```
+
+`pip install gitcad` is complete and agent-ready out of the box — mechanical and
+electrical, the exact kernel with its native accelerator, and the `gitcad-mcp`
+Model Context Protocol server. Only OCCT (a heavy optional oracle) is an extra.
 
 The mechanical kernel is **exact**: topological decisions are made in rational
 arithmetic (ℚ), never by a floating-point tolerance — see
