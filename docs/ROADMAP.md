@@ -60,12 +60,19 @@ machinery.
   ordered by nearest-neighbour with double-sweep endpoint seeding, and
   flags branches that close on themselves. Points stay exact ℚ; the
   ordering is a float render/report layer on top.
-- ⏳ Trimmed-patch representation (patch + parameter-space trim loops).
-  *Medium.*
-- ⏳ Point-in-trimmed-region classification (exact ray parity). *Small.*
+- **✅ Trimmed-patch representation** (done). `trim.TrimmedPatch` =
+  surface + parameter-space trim loops (outer + holes), with exact
+  signed/unsigned parameter-domain area (shoelace in ℚ), winding
+  normalization (outer CCW, holes CW), and structural validation.
+- **✅ Point-in-trimmed-region classification** (done). Exact even-odd
+  ray parity in ℚ returning in / **on** / out — a boundary point is
+  reported, never silently bucketed. No tolerance touches the topology
+  decision (ADR-0019).
 - ⏳ Trimmed-patch volume via Green's theorem over trim loops, then the
   boolean assembly. *Hard — the remaining freeform frontier.* Corpus
-  model + OCCT differential (expect to *win* near tangency).
+  model + OCCT differential (expect to *win* near tangency). Note: the
+  trimmed *surface* measure is not exact while trim curves are polyline-
+  approximated in parameter space — that gap is this bullet, kept honest.
 
 ### K3.7 — the freeform import gap **[K]**
 - Freeform STEP **topology**: trimmed `ADVANCED_FACE` over B-spline
