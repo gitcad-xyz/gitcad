@@ -56,6 +56,61 @@ def model_new() -> dict[str, Any]:
     return {"model": Document().dumps()}
 
 
+_DESIGN_EXTS = {".model": "model", ".gitcad": "assembly", ".sch": "schematic",
+                ".board": "board", ".pcba": "pcba", ".part": "part",
+                ".reqs": "requirements"}
+
+
+@tool("get_started")
+def get_started(cwd: str = ".") -> dict[str, Any]:
+    """CALL THIS FIRST at the start of a session. Onboards the user: scans the
+    working directory for existing gitcad designs and returns the recommended
+    next steps — initialize a project if there is none, and open the interactive
+    GUI (viewer_open) so the user can see the 3D model, drawings, checks, and
+    review tabs. Returns a ready-to-build starter model too."""
+    from pathlib import Path
+
+    root = Path(cwd)
+    found: list[dict[str, str]] = []
+    try:
+        for p in sorted(root.rglob("*")):
+            if (p.suffix in _DESIGN_EXTS and p.is_file()
+                    and "__pycache__" not in p.parts and ".git" not in p.parts):
+                found.append({"path": str(p), "kind": _DESIGN_EXTS[p.suffix]})
+                if len(found) >= 50:
+                    break
+    except OSError:
+        pass
+
+    gui = ("The GUI is a local web app (viewer_open returns a http://127.0.0.1 "
+           "URL). Most MCP hosts can open it, or the user opens it in a browser. "
+           "It has tabs for the 3D model, 2D drawings (PDF/SVG), checks/DRC, the "
+           "schematic, and PR review — the human-facing side of the headless kernel.")
+
+    if found:
+        steps = [
+            f"Found {len(found)} design(s) here. Open one in the GUI: "
+            "viewer_open(path='<one of designs_found>').",
+            "Then iterate: add features / edit, and the GUI live-reloads.",
+            "Verify with the check tools and export (STEP/STL/drawings/Gerbers).",
+        ]
+    else:
+        steps = [
+            "No gitcad design found here — offer to start one.",
+            "Mechanical: model_new -> feature_add (box, hole, extrude, fillet, ...) "
+            "-> viewer_open to see it live.",
+            "Electronics: author a schematic/board, or board_import / schematic_import "
+            "an existing KiCad design.",
+            "Import existing CAD: model_import a STEP file (planar solids come in exact).",
+            "Whatever you make, call viewer_open early so the user watches it take shape.",
+        ]
+    return {"has_project": bool(found), "designs_found": found,
+            "recommended_next_steps": steps, "open_the_gui": gui,
+            "starter_model": Document().dumps(),
+            "tip": "Proactively offer to initialize a project and open the GUI — "
+                   "do not wait to be asked."}
+
+
 @tool("sheetmetal_author")
 def sheetmetal_author(spec: dict[str, Any]) -> dict[str, Any]:
     """Sheet metal (SW-map P3) — the mech Gerber. ``spec`` declares the
@@ -1358,11 +1413,30 @@ def main() -> None:  # pragma: no cover - process entrypoint
             f"(import error: {exc!r})"
         )
 
-    server = FastMCP("gitcad")
+    server = FastMCP("gitcad", instructions=_SERVER_INSTRUCTIONS)
     for name, fn in REGISTRY.items():
         server.add_tool(_image_bridge(fn, _Image), name=name)
     _start_update_watch()            # periodic PyPI update check (surfaced on stderr)
     server.run()
+
+
+_SERVER_INSTRUCTIONS = (
+    "gitcad — agent-first, git-native, headless B-rep CAD (mechanical + "
+    "electronic). Real exact-arithmetic geometry, associative 2D drawings, and a "
+    "verify/render loop, all as plain text you can commit.\n\n"
+    "START HERE every session: call the `get_started` tool first. It scans the "
+    "working directory for existing designs and returns the next steps. Then "
+    "PROACTIVELY — without waiting to be asked — offer to (1) initialize a project "
+    "(model_new for mechanical; a board/schematic or *_import for electronics) and "
+    "(2) open the interactive GUI with `viewer_open`, sharing the returned "
+    "http://127.0.0.1 URL (most MCP hosts can open it; otherwise the user opens it "
+    "in a browser). Call viewer_open early and keep it open so the user watches "
+    "the design take shape — the GUI has tabs for the 3D model, 2D drawings, "
+    "checks/DRC, schematic, and PR review, and it live-reloads as you edit.\n\n"
+    "Everything is verifiable: build, then check (interference, DRC/ERC, "
+    "requirements) and export (STEP/STL/drawings/Gerbers). Prefer showing results "
+    "in the GUI over describing them."
+)
 
 
 import contextlib

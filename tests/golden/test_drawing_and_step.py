@@ -1,6 +1,7 @@
 """GOLDEN: mechanical manufacturing outputs — STEP export and drawings.
 
-All OCCT-backed; skipped when the kernel isn't installed.
+Forge-native. STEP export of a curved/drilled solid and non-planar fillets are
+forge_gap (K3.7 / K5.2); STL, HLR, and the drawing render forge-native.
 """
 
 from __future__ import annotations
@@ -37,7 +38,6 @@ def test_step_export_is_valid_iso10303(part, tmp_path) -> None:
     assert "END-ISO-10303-21;" in text
 
 
-@pytest.mark.forge_gap
 def test_stl_export_writes_mesh(part, tmp_path) -> None:
     k, shape = part
     path = str(tmp_path / "part.stl")

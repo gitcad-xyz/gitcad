@@ -34,21 +34,29 @@ def test_board_svg_renders_all_elements() -> None:
     assert board_to_svg(_board()) == svg  # deterministic
 
 
-@pytest.mark.forge_gap
 def test_tessellation_produces_valid_mesh() -> None:
     from gitcad.kernel.ref import RefKernel
 
     k = RefKernel()
+    # a drilled plate — the most common part; must mesh watertight around the hole
     shape = k.boolean("cut", k.box(60, 40, 8),
                       k.transform(k.cylinder(3.2, 8), translate=(15, 20, 0)))
-    mesh = k.tessellate(shape)
-    n_verts = len(mesh["positions"]) // 3
-    assert n_verts > 8 and len(mesh["indices"]) % 3 == 0
-    assert max(mesh["indices"]) < n_verts   # indices in range
-    xs = mesh["positions"][0::3]
-    zs = mesh["positions"][2::3]
+    mesh = k.tessellate(shape)                 # forge seam: {vertices, triangles}
+    verts, tris = mesh["vertices"], mesh["triangles"]
+    n_verts = len(verts)
+    assert n_verts > 8 and all(len(t) == 3 for t in tris)
+    assert max(i for t in tris for i in t) < n_verts   # indices in range
+    xs = [v[0] for v in verts]
+    zs = [v[2] for v in verts]
     assert min(xs) == pytest.approx(0, abs=1e-3) and max(xs) == pytest.approx(60, abs=1e-3)
     assert max(zs) == pytest.approx(8, abs=1e-3)
+    # watertight: every edge shared by exactly two triangles
+    from collections import defaultdict
+    ec = defaultdict(int)
+    for a, b, c in tris:
+        for e in ((a, b), (b, c), (c, a)):
+            ec[tuple(sorted(e))] += 1
+    assert all(n == 2 for n in ec.values())
 
 
 def test_server_serves_page_version_and_mesh(tmp_path) -> None:

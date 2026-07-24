@@ -117,3 +117,19 @@ def test_drawing_endpoint_404_for_non_model() -> None:
         assert e.value.code == 404
     finally:
         S.REGISTRY["viewer_close"](url=r["url"])
+
+
+def test_get_started_onboards_with_next_steps(tmp_path) -> None:
+    # empty dir: should report no project and push init + GUI
+    r = S.REGISTRY["get_started"](cwd=str(tmp_path))
+    assert r["has_project"] is False and r["designs_found"] == []
+    assert r["starter_model"]                       # a ready-to-build model
+    joined = " ".join(r["recommended_next_steps"]) + r["open_the_gui"]
+    assert "viewer_open" in joined and "model_new" in joined
+
+    # a dir with a design: should find it and point at the GUI
+    (tmp_path / "part.model").write_text(r["starter_model"], encoding="utf-8")
+    r2 = S.REGISTRY["get_started"](cwd=str(tmp_path))
+    assert r2["has_project"] is True
+    assert any(d["kind"] == "model" for d in r2["designs_found"])
+    assert "viewer_open" in " ".join(r2["recommended_next_steps"])
