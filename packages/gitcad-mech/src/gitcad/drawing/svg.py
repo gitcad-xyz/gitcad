@@ -48,8 +48,15 @@ def render_svg(d: Drawing) -> str:
     for c in d.callouts:
         out.append(f'<line class="d" x1="{c.anchor[0]:.2f}" y1="{y(c.anchor[1]):.2f}" '
                    f'x2="{c.label[0]:.2f}" y2="{y(c.label[1]):.2f}"/>')
-        out.append(f'<text class="t" x="{c.label[0] + 0.8:.2f}" y="{y(c.label[1]):.2f}">'
-                   f'{escape(c.text)}</text>')
+        if getattr(c, "balloon", False):
+            # BOM balloon: the item number circled, opaque over geometry
+            out.append(f'<circle class="d" cx="{c.label[0]:.2f}" cy="{y(c.label[1]):.2f}" '
+                       f'r="2.6" fill="white"/>')
+            out.append(f'<text class="t" x="{c.label[0]:.2f}" y="{y(c.label[1]) + 1.1:.2f}" '
+                       f'text-anchor="middle">{escape(c.text)}</text>')
+        else:
+            out.append(f'<text class="t" x="{c.label[0] + 0.8:.2f}" y="{y(c.label[1]):.2f}">'
+                       f'{escape(c.text)}</text>')
 
     for nx, ny, text in d.notes:
         out.append(f'<text class="t" x="{nx:.2f}" y="{y(ny):.2f}" '

@@ -257,9 +257,13 @@ def model_export(model: str, path: str, fmt: str = "step") -> dict[str, Any]:
 
 @tool("model_drawing")
 def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3",
-                  details: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                  details: list[dict[str, Any]] | None = None,
+                  bom: bool = True) -> dict[str, Any]:
     """Build the model and emit a dimensioned 2D drawing (SVG or PDF by file
-    extension) of the final feature — front/top/right/iso, third angle."""
+    extension) of the final feature — front/top/right/iso, third angle. By
+    default the sheet carries a BOM table (derived from the model's union tree)
+    with numbered part balloons on the front view; ``bom=False`` suppresses it
+    (e.g. a one-piece sheet-metal solid)."""
     from gitcad.drawing import make_drawing
 
     doc = Document.loads(model)
@@ -290,9 +294,20 @@ def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3",
         if parts:
             rp = resolve_value(f.params, env)
             threads[(round(float(rp["x"]), 3), round(float(rp["y"]), 3))] = " ".join(parts)
-    d = make_drawing(doc.build(kernel).final(doc), title=title, sheet=sheet,
+    built = doc.build(kernel)
+    bom_lines = None
+    if bom:
+        from gitcad.drawing.bom import model_bom
+
+        # a BOM failure degrades to a BOM-less (but correct) drawing — same
+        # contract as the derived hole dimensions
+        try:
+            bom_lines = model_bom(doc, built, kernel)
+        except Exception:            # noqa: BLE001
+            bom_lines = None
+    d = make_drawing(built.final(doc), title=title, sheet=sheet,
                      thread_specs=threads, notes=doc.tolerance_notes(),
-                     details=details)
+                     details=details, bom=bom_lines)
     svg = d.to_svg()
     if path.lower().endswith(".pdf"):
         with open(path, "wb") as f:
@@ -303,7 +318,9 @@ def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3",
         with open(path, "w", newline="\n", encoding="utf-8") as f:
             f.write(svg)
     result = {"path": path, "scale": d.scale, "sheet": d.sheet,
-              "views": [v.name for v in d.views]}
+              "views": [v.name for v in d.views],
+              "bom": [{k: ln[k] for k in ("item", "qty", "label")}
+                      for ln in bom_lines] if bom_lines else []}
     png = _svg_to_png_b64(svg)               # inline preview when a browser exists
     if png:
         result["image"] = {"png_base64": png, "mime": "image/png"}
