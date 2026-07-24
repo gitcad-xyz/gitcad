@@ -75,16 +75,15 @@ def test_model_to_part_derives_envelope_from_geometry() -> None:
     assert "boss_1" in p.interface.ports
 
 
-@pytest.mark.occt
 def test_model_to_part_envelope_matches_occt_geometry() -> None:
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
     doc = Document()
     b = doc.add(Feature(op="box", params={"dx": 60, "dy": 40, "dz": 8}))
     c = doc.add(Feature(op="cylinder", params={"radius": 3.2, "height": 8}))
     m = doc.add(Feature(op="move", params={"translate": [15, 20, 0]}, inputs=[c]))
     doc.add(Feature(op="boolean", params={"kind": "cut"}, inputs=[b, m]))
-    p = model_to_part(doc, OcctKernel(), part_id="prt_0000000000000003", name="plate")
+    p = model_to_part(doc, RefKernel(), part_id="prt_0000000000000003", name="plate")
     env = p.interface.envelope
     assert env["dx"] == pytest.approx(60, abs=1e-4)
     assert env["dy"] == pytest.approx(40, abs=1e-4)

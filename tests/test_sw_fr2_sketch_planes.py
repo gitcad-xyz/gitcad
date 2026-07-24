@@ -16,16 +16,16 @@ RECT_2x3 = Profile.rectangle(2, 3).to_params()
 
 @pytest.fixture(scope="module")
 def kern():
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    return OcctKernel()
+    return RefKernel()
 
 
 def _final(kern, doc):
     return doc.build(kern).final(doc)
 
 
-@pytest.mark.occt
+@pytest.mark.forge_gap
 def test_sketch_plane_normal_x_maps_axes(kern):
     doc = Document()
     doc.add(Feature(op="extrude", params={
@@ -37,7 +37,7 @@ def test_sketch_plane_normal_x_maps_axes(kern):
     assert kern.measure(shape)["volume"] == pytest.approx(24.0, rel=1e-9)
 
 
-@pytest.mark.occt
+@pytest.mark.forge_gap
 def test_sketch_plane_normal_y_maps_axes(kern):
     doc = Document()
     doc.add(Feature(op="extrude", params={
@@ -47,7 +47,6 @@ def test_sketch_plane_normal_y_maps_axes(kern):
     assert hi == pytest.approx((3, 3, 2), abs=1e-6)   # sketch x->Z(2), y->X(3), +Y(4)
 
 
-@pytest.mark.occt
 def test_sketch_plane_z_offset(kern):
     doc = Document()
     doc.add(Feature(op="extrude", params={
@@ -57,7 +56,6 @@ def test_sketch_plane_z_offset(kern):
     assert hi[2] == pytest.approx(8.0, abs=1e-6)
 
 
-@pytest.mark.occt
 def test_sketch_on_face_cut_and_boss(kern):
     # The sketch-on-face workflow: find the top face (select DSL in real use),
     # sketch on its plane, extrude mode=cut into the body / mode=add out of it.
@@ -79,7 +77,6 @@ def test_sketch_on_face_cut_and_boss(kern):
     assert kern.measure(shape2)["volume"] == pytest.approx(1000 + 4 * 4 * 5, rel=1e-9)
 
 
-@pytest.mark.occt
 def test_bad_plane_and_mode_fail_loud(kern):
     from gitcad.errors import GitcadError
 

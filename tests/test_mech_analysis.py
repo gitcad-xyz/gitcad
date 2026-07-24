@@ -17,22 +17,6 @@ def test_inertia_is_exact_for_forge_solids() -> None:
     assert sorted(round(m, 3) for m in inf["principal_moments"]) == [150.0, 270.0, 312.0]
 
 
-@pytest.mark.occt
-def test_inertia_matches_occt_exactly_on_L_prism() -> None:
-    from gitcad.kernel.occt import OcctKernel
-
-    prof = {"start": [0, 0], "segments": [
-        {"kind": "line", "to": [40, 0]}, {"kind": "line", "to": [40, 10]},
-        {"kind": "line", "to": [10, 10]}, {"kind": "line", "to": [10, 30]},
-        {"kind": "line", "to": [0, 30]}, {"kind": "line", "to": [0, 0]}]}
-    ir = inertia(RefKernel(), RefKernel().extrude(prof, 8))
-    io = inertia(OcctKernel(), OcctKernel().extrude(prof, 8))
-    assert ir["exact"] and not io["exact"]
-    for i in range(3):
-        for j in range(3):
-            assert abs(ir["inertia"][i][j] - io["inertia"][i][j]) < 1e-6
-
-
 def test_draft_analysis_flags_vertical_walls() -> None:
     k = RefKernel()
     # a plain box: 4 vertical walls have zero draft under +z pull

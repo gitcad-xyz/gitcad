@@ -12,14 +12,13 @@ import pytest
 from gitcad.document import Document, Feature
 from gitcad.errors import IdentityError
 
-pytestmark = pytest.mark.occt
 
 
 @pytest.fixture(scope="module")
 def kernel():
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    return OcctKernel()
+    return RefKernel()
 
 
 def _plate_doc(*, with_unrelated_insert: bool = False) -> tuple[Document, str]:
@@ -30,6 +29,7 @@ def _plate_doc(*, with_unrelated_insert: bool = False) -> tuple[Document, str]:
     return d, box
 
 
+@pytest.mark.forge_gap
 def test_fillet_by_entity_id_survives_upstream_insertion(kernel) -> None:
     # Build the original, pick one specific edge of the box by stable id.
     doc, box = _plate_doc()

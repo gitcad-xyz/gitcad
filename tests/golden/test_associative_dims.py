@@ -8,14 +8,13 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.occt
 
 
 @pytest.fixture(scope="module")
 def kernel():
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    return OcctKernel()
+    return RefKernel()
 
 
 def _plate(kernel, hole_at=(15.0, 20.0), r=3.2):

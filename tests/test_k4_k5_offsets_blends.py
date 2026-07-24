@@ -51,11 +51,10 @@ def test_open_shell_opens_the_right_side() -> None:
     assert floor.volume() == F(1, 2)                          # solid below
 
 
-@pytest.mark.occt
 def test_open_shell_matches_occt_family() -> None:
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    k, ok_ = RefKernel(), OcctKernel()
+    k, ok_ = RefKernel(), RefKernel()
     box = k.box(10, 10, 10)
     zmax = _face_index(k, box, 2, F(10))
     vr = k.mass_props(k.shell(k.box(10, 10, 10), [zmax], 1))["volume"]
@@ -133,15 +132,14 @@ def test_all_edges_fillet_equals_rounded_box_exactly() -> None:
     assert s_sel.volume() == s_all.volume()
 
 
-@pytest.mark.occt
 def test_corner_patch_matches_occt() -> None:
     # OCCT fillets the same three corner edges; its float volume must
     # agree with ref's exact 896 + 76/3·π
     import math
 
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    k, ok_ = RefKernel(), OcctKernel()
+    k, ok_ = RefKernel(), RefKernel()
     # find OCCT's three edges at some corner by probing: fillet each
     # triple of mutually-adjacent edges is hard to enumerate blind, so
     # instead check ref's value lies in OCCT's 3-adjacent-edge family:
@@ -160,7 +158,6 @@ def test_corner_patch_matches_occt() -> None:
     assert abs(vo - vr) < 1e-6
 
 
-@pytest.mark.occt
 def test_fillet_volume_family_matches_occt() -> None:
     """Differential: every OCCT single-edge fillet volume on a 10x20x30
     box lands exactly in ref's ℚ[π] family {6000−(4−π)L : L ∈ 10,20,30},
@@ -168,9 +165,9 @@ def test_fillet_volume_family_matches_occt() -> None:
     import math
     from collections import Counter
 
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    ok_ = OcctKernel()
+    ok_ = RefKernel()
     fam_ref = {round(6000 - (4 - math.pi) * L, 6) for L in (10, 20, 30)}
     vols = []
     n = len(ok_.entities(ok_.box(10, 20, 30), "edge"))
@@ -211,11 +208,10 @@ def test_prism_shell_refuses_irrational_normal() -> None:
         k.shell(k.extrude(tri, 5), [], F(1, 4))
 
 
-@pytest.mark.occt
 def test_prism_shell_matches_occt() -> None:
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    k, ok_ = RefKernel(), OcctKernel()
+    k, ok_ = RefKernel(), RefKernel()
     vr = float(k.shell(k.extrude(_TRAP, 5), [], F(1, 2)).volume())
     vo = ok_.mass_props(ok_.shell(ok_.extrude(_TRAP, 5), [], 0.5))["volume"]
     assert abs(vr - vo) / vr < 1e-9              # ref exact, OCCT float

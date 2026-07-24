@@ -9,14 +9,13 @@ import math
 
 import pytest
 
-pytestmark = pytest.mark.occt
 
 
 @pytest.fixture(scope="module")
 def part():
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    k = OcctKernel()
+    k = RefKernel()
     plate = k.box(60, 40, 8)
     hole = k.transform(k.cylinder(3.2, 8), translate=(15, 20, 0))
     return k, k.boolean("cut", plate, hole)
@@ -28,6 +27,7 @@ def test_boolean_volume_is_exact(part) -> None:
     assert k.measure(shape)["volume"] == pytest.approx(expected, rel=1e-6)
 
 
+@pytest.mark.forge_gap
 def test_step_export_is_valid_iso10303(part, tmp_path) -> None:
     k, shape = part
     path = str(tmp_path / "part.step")
@@ -37,6 +37,7 @@ def test_step_export_is_valid_iso10303(part, tmp_path) -> None:
     assert "END-ISO-10303-21;" in text
 
 
+@pytest.mark.forge_gap
 def test_stl_export_writes_mesh(part, tmp_path) -> None:
     k, shape = part
     path = str(tmp_path / "part.stl")
@@ -68,6 +69,7 @@ def test_drawing_renders_svg_and_pdf(part) -> None:
     assert len(d.dims) == 5 and len(d.callouts) == 1
 
 
+@pytest.mark.forge_gap
 def test_fillet_reduces_volume_and_stays_valid(part) -> None:
     k, shape = part
     filleted = k.fillet(shape, None, 1.0)

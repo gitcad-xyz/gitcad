@@ -106,13 +106,12 @@ def test_folded_solid_builds_as_ordinary_document() -> None:
     assert any(f.op == "hole" for f in doc.features)
 
 
-@pytest.mark.occt
 def test_folded_volume_is_sane() -> None:
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
     sm = _bracket(flanges=[Flange(edge="n", length=20)])
     doc = sm.to_document()
-    k = OcctKernel()
+    k = RefKernel()
     result = doc.build(k)
     vol = k.mass_props(result.final(doc))["volume"]
     slabs = 40 * 50 * 2 + 40 * 20 * 2                 # base + flange, sharp

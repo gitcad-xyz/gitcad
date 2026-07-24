@@ -70,12 +70,11 @@ def test_auto_explode_stacks_unmated_instances():
     assert view.offsets["loose"] == (0.0, 0.0, 20.0)   # deepest(1)+1 along +Z
 
 
-@pytest.mark.occt
 def test_assembly_drawing_follows_exploded_view():
     from gitcad.drawing.assembly import assembly_drawing
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    kern = OcctKernel()
+    kern = RefKernel()
     asm = _asm()
     view = ExplodedView(assembly="stack", offsets={"top": (60, 0, 0)})
     plain = assembly_drawing(asm, kern)

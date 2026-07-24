@@ -46,11 +46,11 @@ def test_engrave_builds_and_rejects_empty_text() -> None:
         d2.build(NullKernel())
 
 
-@pytest.mark.occt
+@pytest.mark.forge_gap
 def test_engrave_removes_material() -> None:
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    k = OcctKernel()
+    k = RefKernel()
     d = Document()
     base = d.add(Feature(op="box", params={"dx": 40, "dy": 12, "dz": 3}))
     d.add(Feature(op="engrave", params={"text": "GITCAD", "x": 3, "y": 3,
@@ -61,7 +61,6 @@ def test_engrave_removes_material() -> None:
     assert vol > 40 * 12 * 3 * 0.95        # grooves, not craters
 
 
-@pytest.mark.occt
 def test_detail_view_lands_on_sheet(tmp_path) -> None:
     from gitcad.mcp.server import REGISTRY
 

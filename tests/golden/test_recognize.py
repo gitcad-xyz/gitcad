@@ -9,16 +9,16 @@ from __future__ import annotations
 
 import pytest
 
-pytestmark = pytest.mark.occt
 
 
 @pytest.fixture(scope="module")
 def kernel():
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    return OcctKernel()
+    return RefKernel()
 
 
+@pytest.mark.forge_gap
 def test_step_to_parameterized_model_with_proof(kernel, tmp_path_factory) -> None:
     from gitcad.importers.step import import_step_file
     from gitcad.importers.recognize import recognize
@@ -58,6 +58,7 @@ def test_unrecognizable_shape_is_reported_honestly(kernel) -> None:
     assert "sphere" in result.reason
 
 
+@pytest.mark.forge_gap
 def test_blind_hole_fails_the_proof_not_silently(kernel) -> None:
     """A blind hole LOOKS like a through-hole to v1 recognition — the proof
     must catch the difference and refuse."""

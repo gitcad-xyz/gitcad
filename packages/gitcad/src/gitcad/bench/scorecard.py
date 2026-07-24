@@ -21,9 +21,6 @@ _REL_TOL = 1e-9
 
 
 def _get_kernel(name: str):
-    if name == "occt":
-        from gitcad.kernel.occt import OcctKernel
-        return OcctKernel()
     if name == "null":
         from gitcad.kernel.null import NullKernel
         return NullKernel()
@@ -33,10 +30,7 @@ def _get_kernel(name: str):
     if name == "forge":
         from gitcad.kernel.rustref import RustKernel
         return RustKernel()
-    if name == "auto":
-        from gitcad.kernel.auto import AutoKernel
-        return AutoKernel()
-    raise ValueError(f"unknown backend {name!r} (occt|null|ref|forge|auto)")
+    raise ValueError(f"unknown backend {name!r} (null|ref|forge)")
 
 
 def run_backend(backend: str) -> dict[str, Any]:
@@ -159,7 +153,7 @@ def main() -> None:  # pragma: no cover - CLI entry
     from datetime import date
 
     ap = argparse.ArgumentParser(description="kernel benchmark scorecard")
-    ap.add_argument("backends", nargs="+", help="occt | null | ref")
+    ap.add_argument("backends", nargs="+", help="null | ref | forge")
     ap.add_argument("--outdir", default="bench")
     ap.add_argument("--stamp", default=str(date.today()))
     args = ap.parse_args()

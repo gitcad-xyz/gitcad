@@ -34,11 +34,11 @@ def test_board_svg_renders_all_elements() -> None:
     assert board_to_svg(_board()) == svg  # deterministic
 
 
-@pytest.mark.occt
+@pytest.mark.forge_gap
 def test_tessellation_produces_valid_mesh() -> None:
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    k = OcctKernel()
+    k = RefKernel()
     shape = k.boolean("cut", k.box(60, 40, 8),
                       k.transform(k.cylinder(3.2, 8), translate=(15, 20, 0)))
     mesh = k.tessellate(shape)
@@ -51,7 +51,6 @@ def test_tessellation_produces_valid_mesh() -> None:
     assert max(zs) == pytest.approx(8, abs=1e-3)
 
 
-@pytest.mark.occt
 def test_server_serves_page_version_and_mesh(tmp_path) -> None:
     from gitcad.viewer.server import serve
 

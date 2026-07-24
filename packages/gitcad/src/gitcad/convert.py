@@ -11,20 +11,14 @@ from __future__ import annotations
 
 
 def main() -> None:  # pragma: no cover - CLI entrypoint
-    import argparse
+    import sys
 
-    from gitcad.importers.fcstd import fcstd_to_project
-    from gitcad.kernel import get_kernel
-
-    ap = argparse.ArgumentParser(
-        description="gitcad convert — foreign CAD file to a gitcad project")
-    ap.add_argument("file", help="an .FCStd file (more formats to come)")
-    ap.add_argument("-o", "--out", required=True, help="project directory")
-    ap.add_argument("--name", help="project name (default: file stem)")
-    args = ap.parse_args()
-    result = fcstd_to_project(args.file, args.out,
-                              get_kernel(require="occt"), name=args.name)
-    print(f"converted {result['project']}: {len(result['bodies'])} bodies")
-    for rel in result["written"]:
-        print(f"  {rel}")
-    print(f"open it: gitcad-view {args.out}/{result['root']}")
+    sys.stderr.write(
+        "gitcad-convert imported multi-body FreeCAD .FCStd projects by reading "
+        "their OCCT-format .brp geometry. gitcad no longer bundles that reader "
+        "(forge is the sole kernel — ADR-0020).\n\n"
+        "Migration path: export STEP from FreeCAD (File > Export > STEP) and "
+        "import each body with the model_import tool — planar solids come in "
+        "exactly, on exact arithmetic.\n"
+    )
+    raise SystemExit(2)

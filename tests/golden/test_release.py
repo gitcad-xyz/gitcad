@@ -80,7 +80,6 @@ def test_semantic_diff_board_deltas() -> None:
 
 # -- release (needs OCCT for model artifacts) ---------------------------------
 
-@pytest.mark.occt
 def test_release_all_green_produces_artifacts(tmp_path) -> None:
     from gitcad.release import release
 
@@ -101,7 +100,6 @@ def test_release_all_green_produces_artifacts(tmp_path) -> None:
     assert r.checks[f"parity:{s.name}<->{b.name}"] == "ok"
 
 
-@pytest.mark.occt
 def test_release_refuses_on_any_red_check(tmp_path) -> None:
     from gitcad.release import release
 

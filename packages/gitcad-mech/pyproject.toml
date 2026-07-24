@@ -32,10 +32,6 @@ dependencies = [
     "forgekernel_rs>=0.8.1; platform_machine in 'x86_64 AMD64 aarch64 arm64'",
 ]
 
-[project.optional-dependencies]
-# OCCT independent oracle / fallback kernel.
-occt = ["cadquery-ocp>=7.7"]
-
 [project.urls]
 Homepage = "https://gitcad.xyz"
 Repository = "https://github.com/gitcad-xyz/gitcad"

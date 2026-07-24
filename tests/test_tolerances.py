@@ -66,7 +66,6 @@ def test_tolerance_notes_project_the_block() -> None:
     assert "diameter +0.05/-0.02" in notes[2]
 
 
-@pytest.mark.occt
 def test_drawing_carries_gdt_block_and_toleranced_callout(tmp_path) -> None:
     from gitcad.mcp.server import REGISTRY
 

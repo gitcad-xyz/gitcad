@@ -30,11 +30,10 @@ def test_hole_thread_spec_is_data_and_roundtrips() -> None:
     d2.build(NullKernel())                        # spec is data, build unaffected
 
 
-@pytest.mark.occt
 def test_spring_volume_matches_wire_length() -> None:
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    k = OcctKernel()
+    k = RefKernel()
     r, pitch, turns, wd = 6.0, 3.0, 5.0, 1.2
     d = Document()
     d.add(Feature(op="spring", params={"radius": r, "pitch": pitch,
@@ -45,7 +44,6 @@ def test_spring_volume_matches_wire_length() -> None:
     assert vol == pytest.approx(expected, rel=0.02)
 
 
-@pytest.mark.occt
 def test_thread_spec_appears_in_drawing_callout(tmp_path) -> None:
     from gitcad.mcp.server import REGISTRY
 

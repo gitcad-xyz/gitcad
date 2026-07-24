@@ -116,14 +116,13 @@ def test_markdown_matrix(design):
     assert "NOT MET" in md
 
 
-@pytest.mark.occt
 def test_interference_clear_requirement_on_disk_assembly(tmp_path):
     """The cross-domain fit check as an executable requirement."""
     from gitcad.derive import model_to_part
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
     from gitcad.part import Assembly, new_part_id
 
-    k = OcctKernel()
+    k = RefKernel()
 
     def write_part(name, dx, translate):
         doc = Document()

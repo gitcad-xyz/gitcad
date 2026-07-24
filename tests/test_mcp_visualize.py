@@ -97,7 +97,6 @@ def test_update_check_reports_versions(monkeypatch) -> None:
     assert r["ok"] and r["current"] == "0.8.0" and r["update_available"] is False
 
 
-@pytest.mark.occt
 def test_drawing_endpoint_serves_svg_and_pdf_for_a_model() -> None:
     r = S.REGISTRY["viewer_open"](design=_MODEL)
     try:
@@ -109,7 +108,6 @@ def test_drawing_endpoint_serves_svg_and_pdf_for_a_model() -> None:
         S.REGISTRY["viewer_close"](url=r["url"])
 
 
-@pytest.mark.occt
 def test_drawing_endpoint_404_for_non_model() -> None:
     board = json.dumps({"schema": "gitcad/board/1", "outline": [[0, 0], [10, 0], [10, 10], [0, 10]]})
     r = S.REGISTRY["viewer_open"](design=board)

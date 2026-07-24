@@ -70,13 +70,13 @@ def test_model_bom_parameters_resolve_null_backend():
                       "anchors": lines[0]["anchors"]}]
 
 
-@pytest.mark.occt
+@pytest.mark.forge_gap
 def test_drawing_carries_bom_table_and_balloons():
     from gitcad.drawing import make_drawing
     from gitcad.drawing.bom import model_bom
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    kern = OcctKernel()
+    kern = RefKernel()
     doc = _ladder_doc()
     result = doc.build(kern)
     bom = model_bom(doc, result, kern)

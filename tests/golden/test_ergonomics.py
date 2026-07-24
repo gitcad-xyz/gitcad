@@ -98,11 +98,10 @@ def test_degenerate_track_caught_by_fab_gate() -> None:
 
 # -- select DSL (friction: manual centroid filtering) -------------------------
 
-@pytest.mark.occt
 def test_select_dsl_picks_the_back_face() -> None:
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    k = OcctKernel()
+    k = RefKernel()
     faces = k.entities(k.box(92, 62, 30), "face")
     picks = select_entities(faces, "plane,zmax")
     assert len(picks) == 1
@@ -114,11 +113,11 @@ def test_select_dsl_picks_the_back_face() -> None:
 
 # -- axis-aligned cylinders (friction: rotation sign archaeology) -------------
 
-@pytest.mark.occt
+@pytest.mark.forge_gap
 def test_cylinder_axis_param() -> None:
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    k = OcctKernel()
+    k = RefKernel()
     doc = Document()
     doc.add(Feature(op="cylinder", params={"radius": 9.3, "height": 65, "axis": "y"}))
     (lo, hi) = k.bbox(doc.build(k).final(doc))
@@ -128,13 +127,13 @@ def test_cylinder_axis_param() -> None:
 
 # -- boss feature (friction: ports with no geometry) --------------------------
 
-@pytest.mark.occt
+@pytest.mark.forge_gap
 def test_boss_with_pilot_volume_oracle() -> None:
     import math
 
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    k = OcctKernel()
+    k = RefKernel()
     doc = Document()
     plate = doc.add(Feature(op="box", params={"dx": 30, "dy": 30, "dz": 3}))
     doc.add(Feature(op="boss", params={"x": 15, "y": 15, "base_z": 3, "height": 6,
@@ -160,14 +159,14 @@ def test_subtractive_op_without_inputs_fails_loudly() -> None:
 
 # -- board_to_model bridge (friction: hand-extruded board body) ---------------
 
-@pytest.mark.occt
+@pytest.mark.forge_gap
 def test_board_to_model_bridge() -> None:
     import math
 
     from gitcad.bridge import board_to_model
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    k = OcctKernel()
+    k = RefKernel()
     bare_expected = 80 * 50 * 1.6 - 4 * math.pi * 1.35**2 * 1.6
     doc = board_to_model(_altair_board(), components=False)
     v = k.measure(doc.build(k).final(doc))["volume"]

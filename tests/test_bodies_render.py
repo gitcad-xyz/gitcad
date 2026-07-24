@@ -1,5 +1,6 @@
-"""Golden: multi-body FCStd access, interference tolerance matrix,
-render CLI (real-Altair benchmark round 2).
+"""Golden: interference tolerance matrix, render CLI (real-Altair benchmark
+round 2). (Multi-body FCStd access was removed with the OCCT .brp reader —
+ADR-0020.)
 """
 
 from pathlib import Path
@@ -9,45 +10,11 @@ import pytest
 from gitcad.render import find_browser, render
 
 
-def _fcstd(tmp_path) -> Path:
-    """A synthetic two-body FCStd (zip with two .Shape.brp members)."""
-    import zipfile
-
-    from gitcad.kernel.occt import OcctKernel
-
-    k = OcctKernel()
-    a = tmp_path / "a.brep"
-    b = tmp_path / "b.brep"
-    k.export_brep(k.box(10, 10, 10), str(a))
-    k.export_brep(k.transform(k.box(5, 5, 5), translate=(20, 0, 0)), str(b))
-    f = tmp_path / "two.FCStd"
-    with zipfile.ZipFile(f, "w") as zf:
-        zf.write(a, "Lid.Shape.brp")
-        zf.write(b, "Base.Shape.brp")
-        zf.writestr("Document.xml", '<Document><Object name="Lid"/>'
-                                    '<Object name="Base"/></Document>')
-    return f
-
-
-@pytest.mark.occt
-def test_fcstd_bodies_named_access(tmp_path):
-    from gitcad.importers.fcstd import import_fcstd_bodies
-    from gitcad.kernel.occt import OcctKernel
-
-    k = OcctKernel()
-    bodies = import_fcstd_bodies(str(_fcstd(tmp_path)), k)
-    assert [n for n, _ in bodies] == ["Base", "Lid"]
-    vols = {n: k.measure(s)["volume"] for n, s in bodies}
-    assert vols["Lid"] == pytest.approx(1000.0)
-    assert vols["Base"] == pytest.approx(125.0)
-
-
-@pytest.mark.occt
 def test_interference_tolerance_and_matrix(tmp_path):
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
     from gitcad.part.interference import check_interference
 
-    k = OcctKernel()
+    k = RefKernel()
     inst = {"a": (k.box(10, 10, 10), (0.0, 0.0, 0.0), 0.0),
             "b": (k.box(10, 10, 10), (9.9, 0.0, 0.0), 0.0)}   # 0.1x10x10 = 10mm3
     strict = check_interference(k, inst)
@@ -94,10 +61,9 @@ def test_render_png_without_browser_is_loud(tmp_path, monkeypatch):
         R.render(str(_sch_file(tmp_path)), str(tmp_path / "r.png"))
 
 
-@pytest.mark.occt
 def test_pcba_mesh_has_per_component_groups(tmp_path):
     from gitcad.ecad import Board, Component, Footprint, Pad
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
     from gitcad.viewer.server import pcba_mesh_payload
 
     fp = Footprint("R0603", pads=[Pad("1", -0.75, 0, 0.9, 0.95),
@@ -106,7 +72,7 @@ def test_pcba_mesh_has_per_component_groups(tmp_path):
     b = Board(name="x", outline=[(0, 0), (20, 0), (20, 10), (0, 10)])
     b.components += [Component("R1", fp, x=5, y=5),
                      Component("C7", fp, x=15, y=5)]
-    payload = pcba_mesh_payload(b, OcctKernel())
+    payload = pcba_mesh_payload(b, RefKernel())
     names = [g["name"] for g in payload["groups"]]
     assert names == ["board", "R1", "C7"]      # cross-probe substrate
 

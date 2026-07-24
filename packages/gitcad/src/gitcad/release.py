@@ -137,7 +137,7 @@ def release(sources: list[str], outdir: str, version: str) -> ReleaseResult:
     for p, kind, text in docs:
         label = p.name
         if kind == "document":
-            kernel = kernel or get_kernel(require="occt")
+            kernel = kernel or get_kernel()
             doc = Document.loads(text)
             build = doc.build(kernel)
             for fid, shape in build.shapes.items():

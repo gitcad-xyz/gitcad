@@ -207,7 +207,7 @@ def assembly_mesh_payload(manifest_path: Path, kernel: Kernel) -> dict:
             sorted(resolved.items())):
         shape = kernel.transform(shape0, translate=translate,
                                  rotate_axis=(0, 0, 1), rotate_deg=rot_z)
-        mesh = kernel.tessellate(shape)
+        mesh = _norm_mesh(kernel.tessellate(shape))
         lo, hi = kernel.bbox(shape)
         los.append(lo)
         his.append(hi)

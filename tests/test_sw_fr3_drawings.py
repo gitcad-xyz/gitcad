@@ -13,9 +13,9 @@ from gitcad.document import Document, Feature
 
 @pytest.fixture(scope="module")
 def kern():
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    return OcctKernel()
+    return RefKernel()
 
 
 @pytest.fixture(scope="module")
@@ -27,7 +27,6 @@ def holed_box(kern):
     return doc.build(kern).final(doc)
 
 
-@pytest.mark.occt
 def test_section_through_hole_yields_two_hatched_loops(kern, holed_box):
     from gitcad.drawing.sections import make_section_drawing
 
@@ -45,7 +44,6 @@ def test_section_through_hole_yields_two_hatched_loops(kern, holed_box):
             assert min(ys) - 1e-6 <= y <= max(ys) + 1e-6
 
 
-@pytest.mark.occt
 def test_section_svg_renders_and_labels(kern, holed_box):
     from gitcad.drawing.sections import make_section_drawing
 
@@ -55,7 +53,6 @@ def test_section_svg_renders_and_labels(kern, holed_box):
     assert svg.count("<polyline") > 20     # view + outline + hatching
 
 
-@pytest.mark.occt
 def test_section_rejects_bad_axis(kern, holed_box):
     from gitcad.drawing.sections import make_section_drawing
     from gitcad.errors import GitcadError
@@ -84,7 +81,6 @@ def demo_assembly(kern):
     return asm, {"plate": doc}
 
 
-@pytest.mark.occt
 def test_assembly_balloons_match_bom_items(kern, demo_assembly):
     from gitcad.drawing.assembly import assembly_drawing
 
@@ -100,7 +96,6 @@ def test_assembly_balloons_match_bom_items(kern, demo_assembly):
     assert len(d.notes) == 3
 
 
-@pytest.mark.occt
 def test_assembly_envelope_fallback_draws_hidden_rects(kern, demo_assembly):
     from gitcad.drawing.assembly import assembly_drawing
 

@@ -379,9 +379,9 @@ def board_export_fab(board: str, outdir: str) -> dict[str, Any]:
 
 @tool("model_import")
 def model_import(path: str, fmt: str = "auto", assets_dir: str = ".") -> dict[str, Any]:
-    """Import existing mechanical work (STEP or FreeCAD .FCStd) into a gitcad
-    model. Returns the model text plus an honest report of what was imported,
-    approximated, and dropped. Requires the OCCT kernel."""
+    """Import existing mechanical work into a gitcad model. STEP (planar solids)
+    imports exactly on the forge kernel. Returns the model text plus an honest
+    report of what was imported, approximated, and dropped."""
     lower = path.lower()
     if lower.endswith((".sldprt", ".sldasm", ".slddrw")):
         raise ValueError(
@@ -391,21 +391,22 @@ def model_import(path: str, fmt: str = "auto", assets_dir: str = ".") -> dict[st
             "library with scripts/sw-batch-export.ps1 (drives your installed "
             "SolidWorks via COM), then import the STEP files."
         )
-    kernel = get_kernel(require="occt")
     if fmt == "auto":
         fmt = "fcstd" if lower.endswith(".fcstd") else "step"
-    if fmt == "step":
-        from gitcad.importers.step import import_step_file
+    if fmt == "fcstd":
+        raise ValueError(
+            "FreeCAD .FCStd geometry is stored as OCCT-format .brp payloads, "
+            "which gitcad no longer bundles a reader for (forge is the sole "
+            "kernel — ADR-0020). Export STEP from FreeCAD instead "
+            "(File > Export > STEP), then import that: planar solids come in "
+            "exactly, on exact arithmetic."
+        )
+    if fmt != "step":
+        raise ValueError(f"unknown import format {fmt!r} (want step)")
+    from gitcad.importers.step import import_step_file
 
-        doc, report = import_step_file(path, kernel)
-    elif fmt == "fcstd":
-        # Parametric-first: recover the FreeCAD feature tree when it maps and
-        # proves out; fall back to geometry-only with the reason reported.
-        from gitcad.importers.fcstd_tree import import_fcstd_tree
-
-        doc, report = import_fcstd_tree(path, kernel, assets_dir)
-    else:
-        raise ValueError(f"unknown import format {fmt!r} (want step|fcstd)")
+    kernel = get_kernel()
+    doc, report = import_step_file(path, kernel)
     return {"model": doc.dumps(), "report": report.to_dict(), "kernel": kernel.name}
 
 
@@ -418,7 +419,7 @@ def model_recognize(model: str) -> dict[str, Any]:
     from gitcad.importers.recognize import recognize
 
     doc = Document.loads(model)
-    kernel = get_kernel(require="occt")
+    kernel = get_kernel()
     r = recognize(doc, kernel)
     out: dict[str, Any] = {"recognized": r.recognized, "proof": r.proof,
                            "holes": [{"x": h.x, "y": h.y, "radius": h.radius} for h in r.holes]}
@@ -984,10 +985,10 @@ def assembly_interference(assembly_body: dict[str, Any], models: dict[str, str])
     """EXACT interference check: build each instanced part's real geometry
     (``models``: part id -> model text), place per the assembly transforms,
     boolean-intersect every AABB-overlapping pair. Nonzero common volume =
-    collision, measured in mm3. Requires the OCCT kernel."""
+    collision, measured in mm3."""
     from gitcad.part.interference import check_interference
 
-    kernel = get_kernel(require="occt")
+    kernel = get_kernel()
     instances: dict[str, Any] = {}
     for name, inst in assembly_body["instances"].items():
         text = models.get(inst["part"])

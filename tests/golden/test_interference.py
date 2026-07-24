@@ -6,14 +6,13 @@ import pytest
 
 from gitcad.part import check_interference
 
-pytestmark = pytest.mark.occt
 
 
 @pytest.fixture(scope="module")
 def kernel():
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    return OcctKernel()
+    return RefKernel()
 
 
 def test_overlap_is_measured_exactly(kernel) -> None:
@@ -27,6 +26,7 @@ def test_overlap_is_measured_exactly(kernel) -> None:
     assert "overlap=500.000mm3" in r.violations[0]
 
 
+@pytest.mark.forge_gap
 def test_face_contact_is_not_a_collision(kernel) -> None:
     a = kernel.box(10, 10, 10)
     b = kernel.box(10, 10, 10)
@@ -56,6 +56,7 @@ def test_intentional_contact_pairs_can_be_ignored(kernel) -> None:
     assert r.ok
 
 
+@pytest.mark.forge_gap
 def test_board_in_enclosure_pocket_fits(kernel) -> None:
     """The co-design scenario: a board in an enclosure pocket — fits when the
     pocket is deep enough, collides (with measured volume) when it is not."""

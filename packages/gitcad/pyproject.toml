@@ -32,10 +32,6 @@ dependencies = [
     "mcp>=1.0",
 ]
 
-[project.optional-dependencies]
-# OCCT oracle/fallback kernel.
-occt = ["gitcad-mech[occt]==0.8.1"]
-
 [project.urls]
 Homepage = "https://gitcad.xyz"
 Repository = "https://github.com/gitcad-xyz/gitcad"

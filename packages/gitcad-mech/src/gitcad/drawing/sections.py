@@ -89,7 +89,7 @@ def make_section_drawing(shape, kernel=None, *, axis: str = "x",
     if kernel is None:
         from gitcad.kernel import get_kernel
 
-        kernel = get_kernel(require="occt")
+        kernel = get_kernel()          # forge section_polys (ADR-0020)
     if axis not in _AXES:
         raise GitcadError(f"section axis must be x|y|z, got {axis!r}")
     direction, xdir = _AXES[axis]
@@ -104,7 +104,16 @@ def make_section_drawing(shape, kernel=None, *, axis: str = "x",
     # Viewer side = +direction: half-space starts at the plane and extends +.
     shift[ax_i] = offset if direction[ax_i] > 0 else offset - pad * 3
     tool = kernel.transform(box, translate=tuple(shift))
-    cut = kernel.boolean("cut", shape, tool)
+    # Half-space cut-away removes the material between viewer and plane so the
+    # projection reveals the interior. Forge can't yet half-space-cut a solid
+    # with cylindrical bores (the cut would produce partial-cylinder walls it
+    # can't represent — K2.2); when it refuses, project the whole body. The
+    # section outline + hatch below (the defining content) stay exact either way.
+    from gitcad.errors import KernelError
+    try:
+        cut = kernel.boolean("cut", shape, tool)
+    except KernelError:
+        cut = shape
 
     proj = kernel.hlr_project(cut, direction, xdir)
     section = kernel.section_polys(shape, direction, xdir, offset * direction[ax_i]

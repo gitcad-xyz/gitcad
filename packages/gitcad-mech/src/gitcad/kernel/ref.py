@@ -26,6 +26,56 @@ def _nope(op: str, stage: str):
         FailureSignature(op=op, diagnostic="NotYetImplemented", kernel="ref"))
 
 
+def _mp(volume: float, cx: float, cy: float, cz: float, **extra) -> dict[str, Any]:
+    """A mass-properties dict with the centroid available both as split
+    ``cx/cy/cz`` scalars and as a ``centroid`` tuple (forge does not compute
+    an inertia tensor — that stays out of the seam contract)."""
+    return {"volume": volume, "cx": cx, "cy": cy, "cz": cz,
+            "centroid": (cx, cy, cz), **extra}
+
+
+def _edge_point(e, t) -> list[float]:
+    pt = [float(x) for x in e["point"]]
+    d = [float(x) for x in e["dir"]]
+    dd = sum(x * x for x in d) or 1.0
+    s = (float(t) - sum(pt[i] * d[i] for i in range(3))) / dd
+    return [pt[i] + s * d[i] for i in range(3)]
+
+
+def _edge_midpoint(e) -> list[float]:
+    """Midpoint of a logical straight edge (``tmin``/``tmax`` are the along-dir
+    coordinates), for geometry-based edge selection."""
+    return _edge_point(e, (float(e["tmin"]) + float(e["tmax"])) / 2)
+
+
+def _edge_length(e) -> float:
+    a, b = _edge_point(e, e["tmin"]), _edge_point(e, e["tmax"])
+    return sum((a[i] - b[i]) ** 2 for i in range(3)) ** 0.5
+
+
+def _face_area(frags) -> float:
+    def a2(p):
+        v = p.area2() if callable(getattr(p, "area2", None)) else p.area2
+        return abs(float(v))
+    return sum(a2(p) for p in frags) / 2.0
+
+
+def _face_centroid(frags) -> list[float]:
+    """Area-weighted centroid of a logical face's convex fragments, for
+    geometry-based face selection."""
+    acc, tot = [0.0, 0.0, 0.0], 0.0
+    for p in frags:
+        vs = [[float(c) for c in v] for v in p.verts]
+        n = len(vs) or 1
+        c = [sum(v[i] for v in vs) / n for i in range(3)]
+        area2 = p.area2() if callable(getattr(p, "area2", None)) else p.area2
+        a = abs(float(area2)) or 1e-9
+        for i in range(3):
+            acc[i] += c[i] * a
+        tot += a
+    return [acc[i] / tot for i in range(3)] if tot else [0.0, 0.0, 0.0]
+
+
 class RefKernel:
     """K1: exact planar solids (box, line-profile extrude, quarter-turn
     rigid transforms, mirror, scale, booleans, exact mass properties)."""
@@ -202,28 +252,30 @@ class RefKernel:
         from forgekernel.profile2d import SplinePrism
         if isinstance(shape, (LoftSolid, SplinePrism)):
             cx, cy, cz = shape.centroid_f()
-            return {"volume": float(shape.volume()), "cx": cx, "cy": cy, "cz": cz}
+            return _mp(float(shape.volume()), cx, cy, cz)
         if isinstance(shape, TubeSolid):
             # certified provenance (ADR-0019): volume is an interval; report
             # the midpoint plus the proven half-width bracketing the truth.
             v = shape.volume()
             cx, cy, cz = shape.centroid_f()
-            return {"volume": v.to_float(), "cx": cx, "cy": cy, "cz": cz,
-                    "volume_halfwidth": float(v.width) / 2}
+            return _mp(v.to_float(), cx, cy, cz,
+                       volume_halfwidth=float(v.width) / 2)
         if isinstance(shape, (Cone, Sphere)):
             shape = AxisStack(shape.cx, shape.cy, [shape])
         from forgekernel.quadric import FilletedBox
         if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, FilletedBox)):
             cx, cy, cz = shape.centroid_f()
-            return {"volume": float(shape.volume()),
-                    "cx": cx, "cy": cy, "cz": cz}
+            return _mp(float(shape.volume()), cx, cy, cz)
         c = shape.centroid()
-        return {"volume": float(shape.volume()),
-                "cx": float(c[0]), "cy": float(c[1]), "cz": float(c[2])}
+        return _mp(float(shape.volume()), float(c[0]), float(c[1]), float(c[2]))
 
     def measure(self, shape) -> dict[str, float]:
-        (x0, y0, z0), (x1, y1, z1) = shape.bbox()
-        return {"volume": float(shape.volume()),
+        from forgekernel.quadric import AxisStack, Cone, Sphere
+
+        (x0, y0, z0), (x1, y1, z1) = self.bbox(shape)
+        vshape = (AxisStack(shape.cx, shape.cy, [shape])
+                  if isinstance(shape, (Cone, Sphere)) else shape)
+        return {"volume": float(vshape.volume()),
                 "dx": float(x1 - x0), "dy": float(y1 - y0),
                 "dz": float(z1 - z0)}
 
@@ -262,7 +314,9 @@ class RefKernel:
             # solids (fillet/chamfer selection targets)
             return [{"curve": "line",
                      "dir": [float(v) for v in e["dir"]],
-                     "point": [float(v) for v in e["point"]]}
+                     "point": [float(v) for v in e["point"]],
+                     "centroid": _edge_midpoint(e),
+                     "length": _edge_length(e)}
                     for e in self._sorted_edges(shape)]
         if kind != "face":
             raise NotImplementedError("ref enumerates faces and edges only")
@@ -308,7 +362,9 @@ class RefKernel:
                 key=lambda kv: (kv[0][1], kv[0][0])):
             out.append({"surface": "plane", "lineage": source,
                         "plane": [float(v) for v in plane_key[:3]],
-                        "fragments": len(frags)})
+                        "fragments": len(frags),
+                        "centroid": _face_centroid(frags),
+                        "area": _face_area(frags)})
         return out
 
     def validate(self, shape) -> ValidationReport:
@@ -738,6 +794,13 @@ class RefKernel:
         from forgekernel.hlr import hidden_line
 
         return hidden_line(shape, direction, xdir, deflection=deflection)
+
+    def section_polys(self, shape, direction, xdir, offset, *, deflection=0.05):
+        # ADR-0020: native section curves (plane ∩ solid boundary) — same
+        # sheet frame as hlr_project, so a section view overlays exactly.
+        from forgekernel.hlr import section_polys
+
+        return section_polys(shape, direction, xdir, offset, deflection=deflection)
 
     def export_step(self, shape, path):
         # K7.0c: native AP214 export of a planar-faced solid — OCCT-free

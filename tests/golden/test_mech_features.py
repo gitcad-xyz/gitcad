@@ -8,16 +8,16 @@ import pytest
 
 from gitcad.document import Document, Feature
 
-pytestmark = pytest.mark.occt
 
 
 @pytest.fixture(scope="module")
 def kernel():
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    return OcctKernel()
+    return RefKernel()
 
 
+@pytest.mark.forge_gap
 def test_chamfer_one_edge_volume(kernel) -> None:
     box = kernel.box(10, 10, 10)
     edges = kernel.entities(box, "edge")
@@ -49,6 +49,7 @@ def test_linear_pattern(kernel) -> None:
     assert v == pytest.approx(4 * math.pi * 4 * 5, rel=1e-6)
 
 
+@pytest.mark.forge_gap
 def test_circular_pattern(kernel) -> None:
     doc = Document()
     b = doc.add(Feature(op="box", params={"dx": 5, "dy": 2, "dz": 3}))
@@ -58,6 +59,7 @@ def test_circular_pattern(kernel) -> None:
     assert v == pytest.approx(6 * 5 * 2 * 3, rel=1e-6)   # no overlap at r=10
 
 
+@pytest.mark.forge_gap
 def test_counterbore_hole(kernel) -> None:
     doc = Document()
     plate = doc.add(Feature(op="box", params={"dx": 30, "dy": 30, "dz": 10}))

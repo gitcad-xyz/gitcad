@@ -36,33 +36,30 @@ def test_split_validates_inputs() -> None:
                           "height": 3, "thickness": 1}).build(NullKernel())
 
 
-@pytest.mark.occt
 def test_scale_volumes() -> None:
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    k = OcctKernel()
+    k = RefKernel()
     d = _doc_with("scale", {"factor": 2})
     assert k.mass_props(d.build(k).final(d))["volume"] == pytest.approx(8000)
     d = _doc_with("scale", {"fx": 2, "fy": 1, "fz": 1})
     assert k.mass_props(d.build(k).final(d))["volume"] == pytest.approx(2000)
 
 
-@pytest.mark.occt
 def test_split_keeps_the_named_side() -> None:
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    k = OcctKernel()
+    k = RefKernel()
     d = _doc_with("split", {"normal": "z", "offset": 4, "keep": "below"})
     assert k.mass_props(d.build(k).final(d))["volume"] == pytest.approx(400)
     d = _doc_with("split", {"normal": "z", "offset": 4, "keep": "above"})
     assert k.mass_props(d.build(k).final(d))["volume"] == pytest.approx(600)
 
 
-@pytest.mark.occt
 def test_rib_adds_exact_wall_volume() -> None:
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    k = OcctKernel()
+    k = RefKernel()
     d = Document()
     base = d.add(Feature(op="box", params={"dx": 20, "dy": 20, "dz": 2}))
     d.add(Feature(op="rib", params={"x1": 2, "y1": 10, "x2": 18, "y2": 10,
@@ -72,14 +69,14 @@ def test_rib_adds_exact_wall_volume() -> None:
     assert vol == pytest.approx(20 * 20 * 2 + 16 * 2 * 8)
 
 
-@pytest.mark.occt
+@pytest.mark.forge_gap
 def test_draft_tilts_exactly_the_draftable_faces() -> None:
     """Pull +z on a cube: the 4 side faces accept draft, top/bottom refuse —
     asserted across every face index without assuming enumeration order."""
     from gitcad.errors import KernelError
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    k = OcctKernel()
+    k = RefKernel()
     cube = k.box(10, 10, 10)
     ok, refused = 0, 0
     for idx in range(6):

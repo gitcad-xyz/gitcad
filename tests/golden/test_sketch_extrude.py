@@ -32,13 +32,12 @@ def test_dxf_export_of_profile() -> None:
     assert profile_to_dxf(p) == dxf   # deterministic
 
 
-@pytest.mark.occt
 class TestOcct:
     @pytest.fixture(scope="class")
     def kernel(self):
-        from gitcad.kernel.occt import OcctKernel
+        from gitcad.kernel.ref import RefKernel
 
-        return OcctKernel()
+        return RefKernel()
 
     def test_extruded_rectangle_matches_box(self, kernel) -> None:
         prof = Profile.rectangle(60, 40).to_params()
@@ -53,6 +52,7 @@ class TestOcct:
         expected = (50 * 8 + (40 - 8) * 8) * 30
         assert kernel.measure(shape)["volume"] == pytest.approx(expected, rel=1e-9)
 
+    @pytest.mark.forge_gap
     def test_arc_profile_extrudes(self, kernel) -> None:
         # Rectangle with a semicircular bulge on one edge.
         prof = (Profile((0, 0)).line_to(40, 0).line_to(40, 20)

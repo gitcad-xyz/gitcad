@@ -3,11 +3,11 @@
 # Dev install (editable, all portions):
 #   pip install --no-deps -e packages/gitcad-core -e packages/gitcad-mech \
 #       -e packages/gitcad-ecad -e packages/gitcad
-#   pip install pytest cadquery-ocp
+#   pip install pytest forgekernel forgekernel_rs
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-  "occt: requires the OCCT kernel (cadquery-ocp); skipped if unavailable",
+  "forge_gap: exercises a capability forge does not yet reach (a named K2.2/K3.7/K5.2 refusal); skipped until forge closes the gap — OCCT no longer backfills it (ADR-0020)",
   "invariant: architecture-independent property that must always hold",
 ]

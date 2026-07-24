@@ -30,7 +30,7 @@ def assembly_drawing(asm: Assembly, kernel=None, *,
     if kernel is None:
         from gitcad.kernel import get_kernel
 
-        kernel = get_kernel(require="occt")
+        kernel = get_kernel()          # forge HLR (ADR-0020)
     if exploded is not None:
         asm = exploded.apply(asm)
 

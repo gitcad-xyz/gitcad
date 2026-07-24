@@ -31,11 +31,10 @@ def test_cylinder_volume_null_kernel() -> None:
     assert NullKernel().measure(shape)["volume"] == pytest.approx(math.pi * 4 * 10)
 
 
-@pytest.mark.occt
 def test_box_volume_occt() -> None:
-    from gitcad.kernel.occt import OcctKernel
+    from gitcad.kernel.ref import RefKernel
 
-    k = OcctKernel()
+    k = RefKernel()
     shape = k.box(10, 20, 5)
     assert k.measure(shape)["volume"] == pytest.approx(1000.0, rel=1e-6)
     assert k.validate(shape).ok
