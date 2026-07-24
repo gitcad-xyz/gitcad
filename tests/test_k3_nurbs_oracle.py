@@ -583,3 +583,45 @@ def test_trimmed_region_classification_beats_occt_tolerance() -> None:
     assert tp.classify(Fraction(5), 0) == "on"
     assert tp.classify(Fraction(5), Fraction(5)) == "in"   # deep interior: agree
     assert occt(5, 5, 1e-7) == "in"
+
+
+@pytest.mark.occt
+def test_spline_prism_exact_centroid_matches_occt_and_beats_bbox() -> None:
+    """K3.7 mass properties: forge computes a spline-extruded solid's centroid
+    EXACTLY (Green's-theorem area moments in ℚ). For an asymmetric curved
+    profile the true area centroid (y=51/22≈2.318) is far from the bbox
+    centre (y=3.5) the old code returned — and OCCT's independent float
+    integration agrees with forge, not the bbox."""
+    from OCP.BRepBuilderAPI import (BRepBuilderAPI_MakeEdge,
+                                    BRepBuilderAPI_MakeFace,
+                                    BRepBuilderAPI_MakeWire)
+    from OCP.BRepGProp import BRepGProp
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism
+    from OCP.Geom import Geom_BezierCurve
+    from OCP.gp import gp_Pnt, gp_Vec
+    from OCP.GProp import GProp_GProps
+    from OCP.TColgp import TColgp_Array1OfPnt
+
+    from forgekernel.profile2d import SplinePrism
+
+    prof = [{"kind": "line", "to": [10, 0]},
+            {"kind": "spline", "to": [0, 0], "ctrl": [[12, 7], [-2, 7]]}]
+    pr = SplinePrism([0, 0], prof, 5)
+    cx, cy, cz = pr.centroid()
+    assert (cx, cy, cz) == (Fraction(5), Fraction(51, 22), Fraction(5, 2))
+
+    e_line = BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(10, 0, 0)).Edge()
+    arr = TColgp_Array1OfPnt(1, 4)
+    for i, (x, y) in enumerate([(10, 0), (12, 7), (-2, 7), (0, 0)]):
+        arr.SetValue(i + 1, gp_Pnt(x, y, 0))
+    e_bez = BRepBuilderAPI_MakeEdge(Geom_BezierCurve(arr)).Edge()
+    wire = BRepBuilderAPI_MakeWire(e_line, e_bez).Wire()
+    face = BRepBuilderAPI_MakeFace(wire, True).Face()
+    solid = BRepPrimAPI_MakePrism(face, gp_Vec(0, 0, 5)).Shape()
+    g = GProp_GProps()
+    BRepGProp.VolumeProperties_s(solid, g)
+    com = g.CentreOfMass()
+    assert abs(float(cx) - com.X()) < 1e-9
+    assert abs(float(cy) - com.Y()) < 1e-9        # OCCT agrees with forge
+    assert abs(float(cz) - com.Z()) < 1e-9
+    assert abs(com.Y() - 3.5) > 0.5               # ...and NOT with the bbox centre
