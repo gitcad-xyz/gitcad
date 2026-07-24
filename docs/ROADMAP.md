@@ -126,7 +126,11 @@ topology lands.
   a tolerance check. (done)
 - ⏳ ABC dataset sample census, NIST/CAx-IF conformance files
   (**gated**: dataset download).
-- ⏳ SSI certified-residual fuzzing over random Bézier patch pairs.
+- **✅ SSI certified-residual fuzzing** over random Bézier patch pairs
+  (done). 40 seeded random bilinear graph-patch pairs; every certified
+  point provably lies on both graphs (residual < 1e-18 ⇒ parameters agree),
+  plus operand-symmetry of the branch count. Exercises the hit and the
+  certified-empty paths.
 
 ### Cross-kernel identity stability **[I]** — **(gated: human sign-off)**
 Entity ids are minted per-kernel today (fingerprints differ across
