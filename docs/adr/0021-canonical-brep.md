@@ -106,7 +106,12 @@ Unchanged: no float decides topology. Specifically —
    bbox equality, and mesh-volume agreement. A converter ships only when its
    representation's own numbers reproduce.
 4. Wire the seam to fall back to `Body` when a specialised op refuses; never
-   the reverse (fast exact paths keep priority).
+   the reverse (fast exact paths keep priority). **A fallback must preserve the
+   FAILURE behaviour too, not just the successes** — routing `entities` through
+   the canonical form changed the exception *type* raised for a representation
+   with no converter yet (`NotImplementedError` → `KernelError`) and broke five
+   passing tests that depended on it. "No regression" means observable
+   behaviour, including how an operation declines.
 5. Re-run the capability matrix. Coverage must rise and crashes stay at 0
    (pinned by `tests/invariants/test_seam_enforcement.py`).
 6. Cut over per-op, not big-bang: each operation flips to the generic

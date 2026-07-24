@@ -500,6 +500,19 @@ class RefKernel:
                                          RevolveSolid, Sphere)
 
         from forgekernel.brep import Solid as _Solid
+        from forgekernel import body as _B
+
+        if isinstance(shape, _B.Body):                # ADR-0021 canonical form
+            return _B.edges_info(shape) if kind == "edge" else _B.faces_info(shape)
+        if kind == "edge" and not isinstance(shape, _Solid):
+            # every representation has edges once it is in canonical form —
+            # circular bore rims included, with exact radius and axis. A
+            # representation with no converter yet falls through to the legacy
+            # behaviour rather than changing the exception type callers see.
+            try:
+                return _B.edges_info(_B.to_body(shape))
+            except (ValueError, AttributeError, TypeError):
+                pass
         if kind == "edge" and isinstance(shape, _Solid):
             # K5.0: deterministic straight-edge enumeration for planar
             # solids (fillet/chamfer selection targets)
