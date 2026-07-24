@@ -95,20 +95,24 @@ These features worked via the OCCT fallback and now raise a stage-named
 `NotYetImplemented` until the forge stage that owns them lands. Each has a
 `golden` contract preserved in-tree behind `@pytest.mark.forge_gap`, so it
 lights up automatically when forge closes the gap — no coverage is silently
-lost, it is quarantined and named.
+lost, it is quarantined and named. **The 0.9.x patch line restores these one
+exact, adversarially-reviewed step at a time; the "restored" rows below are
+already back.**
 
-| Feature | Forge stage that unblocks it |
-| --- | --- |
-| counterbore / countersink holes (cone + cyl subtraction) | K2.2 booleans on quadric operands |
-| circular pattern, sketch-on-tilted-plane, cylinder-axis param | K2.2 general-axis rotation of quadrics |
-| chamfer of a *selected* edge | K1.2 stable edge-id chamfer |
-| engrave (text-pocket boolean) | K2.2 quadric cut |
-| draft on a quadric face | K2.2 tilt of a quadric |
-| boss + pilot (Solid ⊍ Cyl disjoint union) | K2.3 mixed disjoint unions |
-| STL export / 3D view of a *drilled* solid | K2.x DrilledSolid tessellation |
-| curved-solid STEP export + STEP round-trip of a drilled plate | K3.7 freeform STEP |
-| fillet on a non-planar base | K5.2 general blends |
-| interference of face-touching / pocketed solids | K2.x boolean robustness on degenerate contact |
+| Feature | Forge stage | Status |
+| --- | --- | --- |
+| STL export / 3D view of a *drilled* solid | K2.x DrilledSolid tessellation | **restored 0.9.1** |
+| 3D view / STL of bare cylinder / sphere / cone | K2.x primitive tessellation | **restored 0.9.1** |
+| circular pattern, tilted / diagonal sketch planes | K2.2 exact ℚ[√d] rotation | **restored 0.9.2** (angles that are multiples of 30°/45°) |
+| chamfer of a *selected* edge | K1.2 stable edge-id chamfer | **restored 0.9.3** (axis-aligned box edges, exact planar wedge) |
+| counterbore holes (coaxial cyl subtraction) | K2.0 drilled solids | **restored 0.9.3** (sequential coaxial cuts) |
+| countersink holes (cone subtraction) | K2.2 conical bore cut | forge_gap |
+| engrave (text-pocket boolean) | K3.1 arbitrary-angle strokes (mixed radicals) | forge_gap |
+| draft on a quadric face | K2.2 tilt of a quadric | forge_gap |
+| boss + pilot (Solid ⊍ Cyl disjoint union) | K2.3 mixed disjoint unions | forge_gap |
+| curved-solid STEP export + STEP round-trip of a drilled plate | K3.7 freeform STEP | forge_gap |
+| fillet on a non-planar base | K5.2 general blends | forge_gap |
+| interference of face-touching / pocketed solids | K2.x boolean robustness on degenerate contact | forge_gap |
 
 Deliberately **dropped** (not merely deferred), with an actionable message:
 

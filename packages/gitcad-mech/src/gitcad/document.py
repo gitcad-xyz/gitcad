@@ -559,24 +559,26 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
         # the workhorse mech feature as one intent-level op.
         x, y, top_z = p["x"], p["y"], p["top_z"]
         depth, dia = p["depth"], p["diameter"]
-        tool = kernel.transform(kernel.cylinder(dia / 2, depth),
-                                translate=(x, y, top_z - depth))
+        # Cut each coaxial tool SEQUENTIALLY rather than pre-unioning them: a
+        # box minus stacked coaxial cylinders is an exact drilled solid
+        # (counterbore stack), whereas cutting a pre-fused quadric union is not
+        # yet supported. Geometry is identical either way.
+        out = kernel.boolean("cut", ins[0], kernel.transform(
+            kernel.cylinder(dia / 2, depth), translate=(x, y, top_z - depth)))
         if p.get("cbore_diameter"):
-            cb = kernel.transform(
+            out = kernel.boolean("cut", out, kernel.transform(
                 kernel.cylinder(p["cbore_diameter"] / 2, p["cbore_depth"]),
-                translate=(x, y, top_z - p["cbore_depth"]))
-            tool = kernel.boolean("union", tool, cb)
+                translate=(x, y, top_z - p["cbore_depth"])))
         if p.get("csink_diameter"):
             # Countersink: cone from hole diameter up to csink diameter at the
             # surface; included angle defaults to the 90-deg standard.
             angle = p.get("csink_angle_deg", 90.0)
             csink_depth = ((p["csink_diameter"] - dia) / 2
                            / math.tan(math.radians(angle / 2)))
-            cs = kernel.transform(
+            out = kernel.boolean("cut", out, kernel.transform(
                 kernel.cone(dia / 2, p["csink_diameter"] / 2, csink_depth),
-                translate=(x, y, top_z - csink_depth))
-            tool = kernel.boolean("union", tool, cs)
-        return kernel.boolean("cut", ins[0], tool)
+                translate=(x, y, top_z - csink_depth)))
+        return out
     if f.op == "engrave":
         # SW-map P8: sketch text as geometry — the shared stroke font
         # (same glyphs as ECAD silkscreen) cut into the top face as

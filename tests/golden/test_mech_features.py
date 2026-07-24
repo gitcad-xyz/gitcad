@@ -17,7 +17,6 @@ def kernel():
     return RefKernel()
 
 
-@pytest.mark.forge_gap
 def test_chamfer_one_edge_volume(kernel) -> None:
     box = kernel.box(10, 10, 10)
     edges = kernel.entities(box, "edge")
@@ -58,7 +57,6 @@ def test_circular_pattern(kernel) -> None:
     assert v == pytest.approx(6 * 5 * 2 * 3, rel=1e-6)   # no overlap at r=10
 
 
-@pytest.mark.forge_gap
 def test_counterbore_hole(kernel) -> None:
     doc = Document()
     plate = doc.add(Feature(op="box", params={"dx": 30, "dy": 30, "dz": 10}))

@@ -84,6 +84,30 @@ def _face_area(frags) -> float:
     return sum(_poly_area_centroid(p.verts)[1] for p in frags)
 
 
+def _tri_prism_along(ea: int, tri2d, a_lo, a_hi):
+    """A triangular prism: the 2D triangle ``tri2d`` (in the two axes other than
+    ``ea``) extruded along axis ``ea`` from ``a_lo`` to ``a_hi``. Exact vertices;
+    outward-oriented (a chamfer wedge to subtract)."""
+    from forgekernel.brep import Polygon, Solid
+
+    eb, ec = (i for i in range(3) if i != ea)
+
+    def pt(a, b, c):
+        p = [None, None, None]
+        p[ea], p[eb], p[ec] = a, b, c
+        return tuple(p)
+
+    bot = [pt(a_lo, b, c) for (b, c) in tri2d]
+    top = [pt(a_hi, b, c) for (b, c) in tri2d]
+    polys = [Polygon(bot, "chamfer.cap"), Polygon(list(reversed(top)), "chamfer.cap")]
+    n = len(tri2d)
+    for i in range(n):
+        j = (i + 1) % n
+        polys.append(Polygon([bot[i], bot[j], top[j], top[i]], "chamfer.side"))
+    s = Solid(polys)
+    return Solid([p.flipped() for p in s.polys]) if s.volume() < 0 else s
+
+
 def _face_centroid(frags) -> list[float]:
     """Area-weighted centroid of a logical face's fragments (each a true
     polygon centroid weighted by true area), for geometry-based face selection."""
@@ -711,15 +735,64 @@ class RefKernel:
                 op="fillet", diagnostic="NotYetImplemented", kernel="ref"))
 
     def chamfer(self, shape, edges, distance):
-        if edges:
-            _nope("chamfer(selected edges)", "K1.2 (edge enumeration ids)")
         from forgekernel.kernel import chamfer as fk_chamfer
 
-        try:
-            return fk_chamfer(shape, distance)
-        except ValueError as exc:
-            raise KernelError(str(exc), FailureSignature(
-                op="chamfer", diagnostic="NotYetImplemented", kernel="ref"))
+        if not edges:
+            try:
+                return fk_chamfer(shape, distance)
+            except ValueError as exc:
+                raise KernelError(str(exc), FailureSignature(
+                    op="chamfer", diagnostic="NotYetImplemented", kernel="ref"))
+
+        # selected edges: exact 45° wedge cut per axis-aligned box edge — a
+        # planar, rational operation (the chamfer facet's endpoints are rational).
+        from forgekernel.brep import Solid
+
+        box = self._box_check(shape) if isinstance(shape, Solid) else None
+        if box is None:
+            _nope("chamfer(selected edges of a non-box)", "K5.2 (general blends)")
+        lo, hi = box
+        all_edges = self._sorted_edges(shape)
+        d = distance if isinstance(distance, Fraction) else Fraction(str(distance))
+        if d <= 0:
+            raise KernelError(
+                f"chamfer distance must be positive (got {float(d)})",
+                FailureSignature(op="chamfer", diagnostic="BadInput", kernel="ref"))
+        out = shape
+        for idx in edges:
+            e = all_edges[idx]
+            dirv = [float(x) for x in e["dir"]]
+            axes = [i for i in range(3) if abs(dirv[i]) > 1e-12]
+            if len(axes) != 1:
+                _nope("chamfer(non-axis-aligned edge)", "K5.2 (general blends)")
+            ea = axes[0]
+            eb, ec = (i for i in range(3) if i != ea)
+            mid = _edge_midpoint(e)
+
+            def _snap(val, loi, hii):
+                if abs(val - float(loi)) < 1e-9:
+                    return loi, 1
+                if abs(val - float(hii)) < 1e-9:
+                    return hii, -1
+                return None
+
+            sb, sc = _snap(mid[eb], lo[eb], hi[eb]), _snap(mid[ec], lo[ec], hi[ec])
+            if sb is None or sc is None:
+                _nope("chamfer(interior edge)", "K5.2 (general blends)")
+            (pb, db), (pc, dc) = sb, sc
+            tri = [(pb, pc), (pb + d * db, pc), (pb, pc + d * dc)]
+            wedge = _tri_prism_along(ea, tri, lo[ea], hi[ea])
+            try:
+                out = self._fk.boolean("cut", out, wedge)
+            except (ValueError, ArithmeticError) as exc:
+                raise KernelError(
+                    f"chamfer: distance {float(d)} too large for the edge ({exc})",
+                    FailureSignature(op="chamfer", diagnostic="BadInput", kernel="ref"))
+            if not getattr(out, "polys", None) or out.volume() <= 0:
+                raise KernelError(
+                    f"chamfer: distance {float(d)} removes the whole cross-section",
+                    FailureSignature(op="chamfer", diagnostic="BadInput", kernel="ref"))
+        return out
 
     def shell(self, shape, remove_faces, thickness):
         from forgekernel.brep import Solid
