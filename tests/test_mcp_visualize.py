@@ -74,6 +74,29 @@ def test_page_ships_the_drawing_tab() -> None:
     assert "drawingAvail" in PAGE
 
 
+def test_github_report_is_consent_gated_by_default() -> None:
+    r = S.REGISTRY["github_report"](repo="gitcad-xyz/gitcad", title="t",
+                                    body="b", kind="issue")
+    assert r["ok"] and r["preview"] is True
+    assert r["would_file"]["repo"] == "gitcad-xyz/gitcad"
+    assert "filed" not in r                       # nothing was filed
+    bad = S.REGISTRY["github_report"](repo="x/y", title="t", body="b", kind="bogus")
+    assert bad["ok"] is False                      # decorator catches the ValueError
+
+
+def test_update_apply_preview_does_not_run_pip(monkeypatch) -> None:
+    monkeypatch.setattr(S, "_pypi_latest", lambda pkg="gitcad": "999.0.0")
+    r = S.REGISTRY["update_apply"](confirm=False)
+    assert r["ok"] and r.get("preview") is True and r["to"] == "999.0.0"
+
+
+def test_update_check_reports_versions(monkeypatch) -> None:
+    monkeypatch.setattr(S, "_server_version", lambda: "0.8.0")
+    monkeypatch.setattr(S, "_pypi_latest", lambda pkg="gitcad": "0.8.0")
+    r = S.REGISTRY["update_check"]()
+    assert r["ok"] and r["current"] == "0.8.0" and r["update_available"] is False
+
+
 @pytest.mark.occt
 def test_drawing_endpoint_serves_svg_and_pdf_for_a_model() -> None:
     r = S.REGISTRY["viewer_open"](design=_MODEL)

@@ -1194,6 +1194,121 @@ def viewer_close(url: str = "", path: str = "") -> dict[str, Any]:
     return {"ok": True, "stopped": stopped}
 
 
+# -- reporting to GitHub (consent-gated) + self-update ------------------------
+
+
+@tool("github_report")
+def github_report(repo: str, title: str, body: str, kind: str = "issue",
+                  labels: list[str] | None = None, confirm: bool = False) -> dict[str, Any]:
+    """File a GitHub **issue** (kind='issue') or **pull request** (kind='pr')
+    against ``repo`` (``owner/name``). CONSENT-GATED by default: without
+    ``confirm=true`` it only PREVIEWS what would be filed and files nothing —
+    show the preview to the user and re-invoke with ``confirm=true`` ONLY after
+    they agree. Uses the ``gh`` CLI (must be installed and authenticated); a PR
+    also needs a pushed branch."""
+    if kind not in ("issue", "pr"):
+        raise ValueError("kind must be 'issue' or 'pr'")
+    if not confirm:
+        return {"ok": True, "preview": True,
+                "would_file": {"repo": repo, "kind": kind, "title": title,
+                               "body": body, "labels": labels or []},
+                "note": "Nothing was filed. Ask the user to approve, then "
+                        "re-invoke with confirm=true."}
+    import shutil
+    import subprocess
+
+    if shutil.which("gh") is None:
+        return {"ok": False, "error": {"type": "NoGitHubCLI", "message":
+                "the GitHub CLI 'gh' is not installed or not on PATH"}}
+    if kind == "issue":
+        cmd = ["gh", "issue", "create", "-R", repo, "-t", title, "-b", body]
+        for lab in (labels or []):
+            cmd += ["-l", lab]
+    else:
+        cmd = ["gh", "pr", "create", "-R", repo, "-t", title, "-b", body]
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    if p.returncode != 0:
+        return {"ok": False, "error": {"type": "GitHubError",
+                "message": (p.stderr or p.stdout).strip()[:500]}}
+    return {"ok": True, "filed": True, "kind": kind, "url": p.stdout.strip()}
+
+
+def _pypi_latest(pkg: str = "gitcad") -> str:
+    import json as _json
+    import urllib.request
+
+    with urllib.request.urlopen(f"https://pypi.org/pypi/{pkg}/json", timeout=5) as r:
+        return _json.load(r)["info"]["version"]
+
+
+@tool("update_check")
+def update_check() -> dict[str, Any]:
+    """Check PyPI for a newer gitcad release. Read-only: returns the installed
+    version, the latest on PyPI, and whether an update is available."""
+    current = _server_version()
+    try:
+        latest = _pypi_latest("gitcad")
+    except Exception as exc:         # noqa: BLE001
+        return {"ok": False, "error": {"type": "PyPIUnreachable", "message": str(exc)}}
+    return {"ok": True, "current": current, "latest": latest,
+            "update_available": current not in ("unknown", latest)}
+
+
+@tool("update_apply")
+def update_apply(confirm: bool = False) -> dict[str, Any]:
+    """Update gitcad to the latest PyPI release (``pip install -U gitcad``).
+    CONSENT-GATED: without ``confirm=true`` it only reports what it would do.
+    Restart the MCP server afterwards for the new version to load."""
+    chk = update_check()
+    if not chk.get("ok"):
+        return chk
+    if not chk["update_available"]:
+        return {"ok": True, "updated": False, "reason": "already up to date", **chk}
+    if not confirm:
+        return {"ok": True, "preview": True, "from": chk["current"], "to": chk["latest"],
+                "note": "Ask the user to approve, then re-invoke with confirm=true."}
+    import subprocess
+    import sys
+
+    p = subprocess.run([sys.executable, "-m", "pip", "install", "-U", "gitcad"],
+                       capture_output=True, text=True)
+    if p.returncode != 0:
+        return {"ok": False, "error": {"type": "PipError",
+                "message": p.stderr.strip()[:500]}}
+    return {"ok": True, "updated": True, "to": chk["latest"],
+            "note": "Restart the MCP server for the new version to take effect."}
+
+
+def _start_update_watch(interval_s: int = 6 * 3600) -> None:
+    """Periodically check PyPI for a newer gitcad and surface it on stderr (the
+    host's log), so the user is prompted rather than silently updated. Set
+    ``GITCAD_MCP_AUTO_UPDATE=1`` to also apply updates automatically."""
+    import os
+    import sys
+    import threading
+    import time
+
+    auto = os.environ.get("GITCAD_MCP_AUTO_UPDATE") == "1"
+
+    def loop() -> None:
+        while True:
+            try:
+                chk = update_check()
+                if chk.get("update_available"):
+                    print(f"[gitcad] update available: {chk['current']} -> "
+                          f"{chk['latest']}"
+                          + (" — applying (GITCAD_MCP_AUTO_UPDATE=1)" if auto
+                             else " — call update_apply(confirm=true) to install"),
+                          file=sys.stderr, flush=True)
+                    if auto:
+                        update_apply(confirm=True)
+            except Exception:        # noqa: BLE001 - a watcher must never crash the server
+                pass
+            time.sleep(interval_s)
+
+    threading.Thread(target=loop, daemon=True).start()
+
+
 def _server_version() -> str:
     try:
         from importlib.metadata import version
@@ -1231,6 +1346,7 @@ def main() -> None:  # pragma: no cover - process entrypoint
     server = FastMCP("gitcad")
     for name, fn in REGISTRY.items():
         server.add_tool(_image_bridge(fn, _Image), name=name)
+    _start_update_watch()            # periodic PyPI update check (surfaced on stderr)
     server.run()
 
 
