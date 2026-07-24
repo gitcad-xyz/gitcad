@@ -54,7 +54,8 @@ PAGE = r"""<!DOCTYPE html>
   .rev .pane h4{color:#57606a;margin:0 0 4px;font-size:11px}
   .rev .pane svg{max-width:100%;height:auto;display:block}
   #drawing{position:fixed;inset:0;display:none;background:#fff}
-  #drawing iframe{width:100%;height:100%;border:0}
+  #drawing .dwrap{position:absolute;inset:38px 0 0 0;overflow:auto;text-align:center}
+  #drawing .dwrap svg{max-width:98%;height:auto}
   #drawing .dbar{position:fixed;right:14px;top:10px;display:flex;gap:8px;z-index:6}
   #drawing .dbar a{color:#0969da;font-size:12px;text-decoration:none;background:#fff;
                    border:1px solid #d0d7de;border-radius:6px;padding:2px 9px}
@@ -438,11 +439,11 @@ function renderTabs(){
   if(activeTab === "3d") mk("measure", "measure", "tool");
 }
 function loadDrawing(){
-  const v = version || "";
-  document.getElementById("drawing").innerHTML =
-    `<div class="dbar"><a href="/api/drawing.pdf?v=${v}" target="_blank">open PDF ⤢</a>` +
-    `<a href="/api/drawing.svg?v=${v}" target="_blank">SVG</a></div>` +
-    `<iframe src="/api/drawing.pdf?v=${v}"></iframe>`;
+  const v = version || "", el = document.getElementById("drawing");
+  el.innerHTML = `<div class="dbar"><a href="/api/drawing.pdf?v=${v}" target="_blank">download PDF ⤓</a></div><div class="dwrap">loading drawing…</div>`;
+  fetch(`/api/drawing.svg?v=${v}`).then(r => r.text()).then(svg => {
+    el.querySelector(".dwrap").innerHTML = svg;      // inline SVG, one page
+  }).catch(e => { el.querySelector(".dwrap").textContent = "drawing unavailable: " + e; });
 }
 function showTab(){
   document.getElementById("sheets").style.display = activeTab === "sheets" ? "block" : "none";
