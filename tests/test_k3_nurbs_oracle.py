@@ -535,3 +535,51 @@ def test_spline_profile_extrude_matches_occt() -> None:
     g = GProp_GProps()
     BRepGProp.VolumeProperties_s(solid, g)
     assert abs(float(v_ref) - abs(g.Mass())) < 1e-6
+
+
+@pytest.mark.occt
+def test_trimmed_region_classification_beats_occt_tolerance() -> None:
+    """K7 point-in-trimmed-region: forge's even-odd parity decides in/on/out
+    in ℚ with NO tolerance, so it correctly calls a point one nanometre
+    (1e-9) inside a boundary "in". OCCT's BRepClass_FaceClassifier is
+    tolerance-based: at a realistic 1e-7 it rounds those same interior
+    points to "on" (wrong). This is the exactness win — forge distinguishes
+    near-boundary points OCCT cannot, and its answer never flips with a
+    tolerance knob."""
+    from OCP.BRepBuilderAPI import (BRepBuilderAPI_MakeFace,
+                                    BRepBuilderAPI_MakePolygon)
+    from OCP.BRepClass import BRepClass_FaceClassifier
+    from OCP.gp import gp_Dir, gp_Pln, gp_Pnt, gp_Pnt2d
+    from OCP.TopAbs import TopAbs_IN, TopAbs_ON, TopAbs_OUT
+
+    from forgekernel.nurbs import BSplineSurface
+    from forgekernel.trim import TrimmedPatch
+
+    square = [(0, 0), (10, 0), (10, 10), (0, 10)]
+    plane = BSplineSurface(1, 1, [[(0, 0, 0), (0, 10, 0)], [(10, 0, 0), (10, 10, 0)]],
+                           [0, 0, 10, 10], [0, 0, 10, 10])
+    tp = TrimmedPatch(plane, [square])
+
+    poly = BRepBuilderAPI_MakePolygon()
+    for x, y in square:
+        poly.Add(gp_Pnt(x, y, 0))
+    poly.Close()
+    pln = gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1))         # UV == XY
+    face = BRepBuilderAPI_MakeFace(pln, poly.Wire(), True).Face()
+    state = {TopAbs_IN: "in", TopAbs_OUT: "out", TopAbs_ON: "on"}
+
+    def occt(u, v, tol):
+        cl = BRepClass_FaceClassifier(face, gp_Pnt2d(float(u), float(v)), tol)
+        return state.get(cl.State(), "?")
+
+    eps = Fraction(1, 10 ** 9)                              # 1 nm inside
+    interior = [(Fraction(5), eps), (eps, Fraction(5)), (eps, eps)]
+    for u, v in interior:
+        assert tp.classify(u, v) == "in"                   # forge: exact, no tol
+        assert occt(u, v, 1e-7) == "on"                    # OCCT: tolerance-fooled
+    # forge's verdict is tolerance-independent by construction; OCCT's flips
+    assert tp.classify(Fraction(5), eps) == "in"
+    # exactly on the boundary is an honest "on", not silently in/out
+    assert tp.classify(Fraction(5), 0) == "on"
+    assert tp.classify(Fraction(5), Fraction(5)) == "in"   # deep interior: agree
+    assert occt(5, 5, 1e-7) == "in"

@@ -50,6 +50,34 @@ sharp-cornered sweeps OCCT's float pipe rejects, *and* the coil spring
 — the last holdout — now lands as a certified build (see K3.0 below).
 OCCT fails two models forge builds; forge fails none.
 
+### K7 — trimmed-patch point classification: exactness beats tolerance (this iteration)
+
+The first piece of the freeform-boolean crown: which side of a trim
+boundary a point lies on. forge's `trim.TrimmedPatch.classify` runs
+even-odd ray parity in ℚ and returns `in` / `on` / `out` with **no
+tolerance**; OCCT's `BRepClass_FaceClassifier` is tolerance-parametrised.
+Probing points one nanometre (1e-9) *inside* a square face's boundary
+(`tests/test_k3_nurbs_oracle.py::test_trimmed_region_classification_beats_occt_tolerance`,
+oracle-checked live against the OCCT wheel):
+
+| probe (1e-9 inside edge) | forge (exact) | OCCT tol 1e-7 | OCCT tol 1e-12 |
+|---|:---:|:---:|:---:|
+| near bottom edge | **in** | on ✗ | in |
+| near left edge | **in** | on ✗ | on ✗ |
+| near corner | **in** | on ✗ | on ✗ |
+| dead centre | in | in | in |
+
+Every probe is strictly interior; forge says so exactly. OCCT at a
+realistic 1e-7 rounds all three to `on` (wrong), and even at 1e-12 still
+misclassifies two. forge's verdict is tolerance-independent by
+construction — it distinguishes near-boundary points OCCT cannot, and a
+point exactly on the edge is reported as an honest `on`, never silently
+bucketed. This is the ADR-0019 principle made concrete at the boundary:
+a topological decision decided by ℚ, not by a fudge factor. (The trimmed
+*surface* measure remains future work — the trim curve is polyline-
+approximated in parameter space, so that integral is not yet exact, and
+the roadmap says so.)
+
 ### K3.0 — the coil spring, and the certified-interval charter (this iteration)
 
 The spring is the first *transcendental* geometry: its volume is
