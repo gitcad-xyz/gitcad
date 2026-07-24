@@ -78,9 +78,14 @@ machinery.
 - Freeform STEP **topology**: trimmed `ADVANCED_FACE` over B-spline
   surfaces → importable freeform solids (consumes K7's trimmed-patch
   type). This is the real-world STEP round-trip for SolidWorks exports.
-- Smooth (spline-fit) multi-section lofts: cubic B-spline interpolation
-  through section rows (exact tridiagonal solve), surface exact; solid
-  volume certified once K7 lands.
+- **✅ Smooth (spline-fit) multi-section lofts** (done). Natural cubic
+  spline through the section rows (exact ℚ tridiagonal solve); `LoftSolid`
+  returns **exact volume AND exact centroid** by polynomial integration of
+  the shoelace area, its Qx/Qy area-moments, and z·A per spline segment.
+  Along the way, fixed a latent bbox-centre-as-centroid approximation in
+  both `LoftSolid` and `SplinePrism` — now both give the true first-moment
+  centroid in ℚ (spline-prism oracle-checked against OCCT). Full B-spline
+  *surface* skin still pending the trimmed-topology assembly above.
 - Sign-varying rational weights in SSI (rare in practice; low priority).
 
 ### K5.2 / K4.2 — blend & offset edges **[K]**
