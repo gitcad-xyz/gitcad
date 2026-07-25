@@ -366,8 +366,15 @@ class RefKernel:
                 return SphereOverlap(a, b, op)
             except ValueError:
                 pass  # not overlapping / nested / irrational → fall through
+        from forgekernel.quadric import RevolveSolid, RoundedBox
+
         axis_prims = (Cyl, Cone, Sphere)
-        curved = (Cyl, Cone, Sphere, AxisStack, DisjointUnion)
+        # RevolveSolid, RoundedBox and DrilledSolid belong here too: they are
+        # every bit as "curved", and leaving them out meant a union with a box
+        # FAR AWAY -- provably disjoint by exact bbox separation -- never even
+        # reached the DisjointUnion path and died in the planar BSP engine.
+        curved = (Cyl, Cone, Sphere, AxisStack, DisjointUnion, RevolveSolid,
+                  RoundedBox, DrilledSolid)
         if op == "union" and (isinstance(a, curved) or isinstance(b, curved)):
             # planar Solid+Solid never reaches here — it stays on the exact
             # BSP engine below. Curved operands: coaxial quadrics fuse into
@@ -396,6 +403,10 @@ class RefKernel:
                 raise KernelError(str(exc), FailureSignature(
                     op="boolean.cut", diagnostic="NotYetImplemented",
                     kernel="ref"))
+        if isinstance(b, Cyl) and op == "cut":
+            lathe = self._bore_lathe(a, b)
+            if lathe is not None:
+                return lathe
         if isinstance(b, Cyl) and op == "cut" and isinstance(a, Cyl):
             from forgekernel.quadric import bore_cyl
 
@@ -958,6 +969,18 @@ class RefKernel:
                 shape.cx, shape.cy
         return None, None, None
 
+    def _bore_lathe(self, a, tool):
+        """A coaxial cylinder through a solid of revolution is another solid
+        of revolution — exactly, with no surface-surface intersection."""
+        from forgekernel.quadric import RevolveSolid
+
+        prof, cx, cy = self._lathe_profile(a)
+        if prof is None or (tool.cx, tool.cy) != (cx, cy):
+            return None                      # not a lathe, or not coaxial
+        out = _bore_lathe_profile(prof, Fraction(tool.r),
+                                  Fraction(tool.z0), Fraction(tool.z1))
+        return RevolveSolid(out, cx, cy)
+
     def _chamfer_lathe(self, shape, d):
         """Chamfer a solid of revolution by chamfering its PROFILE.
 
@@ -1500,3 +1523,29 @@ def _lathe_body(segs, cx, cy):
     from forgekernel import body as B
 
     return B.lathe_body(segs, cx, cy)
+
+
+def _bore_lathe_profile(prof, tool_r, zlo, zhi):
+    """Bore a coaxial hole of radius ``tool_r`` through a lathed profile.
+
+    A cylinder coaxial with a solid of revolution cuts it into another solid
+    of revolution — no surface–surface intersection and no conic sections,
+    because the tool's wall meets the profile plane in a straight line. The
+    profile's points ON THE AXIS become the bore wall.
+
+    Refuses unless the bore passes clean through and stays strictly inside the
+    material: a partial bore leaves a blind pocket whose floor is a new face,
+    and a bore wider than the part at some height is a different solid
+    entirely.
+    """
+    zs = [z for _r, z in prof]
+    if zlo > min(zs) or zhi < max(zs):
+        _nope("boolean.cut(bore does not pass through the lathe)", "K2.2")
+    on_axis = [i for i, (r, _z) in enumerate(prof) if r == 0]
+    if not on_axis:
+        _nope("boolean.cut(lathe already has a bore)", "K2.2")
+    for i, (r, _z) in enumerate(prof):
+        if i not in on_axis and r < tool_r:
+            _nope("boolean.cut(bore is wider than the lathe at some height)",
+                  "K2.2")
+    return [(tool_r if r == 0 else r, z) for r, z in prof]
