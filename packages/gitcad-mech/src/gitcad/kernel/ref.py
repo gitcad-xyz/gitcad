@@ -249,6 +249,7 @@ class RefKernel:
 
     def transform(self, shape, *, translate=(0, 0, 0),
                   rotate_axis=(0, 0, 1), rotate_deg: float = 0.0):
+        from forgekernel.brep import Solid
         from forgekernel.quadric import (AxisStack, Cone, Cyl, DisjointUnion,
                                          DrilledSolid, RevolveSolid, Sphere)
         from forgekernel.curve import TubeSolid
@@ -280,6 +281,12 @@ class RefKernel:
                     "transform an AxisStack", shape,
                     rotate_axis, rotate_deg, translate)
             return shape
+        if not isinstance(shape, Solid):
+            # any other representation with a converter (a rounded box, say)
+            # transforms through the canonical form rather than refusing
+            return self._transform_via_body(
+                f"transform a {type(shape).__name__}", shape,
+                rotate_axis, rotate_deg, translate)
         out = shape
         if rotate_deg:
             axis = {(1, 0, 0): "x", (0, 1, 0): "y", (0, 0, 1): "z"}.get(
@@ -662,8 +669,10 @@ class RefKernel:
                 return shape.tessellate(deflection)
             except TypeError:
                 return shape.tessellate()
-        raise NotImplementedError(
-            f"tessellate not implemented for {type(shape).__name__} (K2.x)")
+        # ADR-0021: anything with a converter meshes through the canonical
+        # form. A rounded box HAS one now, and was still refusing here.
+        return self._via_body("tessellate", shape,
+                              lambda b: B.tessellate(b, deflection))
 
     # -- honest refusals (each names its stage) -------------------------------
 
@@ -1358,8 +1367,23 @@ class RefKernel:
     def export_stl(self, shape, path, *, deflection=0.1):
         from forgekernel import io
 
+        try:
+            text = io.to_stl(shape)
+        except AttributeError:
+            # io.to_stl expects a planar Solid; everything else meshes through
+            # the canonical form, which is the same mesh tessellate() returns
+            mesh = self.tessellate(shape, deflection=deflection)
+            v = mesh["vertices"]
+            out = ["solid forge"]
+            for a, b, c in mesh["triangles"]:
+                out += ["facet normal 0 0 0", "outer loop"]
+                out += [f"vertex {v[i][0]:.9g} {v[i][1]:.9g} {v[i][2]:.9g}"
+                        for i in (a, b, c)]
+                out += ["endloop", "endfacet"]
+            out.append("endsolid forge")
+            text = chr(10).join(out) + chr(10)
         with open(path, "w", newline=chr(10)) as f:
-            f.write(io.to_stl(shape))
+            f.write(text)
 
     def export_brep(self, shape, path):
         from forgekernel import io
