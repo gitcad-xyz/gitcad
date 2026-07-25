@@ -73,3 +73,28 @@ def test_a_slanted_profile_edge_refuses_rather_than_thin_the_wall(k) -> None:
 def test_a_thickness_that_eats_the_solid_refuses(k) -> None:
     with pytest.raises(Exception, match="thickness exceeds"):
         k.shell(Cyl(0, 0, 5, 0, 12), [], 9.0)
+
+
+def test_a_sphere_has_no_edges_to_blend(k) -> None:
+    """fillet and chamfer of a sphere are the sphere. Returning it unchanged
+    is the correct answer, not a refusal — there is no edge to act on."""
+    from forgekernel.quadric import Sphere
+
+    s = Sphere(0, 0, 0, 6)
+    assert k.fillet(s, [], 1) is s
+    assert k.chamfer(s, [], 1) is s
+
+
+def test_a_hollow_ball_is_the_difference_of_two_spheres(k) -> None:
+    from forgekernel.quadric import Sphere
+
+    out = k.shell(Sphere(0, 0, 0, 6), [], 1.0)
+    assert k.mass_props(out)["volume"] == pytest.approx(
+        4 / 3 * math.pi * (6 ** 3 - 5 ** 3))
+
+
+def test_hollowing_a_sphere_thinner_than_itself_refuses(k) -> None:
+    from forgekernel.quadric import Sphere
+
+    with pytest.raises(Exception, match="exceeds the sphere"):
+        k.shell(Sphere(0, 0, 0, 6), [], 9.0)

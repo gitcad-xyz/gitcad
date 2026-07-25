@@ -882,7 +882,10 @@ class RefKernel:
         from forgekernel.quadric import FilletedBox
 
         if not isinstance(shape, Solid) and not edges:
-            from forgekernel.quadric import DisjointUnion, DrilledSolid
+            from forgekernel.quadric import DisjointUnion, DrilledSolid, Sphere
+
+            if isinstance(shape, Sphere):
+                return shape        # a sphere has no edges to blend
 
             r = (radius if isinstance(radius, Fraction)
                  else Fraction(str(radius)))
@@ -1040,6 +1043,10 @@ class RefKernel:
 
             d = (distance if isinstance(distance, Fraction)
                  else Fraction(str(distance)))
+            from forgekernel.quadric import Sphere
+
+            if isinstance(shape, Sphere):
+                return shape        # a sphere has no edges to bevel
             if isinstance(shape, DrilledSolid):
                 # chamfer the BASE and re-drill: DrilledSolid.cut validates
                 # that every bore still lands inside the (now smaller) solid,
@@ -1222,6 +1229,20 @@ class RefKernel:
                     return B.Body(tuple(f for q in parts
                                         for f in B.to_body(q).faces))
                 return DisjointUnion._unchecked(parts)
+            from forgekernel.quadric import Sphere
+
+            if isinstance(shape, Sphere):
+                # a hollow ball: the void is the concentric sphere t smaller,
+                # turned inside out. Exact at (4/3)pi(R^3 - (R-t)^3).
+                from forgekernel import body as B
+
+                inner = Sphere(shape.cx, shape.cy, shape.cz, shape.r - t)
+                if inner.r <= 0:
+                    _nope("shell(thickness exceeds the sphere's radius)", "K4.2")
+                void = B.to_body(inner)
+                return B.Body(B.to_body(shape).faces
+                              + tuple(B.Face(f.surface, f.loops, not f.sense)
+                                      for f in void.faces))
             lathe = self._shell_lathe(shape, t)
             if lathe is not None:
                 return lathe
