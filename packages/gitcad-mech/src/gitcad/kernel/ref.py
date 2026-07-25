@@ -410,6 +410,23 @@ class RefKernel:
                 raise KernelError(str(exc), FailureSignature(
                     op="boolean.cut", diagnostic="NotYetImplemented",
                     kernel="ref"))
+        if op == "cut" and isinstance(b, Solid) and isinstance(a, DrilledSolid):
+            base = self.boolean("cut", a.base, b)
+            out = DrilledSolid(base, [])
+            try:
+                for c in a.bores:
+                    out = out.cut(c)
+            except ValueError as exc:
+                _nope(f"boolean.cut(drilled solid: {exc})", "K2.1")
+            return out
+        if op == "cut" and isinstance(a, DisjointUnion):
+            # (A u B) \ C distributes over disjoint members, and cutting only
+            # SHRINKS each one, so disjointness survives without re-checking
+            try:
+                return DisjointUnion._unchecked(
+                    [self.boolean("cut", m, b) for m in a.members])
+            except KernelError:
+                raise
         if op == "cut":
             pocket = self._pocket_lathe(a, b)
             if pocket is not None:
@@ -888,8 +905,13 @@ class RefKernel:
         if not isinstance(shape, Solid) and not edges:
             from forgekernel.quadric import DisjointUnion, DrilledSolid, Sphere
 
-            if isinstance(shape, Sphere):
-                return shape        # a sphere has no edges to blend
+            from forgekernel.quadric import RoundedBox
+
+            if isinstance(shape, (Sphere, RoundedBox)):
+                # neither carries a SHARP edge: a sphere has none at all and a
+                # rounded box's are already tangent-continuous blends, so
+                # "round every sharp edge" has nothing to act on
+                return shape
 
             r = (radius if isinstance(radius, Fraction)
                  else Fraction(str(radius)))
@@ -1017,10 +1039,26 @@ class RefKernel:
         # or the prism breaks out through a wall and the faces are not these
         far2 = max((x - cx) ** 2 + (y - cy) ** 2
                    for x in (x0, x1) for y in (y0, y1))
-        near2 = min(r * r for r, z in prof if za <= z <= zb) if any(
-            za <= z <= zb for _r, z in prof) else None
-        edge_r = [r for r, z in prof if za <= z <= zb and r > 0]
-        if not edge_r or far2 >= min(r * r for r in edge_r):
+        # The material radius over [za, zb] is NOT the same as the profile's
+        # VERTEX radii there: on a cone the wall shrinks between vertices, and
+        # a vertex outside the range still bounds the material inside it. Walk
+        # every profile EDGE, clip it to the range, and take the true minimum
+        # over both walls — otherwise the guard over-estimates the material and
+        # accepts a prism that breaks straight out through the side.
+        walls = []
+        n = len(prof)
+        for i in range(n):
+            (r1, w1), (r2, w2) = prof[i], prof[(i + 1) % n]
+            if w1 == w2:
+                continue                       # a disk bounds nothing radially
+            lo_, hi_ = (w1, w2) if w1 < w2 else (w2, w1)
+            ca, cbz = max(lo_, za), min(hi_, zb)
+            if ca > cbz:
+                continue
+            for zz in (ca, cbz):
+                walls.append(r1 + (r2 - r1) * (zz - w1) / (w2 - w1))
+        solid = [w for w in walls if w > 0]
+        if not solid or far2 >= min(w * w for w in solid):
             _nope("boolean.cut(the prism reaches the lathe's wall)", "K2.2")
         return _pocket_lathe_body(prof, cx, cy, (x0, y0, x1, y1), za, zb,
                                   open_top)
@@ -1089,8 +1127,10 @@ class RefKernel:
                  else Fraction(str(distance)))
             from forgekernel.quadric import Sphere
 
-            if isinstance(shape, Sphere):
-                return shape        # a sphere has no edges to bevel
+            from forgekernel.quadric import RoundedBox
+
+            if isinstance(shape, (Sphere, RoundedBox)):
+                return shape        # no sharp edge to bevel
             if isinstance(shape, DrilledSolid):
                 # chamfer the BASE and re-drill: DrilledSolid.cut validates
                 # that every bore still lands inside the (now smaller) solid,
