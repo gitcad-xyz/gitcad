@@ -20,10 +20,28 @@ _K3 = "arrives at K3 (NURBS/SSI)"
 _K5 = "arrives at K5 (blends)"
 
 
-def _nope(op: str, stage: str):
+def _nope(op: str, stage: str, *, predicate: str | None = None,
+          measured: dict | None = None, remedy: str | None = None):
+    """Refuse, and say enough that the caller can do something about it.
+
+    ``predicate`` names the guard, ``measured`` carries the numbers it actually
+    saw, and ``remedy`` says in one sentence what would make it work. An agent
+    that hits a bare string has to read this file to know whether to shrink the
+    hole, move it, or give up; with these it can just act. The measured values
+    are LOCAL ONLY — they are user coordinates and never enter the signature
+    (ADR-0006/0007).
+
+    Every refusal also lands on the live rail, so a person watching sees WHY
+    the agent stopped rather than only that it did.
+    """
+    from gitcad import activity
+
+    activity.note("problem", text=f"{op} — {stage}", predicate=predicate,
+                  remedy=remedy)
     raise KernelError(
         f"ref kernel does not implement {op} yet — {stage}",
-        FailureSignature(op=op, diagnostic="NotYetImplemented", kernel="ref"))
+        FailureSignature(op=op, diagnostic="NotYetImplemented", kernel="ref"),
+        stage=stage, predicate=predicate, measured=measured, remedy=remedy)
 
 
 _SEAM_OPS = (
@@ -1239,7 +1257,22 @@ class RefKernel:
             # `w > 0` used to drop a wall TAPERING TO ZERO, so a pocket
             # spanning a cone's apex was accepted — and with no cap at that z
             # its mouth was never punched, returning an OPEN shell as a solid
-            _nope("boolean.cut(the prism reaches the lathe's wall)", "K2.2")
+            import math as _m
+
+            thinnest = min(walls) if walls else 0
+            corner = _m.sqrt(float(far2))
+            # the tool's corner is the binding constraint, so the width that
+            # fits is the inscribed square of the thinnest wall
+            fits = float(thinnest) * _m.sqrt(2)
+            _nope("boolean.cut(the prism reaches the lathe's wall)", "K2.2",
+                  predicate="prism_inside_material",
+                  measured={"tool_corner_radius": corner,
+                            "thinnest_wall_radius": float(thinnest),
+                            "z_range": [float(za), float(zb)]},
+                  remedy=(f"the tool's corner reaches r={corner:.4g} where the "
+                          f"wall is only r={float(thinnest):.4g}; a square tool "
+                          f"up to {fits:.4g} mm across fits, or keep it clear "
+                          "of this z range"))
         pairs = list(zip(prof, prof[1:] + prof[:1]))
         if not any(r1 == 0 and r2 == 0 and min(w1, w2) <= za
                    and max(w1, w2) >= zb for (r1, w1), (r2, w2) in pairs):
@@ -1479,7 +1512,14 @@ class RefKernel:
         ox, oy, oz = shape.origin
         ia, ib, ic = a - 2 * t, b - 2 * t, c - 2 * t
         if min(ia, ib, ic) <= 0:
-            _nope("shell(thickness leaves no cavity in the rounded box)", "K4.2")
+            smallest = min(a, b, c)
+            _nope("shell(thickness leaves no cavity in the rounded box)",
+                  "K4.2", predicate="cavity_is_positive",
+                  measured={"dimensions": [float(a), float(b), float(c)],
+                            "thickness": float(t)},
+                  remedy=(f"t must be under {float(smallest) / 2:.4g} mm — half "
+                          f"the smallest dimension ({float(smallest):.4g}) — or "
+                          "the walls meet and there is nothing to hollow"))
         if t < r:
             void = RoundedBox(ia, ib, ic, r - t,
                               origin=(ox + t, oy + t, oz + t))
@@ -1514,11 +1554,28 @@ class RefKernel:
         if box is None:
             return None                 # a general prism base: K4.1's inset
         (bx0, by0, bz0), (bx1, by1, bz1) = box
-        if any(Fraction(c.z0) > bz0 or Fraction(c.z1) < bz1 for c in shape.bores):
+        blind = [c for c in shape.bores
+                 if Fraction(c.z0) > bz0 or Fraction(c.z1) < bz1]
+        if blind:
             _nope("shell(drilled solid: a BLIND bore's floor erodes to a "
-                  "torus, not a cylinder)", "K4.2 (offset surfaces)")
-        if min(bx1 - bx0, by1 - by0, bz1 - bz0) <= 2 * t:
-            _nope("shell(thickness leaves no cavity)", "K4.2")
+                  "torus, not a cylinder)", "K4.2 (offset surfaces)",
+                  predicate="every_bore_is_through",
+                  measured={"solid_z": [float(bz0), float(bz1)],
+                            "blind_bores": [{"xy": [float(c.cx), float(c.cy)],
+                                             "r": float(c.r),
+                                             "z": [float(c.z0), float(c.z1)]}
+                                            for c in blind]},
+                  remedy=(f"{len(blind)} bore(s) stop inside the material; take "
+                          f"them through z {float(bz0):.4g}..{float(bz1):.4g} "
+                          "and the collar is exact, or shell before drilling"))
+        smallest = min(bx1 - bx0, by1 - by0, bz1 - bz0)
+        if smallest <= 2 * t:
+            _nope("shell(thickness leaves no cavity)", "K4.2",
+                  predicate="cavity_is_positive",
+                  measured={"smallest_dimension": float(smallest),
+                            "thickness": float(t)},
+                  remedy=(f"t must be under {float(smallest) / 2:.4g} mm — half "
+                          "the smallest dimension"))
         inner = translate(Solid.box(bx1 - bx0 - 2 * t, by1 - by0 - 2 * t,
                                     bz1 - bz0 - 2 * t),
                           bx0 + t, by0 + t, bz0 + t)
@@ -2069,9 +2126,16 @@ def _bore_lathe_profile(prof, tool_r, zlo, zhi):
             # the wall SHRINKS between vertices, and an APEX (r = 0) is a wall
             # too: excluding it by `r != 0` let a bore through a cone's tip
             # move the wall outward and report MORE volume than the uncut solid
-            if r1 + (r2 - r1) * (zz - w1) / (w2 - w1) < tool_r:
+            wall = r1 + (r2 - r1) * (zz - w1) / (w2 - w1)
+            if wall < tool_r:
                 _nope("boolean.cut(bore is wider than the lathe at some "
-                      "height)", "K2.2")
+                      "height)", "K2.2", predicate="bore_inside_material",
+                      measured={"tool_radius": float(tool_r),
+                                "wall_radius": float(wall), "at_z": float(zz),
+                                "z_range": [float(za), float(zb)]},
+                      remedy=(f"at z={float(zz):.4g} the wall is only "
+                              f"r={float(wall):.4g}; use a bore of at most that "
+                              f"radius, or stop it before that height"))
     if za > zmin and zb < zmax:
         _nope("boolean.cut(a bore open at neither end leaves an internal "
               "cavity)", "K2.2")
@@ -2206,9 +2270,22 @@ def _cap_index_at(src, zo, probe):
         _nope("boolean.cut(the pocket's open end is not a single polygonal "
               "face)", "K2.2")
     ring = [(e.v0[0], e.v0[1]) for e in cap.loops[0].edges]
-    if not all(_point_strictly_in_poly(ring, q) for q in probe):
+    outside = [q for q in probe if not _point_strictly_in_poly(ring, q)]
+    if outside:
+        xs = [p[0] for p in ring]
+        ys = [p[1] for p in ring]
+        gap = min(min(q[0] - min(xs), max(xs) - q[0],
+                      q[1] - min(ys), max(ys) - q[1]) for q in outside)
         _nope("boolean.cut(the pocket does not sit strictly inside one flat "
-              "face)", "K2.2")
+              "face)", "K2.2", predicate="mouth_inside_cap",
+              measured={"flat": [[float(min(xs)), float(min(ys))],
+                                 [float(max(xs)), float(max(ys))]],
+                        "outside_probes": [[float(a), float(b)]
+                                           for a, b in outside],
+                        "clearance": float(gap)},
+              remedy=(f"move the feature {float(-gap):.4g} mm further from the "
+                      "flat's edge, or make it smaller by twice that — past "
+                      "the flat there is a rounded band, not a plane"))
     return hits[0]
 
 

@@ -46,9 +46,35 @@ class KernelError(GitcadError):
     the user's machine.
     """
 
-    def __init__(self, message: str, signature: FailureSignature) -> None:
+    def __init__(self, message: str, signature: FailureSignature, *,
+                 stage: str | None = None, predicate: str | None = None,
+                 measured: dict | None = None,
+                 remedy: str | None = None) -> None:
         super().__init__(message)
         self.signature = signature
+        self.stage = stage
+        """The roadmap stage that will deliver this, e.g. ``"K4.2"``."""
+        self.predicate = predicate
+        """The named guard that refused, e.g. ``"mouth_inside_cap"``."""
+        self.measured = dict(measured or {})
+        """The numbers the guard actually saw.
+
+        LOCAL ONLY. These are user coordinates, so they must never enter the
+        :class:`FailureSignature` and never leave the machine — the signature
+        exists precisely so a failure can be fingerprinted without them
+        (ADR-0006/0007). They are here for the agent that just called the op
+        and for the viewer showing the human why it stopped.
+        """
+        self.remedy = remedy
+        """What would make it work, in one sentence an agent can act on."""
+
+    def as_dict(self) -> dict:
+        """The refusal as data — for an agent deciding what to try next, and
+        for the live rail. A refusal an agent has to parse out of prose is a
+        refusal it cannot act on."""
+        return {"message": str(self), "op": self.signature.op,
+                "stage": self.stage, "predicate": self.predicate,
+                "measured": self.measured, "remedy": self.remedy}
 
 
 class GeometryInvalidError(KernelError):
