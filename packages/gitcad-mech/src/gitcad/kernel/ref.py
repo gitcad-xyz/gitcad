@@ -20,6 +20,38 @@ _K3 = "arrives at K3 (NURBS/SSI)"
 _K5 = "arrives at K5 (blends)"
 
 
+def _exact_volume(shape) -> float:
+    """The volume, from the CANONICAL form, rendered once at the boundary.
+
+    ``AxisStack.volume()`` integrates its z-slabs in float and wraps the result
+    in a ``PiVal`` — a float laundered into an exact-looking type, which is the
+    worst arrangement available: it reads as exact and is not. It is also
+    POSITION-DEPENDENT, so the same sphere reports a different volume after a
+    translation:
+
+        Sphere(1.5, 1.5, 4.5, 6.5).volume()  ->  6441672123263659/17592186044416 · π
+        the truth                            ->                        2197/6 · π
+
+    That last-digit wobble matters more here than the size of it suggests: this
+    product's premise is that designs diff, and a part that reports a different
+    volume merely for having moved shows up as a change that is not one.
+
+    The whole corpus hides it, because every shape in it has integer dimensions
+    and the float arithmetic lands exactly. A fractional radius does not.
+
+    ADR-0021's answer applies: the canonical B-rep computes this exactly for
+    every representation, so ask it, and keep the per-representation formula
+    only for shapes that have no canonical form yet.
+    """
+    from forgekernel import body as B
+
+    try:
+        return float(B.volume(B.to_body(shape)))
+    except (ValueError, AttributeError, TypeError):
+        v = shape.volume()
+        return v.to_float() if hasattr(v, "to_float") else float(v)
+
+
 def _audited(body, op: str):
     """Check the ANSWER before returning it. The whole burn-down in one rule.
 
@@ -647,14 +679,19 @@ class RefKernel:
             cx, cy, cz = shape.centroid_f()
             return _mp(v.to_float(), cx, cy, cz,
                        volume_halfwidth=float(v.width) / 2)
+        # Measure the volume on the ORIGINAL shape, before the AxisStack wrap
+        # below: a Sphere has a canonical body and an AxisStack does not, so
+        # wrapping first would send it down the float-integrating path that
+        # _exact_volume exists to avoid.
+        vol = _exact_volume(shape)
         if isinstance(shape, (Cone, Sphere)):
             shape = AxisStack(shape.cx, shape.cy, [shape])
         from forgekernel.quadric import FilletedBox
         if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, FilletedBox)):
             cx, cy, cz = shape.centroid_f()
-            return _mp(float(shape.volume()), cx, cy, cz)
+            return _mp(vol, cx, cy, cz)
         c = shape.centroid()
-        return _mp(float(shape.volume()), float(c[0]), float(c[1]), float(c[2]))
+        return _mp(vol, float(c[0]), float(c[1]), float(c[2]))
 
     def measure(self, shape) -> dict[str, float]:
         from forgekernel.quadric import AxisStack, Cone, Sphere
