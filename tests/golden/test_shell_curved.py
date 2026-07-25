@@ -38,11 +38,15 @@ def test_a_shelled_tube_hollows_the_wall_not_the_bore(k) -> None:
         math.pi * ((36 - 9) * 10 - (25 - 16) * 8))
 
 
-def test_a_shelled_drilled_plate_keeps_its_bores(k) -> None:
+def test_shelling_a_drilled_plate_refuses_rather_than_over_remove(k) -> None:
+    """The bore would now pass through the CAVITY, where only the two walls
+    carry material. A full-barrel removal takes the whole 10 mm and reports a
+    volume 3% light — and neither the wall check nor the footprint check sees
+    it, because the barrel crosses nothing. Refuse until the bore can be
+    clipped to the remaining material (K2.1)."""
     plate = DrilledSolid(Solid.box(40, 20, 5), [Cyl(20, 10, 4, 0, 5)])
-    out = k.shell(plate, [], 1.0)
-    assert isinstance(out, DrilledSolid) and len(out.bores) == 1
-    assert k.mass_props(out)["volume"] < k.mass_props(plate)["volume"]
+    with pytest.raises(Exception, match="K2.1"):
+        k.shell(plate, [], 1.0)
 
 
 def test_a_shelled_body_still_meshes_watertight(k) -> None:

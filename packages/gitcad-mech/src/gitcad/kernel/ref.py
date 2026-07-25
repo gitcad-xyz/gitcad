@@ -988,8 +988,14 @@ class RefKernel:
                 # producing a part with a broken-out hole
                 base = self.chamfer(shape.base, (), distance)
                 out = DrilledSolid(base, [])
-                for b in shape.bores:
-                    out = out.cut(b)
+                try:
+                    for b in shape.bores:
+                        out = out.cut(b)
+                except ValueError as exc:
+                    # the reshaped base no longer carries a full-height column
+                    # under some bore; an honest gap, not a crash through the
+                    # seam (the invariant test pins that distinction)
+                    _nope(f"chamfer(drilled solid: {exc})", "K2.1")
                 return out
             if isinstance(shape, DisjointUnion):
                 # members are disjoint and a chamfer only REMOVES material,
@@ -1065,6 +1071,11 @@ class RefKernel:
         faces of the solid at all and are never offset — insetting them would
         put a solid core inside the void.
         """
+        # A REDUNDANT collinear vertex has two identical edge normals, so
+        # summing per-edge moved it 2t instead of t — and a cosmetic extra
+        # point in the profile silently changed the reported volume of
+        # identical geometry by 20%. Drop them before offsetting.
+        prof = _drop_collinear_2d(prof)
         n = len(prof)
         out = []
         for i in range(n):
@@ -1085,6 +1096,19 @@ class RefKernel:
             out.append((p1[0] + shift[0], p1[1] + shift[1]))
         if any(r < 0 for r, _ in out):
             _nope("shell(thickness exceeds the lathe's radius)", "K4.2")
+        # An offset polygon INVERTS where a step is shorter than 2t: the void
+        # becomes a bow tie whose Green's integral is negative, or escapes the
+        # solid entirely (one case put the cavity below z=0). The mesh still
+        # comes back watertight, so nothing downstream notices — check it here
+        # or not at all.
+        if _signed_area2(out) * _signed_area2(prof) <= 0:
+            _nope("shell(thickness inverts the profile)", "K4.2")
+        if abs(_signed_area2(out)) >= abs(_signed_area2(prof)):
+            _nope("shell(inset is not smaller than the profile)", "K4.2")
+        if not _is_simple(out):
+            _nope("shell(thickness makes the void self-intersect)", "K4.2")
+        if not all(_point_in_poly(prof, q) for q in out):
+            _nope("shell(void escapes the solid)", "K4.2")
         return out
 
     def _shell_lathe(self, shape, t):
@@ -1117,12 +1141,28 @@ class RefKernel:
             if isinstance(shape, DrilledSolid):
                 base = self.shell(shape.base, (), thickness)
                 out = DrilledSolid(base, [])
-                for b in shape.bores:
-                    out = out.cut(b)
+                try:
+                    for b in shape.bores:
+                        out = out.cut(b)
+                except ValueError as exc:
+                    # after hollowing, the bore passes through the CAVITY,
+                    # where only the two walls carry material — a full-barrel
+                    # removal would take metal that is not there. An honest
+                    # gap, and it must not escape the seam as a raw exception.
+                    _nope(f"shell(drilled solid: {exc})", "K2.1")
                 return out
             if isinstance(shape, DisjointUnion):
-                return DisjointUnion._unchecked(
-                    [self.shell(m, (), thickness) for m in shape.members])
+                from forgekernel import body as B
+
+                parts = [self.shell(m, (), thickness) for m in shape.members]
+                if any(isinstance(q, B.Body) for q in parts):
+                    # a DisjointUnion's members must be quadric types: putting
+                    # a Body in one turned a working object into a crashing
+                    # one (volume/tessellate reach for .cx). The members are
+                    # disjoint, so their faces already form ONE valid Body.
+                    return B.Body(tuple(f for q in parts
+                                        for f in B.to_body(q).faces))
+                return DisjointUnion._unchecked(parts)
             lathe = self._shell_lathe(shape, t)
             if lathe is not None:
                 return lathe
@@ -1309,3 +1349,65 @@ class RefKernel:
 
         with open(path, encoding="utf-8") as f:
             return io.loads(f.read())
+
+
+def _drop_collinear_2d(poly):
+    """Remove vertices that lie mid-edge — they carry no shape, and an offset
+    counts their (duplicated) edge normal twice."""
+    out = list(poly)
+    i = 0
+    while len(out) > 3 and i < len(out):
+        a, b, c = out[i - 1], out[i], out[(i + 1) % len(out)]
+        if ((b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])) == 0:
+            del out[i]
+        else:
+            i += 1
+    return out
+
+
+def _signed_area2(poly):
+    n = len(poly)
+    return sum(poly[i][0] * poly[(i + 1) % n][1]
+               - poly[(i + 1) % n][0] * poly[i][1] for i in range(n))
+
+
+def _orient(a, b, c):
+    v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    return 0 if v == 0 else (1 if v > 0 else -1)
+
+
+def _segments_cross(a, b, c, d) -> bool:
+    o1, o2 = _orient(a, b, c), _orient(a, b, d)
+    o3, o4 = _orient(c, d, a), _orient(c, d, b)
+    if o1 != o2 and o3 != o4:
+        return True
+    def on(p, q, r):
+        return (_orient(p, q, r) == 0
+                and min(p[0], q[0]) <= r[0] <= max(p[0], q[0])
+                and min(p[1], q[1]) <= r[1] <= max(p[1], q[1]))
+    return on(a, b, c) or on(a, b, d) or on(c, d, a) or on(c, d, b)
+
+
+def _is_simple(poly) -> bool:
+    """Exact: does the polygon avoid touching itself anywhere but at shared
+    vertices of adjacent edges?"""
+    n = len(poly)
+    for i in range(n):
+        for j in range(i + 1, n):
+            if j == i or (j + 1) % n == i or (i + 1) % n == j:
+                continue
+            if _segments_cross(poly[i], poly[(i + 1) % n],
+                               poly[j], poly[(j + 1) % n]):
+                return False
+    return True
+
+
+def _point_in_poly(poly, q) -> bool:
+    inside = False
+    n = len(poly)
+    for i in range(n):
+        (x1, y1), (x2, y2) = poly[i], poly[(i + 1) % n]
+        if (y1 > q[1]) != (y2 > q[1]):
+            if q[0] < x1 + (q[1] - y1) * (x2 - x1) / (y2 - y1):
+                inside = not inside
+    return inside
