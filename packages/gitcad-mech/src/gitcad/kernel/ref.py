@@ -1590,31 +1590,28 @@ class RefKernel:
         return section_polys(shape, direction, xdir, offset, deflection=deflection)
 
     def export_step(self, shape, path):
-        # K7.0c: native AP214 export — OCCT-free CAD exchange. Planar solids and
-        # drilled solids (exact CYLINDRICAL_SURFACE bores, not facets) export;
-        # freeform topology arrives at K3.7.
-        from forgekernel.brep import Solid
-        from forgekernel.quadric import Cyl, DrilledSolid
-        from forgekernel.stepio import write_step_planar_solid
+        """K7.0c: native AP214 export — OCCT-free CAD exchange.
 
-        if isinstance(shape, Solid):
-            base, bores = shape, ()
-        elif isinstance(shape, DrilledSolid):
-            base, bores = shape.base, shape.bores
-        else:
-            # ADR-0021: everything else exports from the canonical B-rep, one
-            # writer for all representations. A bare cylinder, a boss and a
-            # bored boss all used to refuse for want of a planar base to hang
-            # the topology on — the canonical form has no such notion.
-            from forgekernel.stepbody import write_step_body
+        EVERY representation goes through the canonical B-rep writer. Planar
+        solids and drilled solids used to take a second writer of their own,
+        and the two disagreed about the one thing a solid model has to get
+        right: ``write_step_body`` folds ``ADVANCED_FACE``'s same_sense flag
+        into an edge's traversal, ``write_step_planar_solid`` does not. Under
+        either rule one family of files was invalid, and a shelled box went out
+        as a MANIFOLD_SOLID_BREP over a shell with 16 of its 56 edges used by
+        exactly one face — dangling on both conventions.
 
-            text = self._via_body("export_step", shape,
-                                  lambda b: write_step_body(b))
-            with open(path, "w", encoding="utf-8", newline="\n") as f:
-                f.write(text)
-            return
+        Folding same_sense is the correct reading (the flag is precisely what
+        relates the face's orientation to its surface's), and the canonical
+        writer audits itself before emitting, so a defect refuses instead of
+        shipping a file that opens and then will not boolean or mesh for CAM.
+        """
+        from forgekernel.stepbody import write_step_body
+
+        text = self._via_body("export_step", shape,
+                              lambda b: write_step_body(b))
         with open(path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(write_step_planar_solid(base, bores=bores))
+            f.write(text)
 
     def export_stl(self, shape, path, *, deflection=0.1):
         from forgekernel import io
@@ -1796,29 +1793,51 @@ def _disc_misses_solid(solid, cx, cy, r) -> bool:
                 t = ((cx - ax) * dx + (cy - ay) * dy) / den
                 t = min(max(t, 0 * t), 1 + 0 * t)      # clamp, type-preserving
                 qx, qy = ax + t * dx, ay + t * dy
-            if (cx - qx) ** 2 + (cy - qy) ** 2 <= r2:
+            # multiplication, never `** 2`: SurdVal has no __pow__, and an
+            # exactly-rotated solid raised a raw TypeError straight out of the
+            # seam — the capability matrix calls a bare exception a defect
+            # however honest the refusal it replaced would have been
+            ex, ey = cx - qx, cy - qy
+            if ex * ex + ey * ey <= r2:
                 return False
     return True
 
 
 def _is_axis_box(kernel, shape, bb) -> bool:
-    """Is ``shape`` exactly the axis-aligned box ``bb``?
+    """Is ``shape`` exactly the axis-aligned box ``bb``? By its POINT SET.
 
-    ``volume() == dx*dy*dz`` is NOT that predicate, and reading it as one cut
-    the tool's BOUNDING BOX instead of the tool. ``Solid.volume()`` is additive
-    over polys, so a compound whose overlap exactly pays for its gap passes it:
-    an L of two boxes (4x3 plus 2x2 sharing a 2x1 corner) has area 14 in a 4x4
-    bbox and volume 4*4*4 — cut into a rounded box it removed 48 mm³ where the
-    truth is 42, silently, with a watertight mesh.
+    Two screens were tried here and both were unsound, in the same way: they
+    tested a PROPERTY the box has instead of testing the set.
 
-    ``_box_check`` settles the POINT SET (every vertex at a bbox corner, every z
-    at a face), which is what the pocket construction actually needs; the volume
-    test stays as the guard against a doubled or degenerate shell that would
-    satisfy it.
+      * ``volume() == dx*dy*dz`` — ``Solid.volume()`` is additive over polys, so
+        a compound whose overlap exactly pays for its gap passes. An L of two
+        boxes has area 14 in a 4x4 bbox and volume 4*4*4; cut into a rounded box
+        it removed 48 mm³ where the truth is 42.
+      * ``_box_check`` (every vertex at a bbox corner) ∧ the volume — that only
+        forbids INTERIOR vertices. Two triangular wedges spanning the same
+        corners, ``[(4,3),(8,3),(8,7)]`` and ``[(4,3),(8,3),(4,7)]`` extruded
+        together, have six vertices all at bbox corners and volume 4*4*4 while
+        covering 12 of the 16 mm². The pocket removed 64 where 48 exists — 38σ
+        against Monte Carlo, mesh watertight, ``validate()`` ok. It also
+        REFUSED an ordinary box whose bottom edge carried a midpoint vertex,
+        which every sketch that splits an edge produces.
+
+    So ask the question directly: the symmetric difference against the box must
+    be empty, both ways, on the exact planar engine. A property test can always
+    be satisfied by something that is not the thing.
     """
+    from forgekernel.brep import Solid
+    from forgekernel.kernel import translate
+
     (x0, y0, z0), (x1, y1, z1) = bb
-    return (kernel._box_check(shape) is not None
-            and shape.volume() == (x1 - x0) * (y1 - y0) * (z1 - z0))
+    if shape.volume() != (x1 - x0) * (y1 - y0) * (z1 - z0):
+        return False                          # cheap screen before the booleans
+    box = translate(Solid.box(x1 - x0, y1 - y0, z1 - z0), x0, y0, z0)
+    try:
+        return (kernel._fk.boolean("cut", box, shape).volume() == 0
+                and kernel._fk.boolean("cut", shape, box).volume() == 0)
+    except (ArithmeticError, ValueError, TypeError, IndexError):
+        return False                          # not a shape the engine can settle
 
 
 def _fillet_profile(prof, r):

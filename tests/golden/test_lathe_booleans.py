@@ -556,3 +556,84 @@ def test_the_miss_predicate_is_tight_at_the_wall(k, label, c, r, misses) -> None
 
     prism = k.extrude(NOTCH_L, 8)
     assert _disc_misses_solid(prism, Q(c[0]), Q(c[1]), Q(str(r))) is misses
+
+
+# --- review round 8: the box predicate, again --------------------------------
+
+def _wedge(k, prof, z0, z1):
+    segs = [{"kind": "line", "to": list(p)} for p in prof[1:] + [prof[0]]]
+    return k.transform(k.extrude({"start": list(prof[0]), "segments": segs},
+                                 z1 - z0), translate=(0, 0, z0))
+
+
+BOXY = [
+    ("a plain box", lambda k: k.transform(k.box(4, 4, 4), translate=(4, 3, 2)),
+     True),
+    # an everyday sketch: the bottom edge carries a midpoint vertex. The
+    # previous guard demanded EVERY vertex sit at a bbox corner, so it refused
+    # this outright while accepting the wedges below.
+    ("a box with a split edge",
+     lambda k: _wedge(k, [(4, 3), (6, 3), (8, 3), (8, 7), (4, 7)], 2, 6), True),
+    ("two stacked halves", lambda k: k.compound(
+        [k.transform(k.box(4, 4, 2), translate=(4, 3, 2)),
+         k.transform(k.box(4, 4, 2), translate=(4, 3, 4))]), True),
+    # SIX vertices, every one at a bbox corner, volume exactly 4*4*4 — and the
+    # two triangles cover 12 of the 16 mm2. The pocket removed 64 where 48
+    # exists: 38 sigma against Monte Carlo, watertight, validate() ok.
+    ("two triangular wedges", lambda k: k.compound(
+        [_wedge(k, [(4, 3), (8, 3), (8, 7)], 2, 6),
+         _wedge(k, [(4, 3), (8, 3), (4, 7)], 2, 6)]), False),
+    ("an L of two boxes", lambda k: k.compound(
+        [k.transform(k.box(4, 3, 4), translate=(4, 3, 2)),
+         k.transform(k.box(2, 2, 4), translate=(4, 5, 2))]), False),
+]
+
+
+@pytest.mark.parametrize("label,build,is_box", BOXY, ids=[b[0] for b in BOXY])
+def test_a_pocket_tool_is_a_box_by_its_point_set_not_by_a_property(
+        k, label, build, is_box) -> None:
+    """Two screens were tried here and both were unsound the same way: they
+    tested a PROPERTY the box has instead of testing the set. ``volume() ==
+    dx*dy*dz`` is additive over polys; adding ``_box_check`` only forbids
+    INTERIOR vertices. A property test can always be satisfied by something
+    that is not the thing, so ask the question directly — the symmetric
+    difference against the box, both ways, on the exact planar engine."""
+    from forgekernel.quadric import _exact_bbox
+    from gitcad.kernel.ref import _is_axis_box
+
+    tool = build(k)
+    assert tool.volume() == 4 * 4 * 4, "every case must bait the volume screen"
+    assert _is_axis_box(k, tool, _exact_bbox(tool)) is is_box
+
+    base = RoundedBox(20, 20, 6, 2)
+    before = float(k.mass_props(base)["volume"])
+    if is_box:
+        out = k.boolean("cut", base, tool)
+        assert before - float(k.mass_props(out)["volume"]) == pytest.approx(
+            4 * 4 * 4)
+    else:
+        with pytest.raises(KernelError):
+            k.boolean("cut", base, tool)
+
+
+ROTATIONS = [45, 30, 60, 120, 135]
+
+
+@pytest.mark.parametrize("deg", ROTATIONS)
+def test_a_bore_against_an_exactly_rotated_solid_refuses_without_crashing(
+        k, deg) -> None:
+    """``_disc_misses_solid`` squared its distances with ``** 2``, which
+    SurdVal does not implement — so every exactly-rotated solid raised a raw
+    TypeError straight out of the seam. The capability matrix calls a bare
+    exception a defect however honest the refusal it replaced would have been;
+    multiplication is exact over ℚ and ℚ[√d] alike."""
+    prof = {"start": [0, 0], "segments": [{"kind": "line", "to": [10, 0]},
+                                          {"kind": "line", "to": [10, 4]},
+                                          {"kind": "line", "to": [4, 4]},
+                                          {"kind": "line", "to": [4, 10]},
+                                          {"kind": "line", "to": [0, 10]},
+                                          {"kind": "line", "to": [0, 0]}]}
+    for shape in (k.box(10, 10, 4), k.extrude(prof, 4)):
+        turned = k.transform(shape, rotate_axis=(0, 0, 1), rotate_deg=deg)
+        with pytest.raises(KernelError):
+            k.boolean("cut", turned, Cyl(0, 0, 2, -1, 5))
