@@ -403,13 +403,14 @@ class RefKernel:
                     kernel="ref"))
         if isinstance(b, Cyl) and op == "cut" and isinstance(a, DisjointUnion):
             # (A ∪ B) ∖ C distributes over disjoint members (K2.3): the boss
-            # standing on a plate keeps its pilot bore exact.
+            # standing on a plate keeps its pilot bore exact. DisjointUnion.cut
+            # only knows some member types, so fall through to the seam's own
+            # distribution rather than refusing on its behalf — it handles
+            # lathes, misses and pockets that the quadric layer does not.
             try:
                 return a.cut(b)
-            except ValueError as exc:
-                raise KernelError(str(exc), FailureSignature(
-                    op="boolean.cut", diagnostic="NotYetImplemented",
-                    kernel="ref"))
+            except ValueError:
+                pass
         if op == "cut" and isinstance(b, Solid) and isinstance(a, DrilledSolid):
             from forgekernel.quadric import _exact_bbox
 

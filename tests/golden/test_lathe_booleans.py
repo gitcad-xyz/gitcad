@@ -332,3 +332,28 @@ def test_a_tool_straddling_a_counterbore_step_refuses(k) -> None:
     tool = k.transform(k.box(2, 2, 100), translate=(15, 15, 5))
     with pytest.raises(Exception):
         k.boolean("cut", cb, tool)
+
+
+def test_a_union_falls_through_to_the_seams_own_distribution(k) -> None:
+    """DisjointUnion.cut only knows some member types, and refusing on the
+    seam's behalf hid the cases the seam handles: lathes, misses and pockets.
+
+    Here the tube member ALREADY has an r=1 bore from z=4 and the tool is an
+    r=1 cylinder from z=4.5 up, so the tool coincides with the bore and
+    removing nothing is the correct answer — not an accidental no-op. The
+    plate member is missed outright (the tool starts above it)."""
+    from forgekernel.quadric import DisjointUnion, RevolveSolid
+    from forgekernel.brep import Solid
+
+    boss = DisjointUnion([
+        Solid.box(30, 30, 3),
+        RevolveSolid([(0, 3), (4, 3), (4, 9), (1, 9), (1, 4), (0, 4)], 15, 15)])
+    tool = k.transform(k.cylinder(1, 100), translate=(15, 15, 4.5))
+    out = k.boolean("cut", boss, tool)
+    assert k.mass_props(out)["volume"] == pytest.approx(
+        k.mass_props(boss)["volume"])
+    # ...and the no-op is not vacuous: a WIDER tool would have to WIDEN the
+    # existing bore, which a profile clamp cannot express, and refuses
+    wider = k.transform(k.cylinder(2, 100), translate=(15, 15, 4.5))
+    with pytest.raises(Exception, match="wider than the lathe"):
+        k.boolean("cut", boss, wider)
