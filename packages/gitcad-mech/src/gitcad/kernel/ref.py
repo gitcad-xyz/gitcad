@@ -1432,18 +1432,22 @@ class RefKernel:
             t = (thickness if isinstance(thickness, Fraction)
                  else Fraction(str(thickness)))
             if isinstance(shape, DrilledSolid):
-                base = self.shell(shape.base, (), thickness)
-                out = DrilledSolid(base, [])
-                try:
-                    for b in shape.bores:
-                        out = out.cut(b)
-                except ValueError as exc:
-                    # after hollowing, the bore passes through the CAVITY,
-                    # where only the two walls carry material — a full-barrel
-                    # removal would take metal that is not there. An honest
-                    # gap, and it must not escape the seam as a raw exception.
-                    _nope(f"shell(drilled solid: {exc})", "K2.1")
-                return out
+                if shape.bores:
+                    # SHELLING A DRILLED SOLID NEEDS A COLLAR. Shell offsets
+                    # every boundary face inward by t, and the bore's own
+                    # cylindrical wall is a boundary face: the void must stop
+                    # r+t from the axis, leaving a tube of metal around the
+                    # hole. "Shell the base, then re-drill" builds no such
+                    # tube, and it was not refusing — a 30x30x10 plate with a
+                    # blind Ø4 bore in its top wall, shelled t=2, reported
+                    # 4918.867 where the truth is 5088.81 +- 6.69 (4M-sample
+                    # Monte Carlo): 170 mm3 of collar that is simply absent.
+                    # The old guard only caught bores that reached the cavity,
+                    # and even those it blamed on the barrel arithmetic.
+                    _nope("shell(drilled solid: the bore's own wall must be "
+                          "offset too, which needs a collar this kernel does "
+                          "not build yet)", "K4.2 (offset surfaces)")
+                return DrilledSolid(self.shell(shape.base, (), thickness), [])
             if isinstance(shape, DisjointUnion):
                 from forgekernel import body as B
 

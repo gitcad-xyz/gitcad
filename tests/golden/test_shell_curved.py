@@ -38,15 +38,25 @@ def test_a_shelled_tube_hollows_the_wall_not_the_bore(k) -> None:
         math.pi * ((36 - 9) * 10 - (25 - 16) * 8))
 
 
-def test_shelling_a_drilled_plate_refuses_rather_than_over_remove(k) -> None:
-    """The bore would now pass through the CAVITY, where only the two walls
-    carry material. A full-barrel removal takes the whole 10 mm and reports a
-    volume 3% light — and neither the wall check nor the footprint check sees
-    it, because the barrel crosses nothing. Refuse until the bore can be
-    clipped to the remaining material (K2.1)."""
-    plate = DrilledSolid(Solid.box(40, 20, 5), [Cyl(20, 10, 4, 0, 5)])
-    with pytest.raises(Exception, match="K2.1"):
-        k.shell(plate, [], 1.0)
+def test_shelling_a_drilled_solid_refuses_because_the_bore_needs_a_collar(k):
+    """Shell offsets EVERY boundary face inward by t, and a bore's cylindrical
+    wall is a boundary face — so the void must stop r+t from the axis, leaving
+    a tube of metal around the hole.
+
+    "Shell the base, then re-drill" builds no such tube. It was refusing only
+    where the bore reached the cavity, and blaming the barrel arithmetic; where
+    the bore stayed inside one wall it SUCCEEDED and was silently wrong. A
+    30x30x10 plate with a blind Ø4 bore in its top wall, shelled t=2, reported
+    4918.867 against a true 5088.81 +- 6.69 (4M-sample Monte Carlo) — 170 mm3
+    of collar simply absent, in a shape the kernel called good."""
+    reached = DrilledSolid(Solid.box(40, 20, 5), [Cyl(20, 10, 4, 0, 5)])
+    inside_one_wall = DrilledSolid(Solid.box(30, 30, 10), [Cyl(15, 15, 2, 8, 10)])
+    for plate in (reached, inside_one_wall):
+        with pytest.raises(Exception, match="collar"):
+            k.shell(plate, [], 2.0)
+    # a DrilledSolid carrying NO bores is just its base, and still shells
+    assert k.mass_props(k.shell(DrilledSolid(Solid.box(20, 20, 20), []),
+                                [], 2.0))["volume"] == 20 ** 3 - 16 ** 3
 
 
 def test_a_shelled_body_still_meshes_watertight(k) -> None:
