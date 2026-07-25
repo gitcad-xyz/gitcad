@@ -1056,10 +1056,76 @@ class RefKernel:
                     FailureSignature(op="chamfer", diagnostic="BadInput", kernel="ref"))
         return out
 
+    def _inset_profile(self, prof, t):
+        """Inset a RECTILINEAR (r, z) profile inward by t, exactly.
+
+        Only axis-aligned edges: a slanted edge's inward normal carries
+        1/sqrt(dr^2+dz^2), which leaves ℚ, and a shell wall must be exactly
+        t thick or the part is not the part. Edges lying ON the axis are not
+        faces of the solid at all and are never offset — insetting them would
+        put a solid core inside the void.
+        """
+        n = len(prof)
+        out = []
+        for i in range(n):
+            p0, p1, p2 = prof[i - 1], prof[i], prof[(i + 1) % n]
+            shift = [Fraction(0), Fraction(0)]
+            for (qa, qb) in ((p0, p1), (p1, p2)):
+                dr, dz = qb[0] - qa[0], qb[1] - qa[1]
+                if qa[0] == 0 and qb[0] == 0:
+                    continue                       # the axis is not a face
+                if dr != 0 and dz != 0:
+                    _nope("shell(slanted lathe profile edge)",
+                          "K4.2 (offset surfaces)")
+                if dr == 0 and dz == 0:
+                    continue
+                ln = abs(dr) if dr else abs(dz)
+                shift[0] += -dz / ln * t
+                shift[1] += dr / ln * t
+            out.append((p1[0] + shift[0], p1[1] + shift[1]))
+        if any(r < 0 for r, _ in out):
+            _nope("shell(thickness exceeds the lathe's radius)", "K4.2")
+        return out
+
+    def _shell_lathe(self, shape, t):
+        """Hollow a solid of revolution: the void is the profile inset by t,
+        lathed and turned inside out. Its faces are the inner solid's with
+        every sense FLIPPED — a cavity's boundary faces point away from the
+        material, which is into the cavity — so the divergence sum subtracts
+        the void and the shelled volume is exact with no boolean at all."""
+        from forgekernel import body as B
+        from forgekernel.quadric import RevolveSolid
+
+        prof, cx, cy = self._lathe_profile(shape)
+        if prof is None:
+            return None
+        inner = RevolveSolid(self._inset_profile(prof, t), cx, cy)
+        void = B.to_body(inner)
+        return B.Body(B.to_body(shape).faces
+                      + tuple(B.Face(f.surface, f.loops, not f.sense)
+                              for f in void.faces))
+
     def shell(self, shape, remove_faces, thickness):
         from forgekernel.brep import Solid
         from forgekernel.kernel import shell as fk_shell
 
+        if not isinstance(shape, Solid) and not remove_faces:
+            from forgekernel.quadric import DisjointUnion, DrilledSolid
+
+            t = (thickness if isinstance(thickness, Fraction)
+                 else Fraction(str(thickness)))
+            if isinstance(shape, DrilledSolid):
+                base = self.shell(shape.base, (), thickness)
+                out = DrilledSolid(base, [])
+                for b in shape.bores:
+                    out = out.cut(b)
+                return out
+            if isinstance(shape, DisjointUnion):
+                return DisjointUnion._unchecked(
+                    [self.shell(m, (), thickness) for m in shape.members])
+            lathe = self._shell_lathe(shape, t)
+            if lathe is not None:
+                return lathe
         if not isinstance(shape, Solid):
             _nope("shell(non-planar base)", "K4.2 (offset surfaces)")
         if not remove_faces:
