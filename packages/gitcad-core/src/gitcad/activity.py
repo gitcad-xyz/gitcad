@@ -31,9 +31,39 @@ import time
 import uuid
 from pathlib import Path
 
-__all__ = ["Activity", "session_dir", "SESSION_FILE"]
+__all__ = ["Activity", "session_dir", "SESSION_FILE", "narrate_to", "note"]
 
 SESSION_FILE = "activity.jsonl"
+
+# The ambient sink. Build code calls `note(...)`; if nothing has opted in, that
+# is a no-op with no import of this module's machinery and no file touched.
+# Narration must never be a dependency of building — a design has to build
+# identically with nobody watching.
+_SINK: "Activity | None" = None
+
+
+def narrate_to(root: Path | str | None) -> "Activity | None":
+    """Point ambient narration at a project (or ``None`` to switch it off)."""
+    global _SINK
+    _SINK = None if root is None else Activity(root)
+    return _SINK
+
+
+def note(kind: str = "status", **fields) -> None:
+    """Narrate, if anyone is listening.
+
+    NEVER raises, and deliberately swallows everything rather than a chosen
+    list of exception types. Broad catches usually hide bugs; here the opposite
+    is true — a design must build identically whether or not someone is
+    watching, so a full disk, a read-only tree or an unserialisable field has
+    to cost the build nothing. Narration is never load-bearing.
+    """
+    if _SINK is None:
+        return
+    try:
+        _SINK._append(kind, **fields)
+    except Exception:                          # noqa: BLE001 - see docstring
+        pass
 
 
 def session_dir(start: Path | str = ".") -> Path:

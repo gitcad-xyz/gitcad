@@ -13,6 +13,7 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from gitcad import activity
 from gitcad.document import Document
 from gitcad.ecad.board import Board
 from gitcad.kernel import get_kernel
@@ -107,6 +108,10 @@ def resolve_assembly_shapes(manifest_path: Path, kernel: Kernel
 
     out: dict[str, tuple] = {}
     for name, inst in sorted(manifest.body.get("instances", {}).items()):
+        # narrate WHICH member is being resolved: this is what lights the
+        # instance green in the viewer while a big assembly builds
+        activity.note(text=f"resolving {name}", instance=name,
+                      file=str(manifest_path.name))
         entry = by_id.get(inst["part"])
         if entry is None:
             raise ValueError(f"instance {name!r}: part {inst['part']!r} not found "
@@ -535,6 +540,11 @@ def serve(path: str, port: int = 8137, kernel: Kernel | None = None,
     """Start (and return) the server; caller decides whether to block.
     ``review_base``: a git ref — the viewer grows a review tab comparing
     the design's repo against it (the gitcad-review report, in-app)."""
+    # Narration is on whenever a viewer is watching. Builds this process runs
+    # (the mesh endpoint rebuilds the design on every change) then show up on
+    # the live rail with no further wiring — which is the common case: a person
+    # watching the same project an agent is editing.
+    activity.narrate_to(Path(path))
     handler = type("Handler", (_Handler,), {
         "path_watched": Path(path),
         "kernel": kernel or get_kernel(),

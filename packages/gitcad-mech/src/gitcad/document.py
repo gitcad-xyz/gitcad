@@ -20,6 +20,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
+from gitcad import activity
 from gitcad.canonical import canonical_json
 from gitcad.errors import GitcadError, IdentityError
 from gitcad.identity import IdentityService
@@ -351,7 +352,16 @@ class Document:
                 continue
             f_run = (f if resolved == f.params
                      else Feature(op=f.op, params=resolved, inputs=f.inputs, id=f.id))
-            shape = _dispatch(kernel, f_run, ins, result)
+            # Narrate the step BEFORE running it, so a watcher sees which
+            # feature a long or failing op is stuck on — after the fact is too
+            # late to be worth showing. No-op when nobody is listening.
+            activity.note(text=f"{f.op} · {f.id}", feature=f.id)
+            try:
+                shape = _dispatch(kernel, f_run, ins, result)
+            except Exception as exc:
+                activity.note("problem", text=f"{f.op} · {f.id}: {exc}",
+                              feature=f.id)
+                raise
             result.shapes[f.id] = shape
             result.entities[f.id] = _index_entities(kernel, shape, f.id, identity)
         return result

@@ -163,3 +163,79 @@ def test_a_malformed_answer_is_refused_not_recorded(project) -> None:
         assert Activity(project).state()["events"] == []
     finally:
         srv.shutdown()
+
+
+# --- the agent side: build paths narrate on their own ------------------------
+
+def test_building_a_document_narrates_each_feature(project) -> None:
+    """A watcher should see WHICH feature a long or failing build is on. The
+    event is emitted before the op runs — after the fact is too late to be
+    worth showing."""
+    from gitcad import activity as A
+    from gitcad.document import Document
+    from gitcad.kernel import get_kernel
+
+    doc = Document.loads(json.dumps({
+        "schema": "gitcad/document@1",
+        "features": [
+            {"id": "base", "op": "box", "params": {"dx": 10, "dy": 10, "dz": 10}},
+            {"id": "round", "op": "fillet", "inputs": ["base"],
+             "params": {"edges": [], "radius": 1}},
+        ]}))
+    act = A.narrate_to(project)
+    try:
+        doc.build(get_kernel())
+    finally:
+        A.narrate_to(None)
+    said = [e["text"] for e in act.state()["events"]]
+    assert any("box · base" in s for s in said)
+    assert any("fillet · round" in s for s in said)
+
+
+def test_a_failing_feature_says_so_on_the_rail(project) -> None:
+    from gitcad import activity as A
+    from gitcad.document import Document
+    from gitcad.kernel import get_kernel
+
+    doc = Document.loads(json.dumps({
+        "schema": "gitcad/document@1",
+        "features": [
+            {"id": "base", "op": "sphere", "params": {"radius": 6}},
+            {"id": "cut", "op": "boolean", "inputs": ["base", "base"],
+             "params": {"kind": "cut"}},
+        ]}))
+    act = A.narrate_to(project)
+    try:
+        with pytest.raises(Exception):
+            doc.build(get_kernel())
+    finally:
+        A.narrate_to(None)
+    assert any(e["kind"] == "problem" for e in act.state()["events"])
+
+
+def test_narration_is_off_by_default_and_never_touches_disk(project) -> None:
+    """A design must build identically with nobody watching."""
+    from gitcad import activity as A
+    from gitcad.document import Document
+    from gitcad.kernel import get_kernel
+
+    A.narrate_to(None)
+    doc = Document.loads(json.dumps({
+        "schema": "gitcad/document@1",
+        "features": [{"id": "base", "op": "box",
+                      "params": {"dx": 10, "dy": 10, "dz": 10}}]}))
+    doc.build(get_kernel())
+    assert not (project / ".gitcad").exists()
+
+
+def test_a_sink_that_cannot_write_does_not_take_the_build_down(project) -> None:
+    """A full disk or a read-only tree must not turn a working build into a
+    failure — narration is never a dependency of building."""
+    from gitcad import activity as A
+
+    A.narrate_to(project)
+    try:
+        A._SINK.dir = Path("\0 not a directory")   # unopenable on any platform
+        A.note(text="this must not raise")
+    finally:
+        A.narrate_to(None)
