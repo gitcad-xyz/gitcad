@@ -1122,9 +1122,20 @@ class RefKernel:
 
     def export_brep(self, shape, path):
         from forgekernel import io
+        from forgekernel.brep import Solid
 
+        if isinstance(shape, Solid):
+            text = io.dumps(shape)
+        else:
+            # ADR-0021: the native format described planar polygon soup only,
+            # so a bore, a boss or a lathe had nothing to serialise. The
+            # canonical form is written ANALYTICALLY — a hole is a cylinder
+            # with an exact radius, so a git diff reads as a change of
+            # geometry rather than a reshuffle of triangles.
+            text = self._via_body("export_brep", shape,
+                                  lambda b: io.dumps_body(b))
         with open(path, "w", newline=chr(10)) as f:
-            f.write(io.dumps(shape))
+            f.write(text)
 
     def import_step(self, path):
         # K3.6: planar-faced STEP solids import as EXACT Solids — STEP
