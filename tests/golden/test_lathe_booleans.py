@@ -15,6 +15,7 @@ import pytest
 
 from forgekernel.brep import Solid
 from forgekernel.quadric import Cone, Cyl, RevolveSolid, RoundedBox
+from gitcad.errors import KernelError
 from gitcad.kernel.ref import RefKernel
 
 
@@ -196,7 +197,7 @@ def test_cutting_a_drilled_solid_keeps_its_bores(k) -> None:
 
 
 def test_cutting_a_disjoint_union_distributes_over_its_members(k) -> None:
-    """(A u B) \ C distributes, and cutting only SHRINKS a member, so
+    r"""(A u B) \ C distributes, and cutting only SHRINKS a member, so
     disjointness survives without re-checking it."""
     from forgekernel.brep import Solid
     from forgekernel.quadric import DisjointUnion
@@ -406,3 +407,152 @@ def test_a_pocket_reaching_a_rounded_boxs_fillet_refuses(k) -> None:
     tool = k.transform(k.cylinder(1, 100), translate=(2, 10, 10))
     with pytest.raises(Exception, match="strictly inside one flat"):
         k.boolean("cut", RoundedBox(20, 20, 20, 3), tool)
+
+
+# --- the seventh adversarial review: pocket constructions ---------------------
+
+def test_a_compound_whose_volume_matches_its_bbox_is_not_a_box(k) -> None:
+    """The pocket paths asked ``volume() == dx*dy*dz`` and read a yes as "this
+    tool is a box", then cut the tool's BOUNDING BOX. ``Solid.volume()`` is
+    additive over polys, so a compound whose overlap exactly pays for its gap
+    passes: an L of a 4x3 and a 2x2 sharing a 2x1 corner has area 14 inside a
+    4x4 bbox, and 4*4*4 == 64 either way.
+
+    Cut into a rounded box it removed 48 mm3 where the truth is 42 — silently,
+    with a watertight mesh. The predicate is the POINT SET, not the measure."""
+    tool = k.compound([k.transform(k.box(4, 3, 4), translate=(3, 3, 3)),
+                       k.transform(k.box(2, 2, 4), translate=(3, 5, 3))])
+    assert tool.volume() == 4 * 4 * 4          # the trap, still baited
+    assert k._box_check(tool) is None          # and the predicate that sees it
+    base = RoundedBox(12, 10, 6, 2)            # top flat [2,10] x [2,8]
+    before = float(k.mass_props(base)["volume"])
+    with pytest.raises(KernelError, match="quadric operands"):
+        k.boolean("cut", base, tool)           # NOT 48 mm3 removed
+    # the honest box still cuts, and removes exactly its own footprint x depth
+    box = k.transform(k.box(4, 4, 4), translate=(3, 3, 3))
+    got = float(k.mass_props(k.boolean("cut", base, box))["volume"])
+    assert before - got == pytest.approx(4 * 4 * 3)
+
+
+MIRRORS = [
+    ("rect low-y", (4, 2)), ("rect high-y", (4, 4)),
+    ("rect low-x", (2, 3)), ("rect high-x", (6, 3)),
+]
+
+
+@pytest.mark.parametrize("label,xy", MIRRORS, ids=[m[0] for m in MIRRORS])
+def test_a_mouth_tangent_to_its_flat_refuses_from_every_side(k, label, xy) -> None:
+    """The containment guard was a crossing-parity test, which is half-open:
+    inclusive on the min-x/min-y edges and exclusive on the others. A pocket
+    tangent to its flat's boundary was accepted on two sides and refused on the
+    other two — so the same part rotated 180 degrees about z built or refused
+    depending on which way it landed, and the accepted B-rep had the cap's
+    inner loop coincident with its outer along a segment."""
+    rb = RoundedBox(10, 8, 6, 2)               # top flat is [2,8] x [2,6]
+    tool = k.transform(k.box(2, 2, 4), translate=(xy[0], xy[1], 4))
+    with pytest.raises(KernelError, match="strictly inside"):
+        k.boolean("cut", rb, tool)
+
+
+def test_the_guard_is_exact_at_a_magnitude_no_float_can_hold(k) -> None:
+    """The ring was taken through ``float()``. At 2**53 the cap's own corner
+    rounds DOWN, and a mouth starting a full 1.0 OUTSIDE the flat was accepted
+    — it removed 264 where the truth is 264 - (4 - pi), and left a mesh with 18
+    non-manifold edges. ADR-0019: a float must never decide topology."""
+    big = 2 ** 53
+    rb = RoundedBox(20, 16, 12, 1, origin=(big, 0, 0))
+    tool = k.transform(k.box(4, 4, 6), translate=(big, 4, 6))
+    with pytest.raises(KernelError, match="strictly inside"):
+        k.boolean("cut", rb, tool)
+
+
+# the base is 6 tall and every tool opens at z = 4, so the depth is 2
+POCKETS = [("circle", lambda k: Cyl(5, 4, 1, 4, 7), math.pi * 1 * 2),
+           ("fractional r", lambda k: Cyl(5, 4, 1.0 / 3, 4, 7),
+            math.pi * (1 / 3.0) ** 2 * 2),
+           ("rect", lambda k: k.transform(k.box(2, 2, 4), translate=(4, 3, 4)),
+            2 * 2 * 2)]
+
+
+@pytest.mark.parametrize("label,tool,removed", POCKETS,
+                         ids=[p[0] for p in POCKETS])
+def test_a_pocket_exports_a_closed_shell_and_validates(k, label, tool,
+                                                       removed) -> None:
+    """Every CIRCULAR pocket shipped a STEP file whose shell was open at the
+    mouth rim: the mouth circle was handed to the writer already reversed,
+    which inverted the outer/inner decision the writer makes from the circle's
+    axis, so the rim ran the same way as the bore wall's. Two non-manifold
+    edges in a MANIFOLD_SOLID_BREP — a file that opens, and then will not
+    boolean, will not mesh for CAM, and imports as a surface soup."""
+    from forgekernel import body as B
+    from forgekernel.stepbody import write_step_body
+
+    base = RoundedBox(10, 8, 6, 1)
+    before = float(k.mass_props(base)["volume"])
+    out = k.boolean("cut", base, tool(k))
+    assert before - float(k.mass_props(out)["volume"]) == pytest.approx(removed)
+    assert B.manifold_violations(B.to_body(out)) == []
+    assert k.validate(out).ok
+    write_step_body(B.to_body(out))            # the writer's own audit runs here
+
+
+def test_a_tool_that_provably_misses_gives_the_solid_back(k) -> None:
+    """Bbox separation in any one axis settles a cut exactly, and it belongs
+    ahead of every representation-specific path: a drilled solid asked to cut a
+    tool it never meets refused with "bore misses the solid in xy" rather than
+    handing back the solid it already was."""
+    plate = k.boolean("cut", Solid.box(40, 20, 5),
+                      k.transform(k.cylinder(4, 5), translate=(20, 10, 0)))
+    far = k.transform(k.box(5, 5, 5), translate=(100, 100, 100))
+    assert k.boolean("cut", plate, far) is plate
+
+
+NOTCH_L = {"start": [0, 0], "segments": [
+    {"kind": "line", "to": [30, 0]}, {"kind": "line", "to": [30, 10]},
+    {"kind": "line", "to": [10, 10]}, {"kind": "line", "to": [10, 30]},
+    {"kind": "line", "to": [0, 30]}, {"kind": "line", "to": [0, 0]}]}
+
+
+def test_a_bore_down_a_notch_gives_the_solid_back_rather_than_refusing(k) -> None:
+    """The two shapes overlap in every axis and the disc still never touches
+    material: an L-prism's bbox centre is in the NOTCH. Bbox separation cannot
+    see that, so the kernel refused "bore misses the solid in xy (nothing to
+    drill)" — a refusal whose own text states the answer. The disc-vs-shadow
+    test is exact (a clamped ratio compared against r^2), and it is checked
+    against the SHADOW, since a closed solid's shadow is its boundary's."""
+    prism = k.extrude(NOTCH_L, 8)
+    assert float(k.mass_props(prism)["volume"]) == 30 * 10 * 8 + 10 * 20 * 8
+    bore = k.transform(k.cylinder(1, 100), translate=(15, 15, 4))
+    assert k.boolean("cut", prism, bore) is prism
+
+    # ...and a bore that DOES meet the material still cuts, to the millimetre:
+    # the tool spans z 4..104 and the prism z 0..8, so the depth is 4
+    hit = k.boolean("cut", prism, k.transform(k.cylinder(1, 100),
+                                              translate=(5, 5, 4)))
+    removed = float(k.mass_props(prism)["volume"]) - float(
+        k.mass_props(hit)["volume"])
+    assert removed == pytest.approx(math.pi * 1 * 4)
+
+
+# the notch's walls are x = 10 (y >= 10) and y = 10 (x >= 10), meeting at the
+# reflex corner (10, 10)
+TANGENT = [("well inside the notch", (15, 15), 1, True),
+           ("centre on the wall", (10, 20), 1, False),
+           ("just short of the wall", (12, 20), 1.9, True),
+           ("exactly touching the wall", (12, 20), 2, False),
+           ("short of a reflex corner", (11.2, 11.2), 1, True),
+           ("reaching a reflex corner", (11.2, 11.2), 1.2, False)]
+
+
+@pytest.mark.parametrize("label,c,r,misses", TANGENT,
+                         ids=[t[0] for t in TANGENT])
+def test_the_miss_predicate_is_tight_at_the_wall(k, label, c, r, misses) -> None:
+    """Claiming a miss where material exists would be a silent wrong answer —
+    the exact failure mode this whole burn-down is about. Tangency counts as a
+    hit and falls through to the ordinary path."""
+    from fractions import Fraction as Q
+
+    from gitcad.kernel.ref import _disc_misses_solid
+
+    prism = k.extrude(NOTCH_L, 8)
+    assert _disc_misses_solid(prism, Q(c[0]), Q(c[1]), Q(str(r))) is misses

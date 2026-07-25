@@ -375,6 +375,31 @@ class RefKernel:
                 pass  # not overlapping / nested / irrational → fall through
         from forgekernel.quadric import RevolveSolid, RoundedBox
 
+        if op == "cut":
+            # A tool whose bbox is SEPARATED from the solid's removes nothing,
+            # whatever either shape is. Exact (bbox separation in any one axis
+            # is decisive, and touching is measure zero), and it belongs ahead
+            # of every representation-specific path: a drilled solid asked to
+            # cut a tool it never meets refused with "bore misses the solid in
+            # xy" rather than handing back the solid it already was.
+            from forgekernel.quadric import _exact_bbox
+
+            ab, bb_ = _exact_bbox(a), _exact_bbox(b)
+            if ab is not None and bb_ is not None and any(
+                    bb_[1][k] <= ab[0][k] or ab[1][k] <= bb_[0][k]
+                    for k in range(3)):
+                return a
+            # A bore can also miss inside the bbox — down an L-prism's notch,
+            # say, where the two shapes overlap in every axis and the disc
+            # still never touches material. That is exactly decidable against
+            # the solid's xy shadow, and "the bore misses" is the ANSWER, not
+            # a reason to refuse.
+            base = (a if isinstance(a, Solid)
+                    else a.base if isinstance(a, DrilledSolid) else None)
+            if isinstance(b, Cyl) and base is not None and _disc_misses_solid(
+                    base, Fraction(b.cx), Fraction(b.cy), Fraction(b.r)):
+                return a
+
         axis_prims = (Cyl, Cone, Sphere)
         # RevolveSolid, RoundedBox and DrilledSolid belong here too: they are
         # every bit as "curved", and leaving them out meant a union with a box
@@ -492,7 +517,11 @@ class RefKernel:
                     raise KernelError(str(exc), FailureSignature(
                         op="boolean.cut", diagnostic="NotYetImplemented",
                         kernel="ref"))
-        if isinstance(a, (AxisStack, *axis_prims, DrilledSolid)) or                 isinstance(b, (AxisStack, *axis_prims, DrilledSolid)):
+        # RoundedBox, RevolveSolid and DisjointUnion belong on this list too:
+        # they have no `.polys`, so falling through to the planar BSP engine
+        # surfaced raw CPython text ("'RoundedBox' object has no attribute
+        # 'polys'") as the kernel's diagnostic instead of naming the stage.
+        if isinstance(a, curved) or isinstance(b, curved):
             _nope(f"boolean.{op} on quadric operands", "K2.2")
         try:
             return self._fk.boolean(op, a, b)
@@ -710,6 +739,22 @@ class RefKernel:
         if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, _FB)):
             return ValidationReport(ok=True, checks={"method": "analytic"},
                                     violations=[])
+        from forgekernel import body as _B
+        if isinstance(shape, _B.Body):
+            # A Body has no `watertight_violations` — it is a different
+            # representation — so every pocketed or curved-shelled solid came
+            # back "unsupported representation", i.e. unvalidatable, which
+            # reads far too much like fine. The canonical B-rep's own oracle is
+            # edge pairing: in a closed shell every edge is shared by exactly
+            # two faces.
+            bad = _B.manifold_violations(shape)
+            if float(_B.volume(shape)) <= 0:
+                bad = list(bad) + ["nonpositive-volume"]
+            return ValidationReport(
+                ok=not bad,
+                checks={"method": "exact-edge-pairing",
+                        "faces": len(shape.faces)},
+                violations=list(bad))
         if isinstance(shape, DrilledSolid):
             bad = shape.watertight_violations()
             return ValidationReport(
@@ -1079,8 +1124,7 @@ class RefKernel:
         (tx0, ty0, tz0), (tx1, ty1, tz1) = tb
         if isinstance(tool, Cyl):
             foot = ("circle", tool.cx, tool.cy, tool.r)
-        elif isinstance(tool, Solid) and tool.volume() == (
-                tx1 - tx0) * (ty1 - ty0) * (tz1 - tz0):
+        elif isinstance(tool, Solid) and _is_axis_box(self, tool, tb):
             foot = ("rect", tx0, ty0, tx1, ty1)
         else:
             return None
@@ -1107,7 +1151,7 @@ class RefKernel:
         if bb is None:
             return None
         (x0, y0, z0), (x1, y1, z1) = bb
-        if tool.volume() != (x1 - x0) * (y1 - y0) * (z1 - z0):
+        if not _is_axis_box(self, tool, bb):
             return None                       # not a solid axis-aligned box
         zs = [z for _r, z in prof]
         zmin, zmax = min(zs), max(zs)
@@ -1691,6 +1735,88 @@ def _point_in_poly(poly, q) -> bool:
     return inside
 
 
+def _point_strictly_in_poly(poly, q) -> bool:
+    """Exact, and STRICT: a point on the boundary is not inside.
+
+    ``_point_in_poly`` is a crossing-parity test, which is half-open — it is
+    inclusive on the min-x/min-y edges and exclusive on the others. That makes
+    it MIRROR-ASYMMETRIC: a pocket tangent to its flat's boundary is accepted on
+    two sides and refused on the other two, and the same part rotated 180° about
+    z builds or refuses depending on which way it landed. Where the answer means
+    "the mouth is clear of every other face", tangency is not clear, so the
+    boundary has to be excluded on all four sides and by name.
+
+    Exact throughout: no division and no ``float()``, so ℚ and ℚ[√d] coordinates
+    both decide this the same way. The float version silently rounded the cap's
+    own corner, which at large magnitudes let a mouth a full millimetre outside
+    the flat through (ADR-0019: a float must never decide topology).
+    """
+    px, py = q
+    n = len(poly)
+    inside = False
+    for i in range(n):
+        (ax, ay), (bx, by) = poly[i], poly[(i + 1) % n]
+        # cross > 0 <=> q is left of a->b; == 0 <=> q is on the carrier line
+        cr = (bx - ax) * (py - ay) - (by - ay) * (px - ax)
+        if cr == 0 and (px - ax) * (px - bx) <= 0 and (py - ay) * (py - by) <= 0:
+            return False                       # on the boundary: not strict
+        if (ay > py) != (by > py) and (cr > 0) == (by > ay):
+            inside = not inside
+    return inside
+
+
+def _disc_misses_solid(solid, cx, cy, r) -> bool:
+    """Does the disc (cx, cy, r) miss the solid's xy shadow entirely? EXACT.
+
+    A closed solid's shadow is the shadow of its BOUNDARY — every point over
+    the shadow's interior has a face above it — so projecting every poly and
+    testing the disc against each covers the whole footprint. A side wall
+    projects to a segment, which the edge-distance test handles as written.
+
+    Rational throughout: the closest point on a segment is a clamped ratio and
+    the comparison is against r², so nothing is rounded and ℚ[√d] coordinates
+    from an exact rotation decide it the same way.
+    """
+    r2 = r * r
+    for pp in solid.polys:
+        ring = [(v[0], v[1]) for v in pp.verts]
+        if len(ring) >= 3 and _point_in_poly(ring, (cx, cy)):
+            return False
+        for i in range(len(ring)):
+            (ax, ay), (bx, by) = ring[i], ring[(i + 1) % len(ring)]
+            dx, dy = bx - ax, by - ay
+            den = dx * dx + dy * dy
+            if den == 0:
+                qx, qy = ax, ay
+            else:
+                t = ((cx - ax) * dx + (cy - ay) * dy) / den
+                t = min(max(t, 0 * t), 1 + 0 * t)      # clamp, type-preserving
+                qx, qy = ax + t * dx, ay + t * dy
+            if (cx - qx) ** 2 + (cy - qy) ** 2 <= r2:
+                return False
+    return True
+
+
+def _is_axis_box(kernel, shape, bb) -> bool:
+    """Is ``shape`` exactly the axis-aligned box ``bb``?
+
+    ``volume() == dx*dy*dz`` is NOT that predicate, and reading it as one cut
+    the tool's BOUNDING BOX instead of the tool. ``Solid.volume()`` is additive
+    over polys, so a compound whose overlap exactly pays for its gap passes it:
+    an L of two boxes (4x3 plus 2x2 sharing a 2x1 corner) has area 14 in a 4x4
+    bbox and volume 4*4*4 — cut into a rounded box it removed 48 mm³ where the
+    truth is 42, silently, with a watertight mesh.
+
+    ``_box_check`` settles the POINT SET (every vertex at a bbox corner, every z
+    at a face), which is what the pocket construction actually needs; the volume
+    test stays as the guard against a doubled or degenerate shell that would
+    satisfy it.
+    """
+    (x0, y0, z0), (x1, y1, z1) = bb
+    return (kernel._box_check(shape) is not None
+            and shape.volume() == (x1 - x0) * (y1 - y0) * (z1 - z0))
+
+
 def _fillet_profile(prof, r):
     """Round every convex RIGHT-ANGLE corner of an (r, z) profile.
 
@@ -1906,12 +2032,17 @@ def _pocket_into_body(src, foot, za, zb, open_top):
 
     def mouth(z, n, positive):
         if foot[0] == "circle":
+            # NO pre-flip. A full-circle loop carries no winding of its own, so
+            # its direction is the writer's to decide from the circle's axis
+            # against the face's role (outer vs inner) — which is exactly what
+            # ``stepbody._oriented_bounds`` does, and what ``from_drilled`` and
+            # ``from_revolve`` rely on. Handing it a circle already reversed
+            # inverted that decision and emitted the mouth rim running the same
+            # way as the bore wall's: 2 non-manifold edges in every circular
+            # pocket's STEP file, i.e. a MANIFOLD_SOLID_BREP over an open shell.
             _k, cx, cy, r = foot
-            c = B._circle_at(cx, cy, z, r)
-            if (n[2] > 0) != positive:
-                c = B.Circle(c.c, tuple(-x for x in c.n), c.ref, c.r)
             p = (Q(cx) + Q(r), Q(cy), Q(z))
-            return B.Loop((B.Edge(c, p, p),))
+            return B.Loop((B.Edge(B._circle_at(cx, cy, z, r), p, p),))
         _k, x0, y0, x1, y1 = foot
         pts = [(Q(x), Q(y), Q(z)) for x, y in
                ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
@@ -1932,15 +2063,26 @@ def _pocket_into_body(src, foot, za, zb, open_top):
         _nope(f"boolean.cut(the pocket's open end meets {len(caps)} planar "
               "faces, not exactly one)", "K2.2")
     cap = src[caps[0]]
-    # the mouth must sit strictly inside the cap, clear of any fillet
-    ring = [tuple(float(x) for x in e.v0) for e in cap.loops[0].edges]
+    # The mouth must sit strictly inside the cap, clear of any fillet. The ring
+    # is taken EXACTLY (no float()) and tested strictly on all four sides —
+    # see _point_strictly_in_poly for what each of those was hiding.
+    #
+    # Both footprints are axis-aligned, so probing the four extremes bounds the
+    # whole mouth: for a rectangle they ARE the mouth's corners, and for a
+    # circle the axis extremes plus convexity of the cap give the rest. The cap
+    # must therefore be a polygon — an arc edge would make its vertex list an
+    # inscribed chord polygon and the containment claim would no longer follow.
+    if len(cap.loops) != 1 or any(not isinstance(e.curve, B.Line)
+                                  for e in cap.loops[0].edges):
+        _nope("boolean.cut(the pocket's open end is not a single polygonal "
+              "face)", "K2.2")
+    ring = [(e.v0[0], e.v0[1]) for e in cap.loops[0].edges]
     probe = ([(foot[1] + foot[3], foot[2]), (foot[1] - foot[3], foot[2]),
               (foot[1], foot[2] + foot[3]), (foot[1], foot[2] - foot[3])]
              if foot[0] == "circle"
              else [(foot[1], foot[2]), (foot[3], foot[2]),
                    (foot[3], foot[4]), (foot[1], foot[4])])
-    if len(cap.loops) != 1 or not all(
-            _point_in_poly([(p[0], p[1]) for p in ring], q) for q in probe):
+    if not all(_point_strictly_in_poly(ring, q) for q in probe):
         _nope("boolean.cut(the pocket does not sit strictly inside one flat "
               "face)", "K2.2")
 
