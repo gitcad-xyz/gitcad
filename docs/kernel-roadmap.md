@@ -31,8 +31,11 @@ regenerable — no more discovering fundamentals by accident.
 
 ## Current state
 
-**247/345 (71.6%) working · 98 honest gaps · 0 crashes.**
-(Was 218/345 when this document was written; 236 after ADR-0021 landed.)
+**290/345 (84.1%) working · 55 honest gaps · 0 crashes.**
+(218/345 when this document was written; 236 after ADR-0021 landed;
+247 after transforms and STEP moved to the canonical form; 290 after the
+Cone and RevolveSolid converters, the native body text format, and
+chamfer/shell on curved solids.)
 
 Rules this establishes:
 
@@ -61,56 +64,38 @@ can. Pair every coverage push with one.
 
 Priority = (how common the part is) × (how blocking the loss is).
 
-### P1 — rigid transforms on curved/composite solids — MOSTLY DONE
-Transforms now route through the canonical B-rep (ADR-0021), which rotates
-exactly for the ℚ[√d] angles. `rotate` went from 14 refusals to 3, and what is
-left is **not a transform problem at all**: it is four missing `Body`
-converters. Every remaining `mirror`/`scale`/`rotate`/`export_step` refusal on
-a curved solid reduces to one of
+### P1 — rigid transforms, exports, chamfer, shell — DONE
+Transforms, STEP, the native text format, chamfer and closed shell all route
+through the canonical B-rep now, and the `Cone` and `RevolveSolid` converters
+landed. What is left is no longer plumbing.
 
-| missing converter | unlocks (cells) |
-|---|---|
-| `Cone` | mirror, scale, export_step |
-| `RevolveSolid` | rotate ×2, mirror, scale, export_step, entities(edge) |
-| `RoundedBox` (filleted box) | translate, rotate ×2, mirror, scale, export_step, export_stl |
-| `DisjointUnion` with a `DrilledSolid` member | rotate ×2, mirror, scale, export_step |
+### What the last 55 cells actually need
 
-That is ~22 cells behind four converters — the highest-leverage work left, and
-the O(reps) half of ADR-0021 rather than new mathematics.
+The remaining gaps are **three missing geometry types**, not fifty-five
+missing features. Nothing here is closable by another fallback.
 
-### P2 — booleans on curved operands (K2.2/K2.3)
-`cut box` and `union box` refuse on quadrics; `cut cylinder` refuses on spheres
-and cones. This is the countersink blocker (cone-vs-solid) and the general
-"pocket a curved part" case. *Real math:* needs quadric∩planar surface
-intersection. The `bore_cyl` revolve-profile trick generalises here — a coaxial
-cut of a solid of revolution is another solid of revolution — and covers
-countersinks and tapered bores without full K2.3.
+| # cells | blocked on | why it is real work |
+|---|---|---|
+| 21 | **conic-section curves** (K2.2) | cutting a quadric with a plane produces an ellipse / parabola / hyperbola. The canonical curve set is `Line | Circle`; a general plane–cylinder edge is none of those, and faceting it would be exactly the approximation the charter forbids. |
+| 14 | **torus surfaces** (K5.2) | filleting a lathed rim sweeps a torus. A `RevolveSolid` profile is line segments only, so the fillet arc has nowhere to live. |
+| ~10 | **trimmed quadric faces** (`RoundedBox`, cone/sphere chamfer+shell) | a rounded box is quarter-cylinders and octant-spheres — partial bands, with loops that mix arcs and lines on a CURVED surface. |
 
-### P3 — `entities(edge)` on curved solids
-Refuses everywhere except planar. Blocks edge selection (fillet/chamfer
-targeting, dimension anchoring) on any part with a hole. *Tractable:* a bore
-contributes two circular edges with known centre/radius/plane; that descriptor
-already exists in `cylinder_faces()`.
+The good news in each row:
 
-### P4 — blends and shells on curved/composite solids
-`fillet(all)` refuses nearly everywhere; `shell` refuses on curved solids.
-*Genuinely hard* (K5.2 general blends, K4.2 offset surfaces) — schedule after
-P1–P3 and do not let it block them.
+- **Conic sections stay exact.** An ellipse from a plane–cylinder cut has
+  rational centre and axes when both operands are rational, so `Ellipse` is a
+  ℚ-parameterised curve like `Circle` — no new number field, and the
+  divergence-theorem volume terms extend the same way the cone's did.
+- **Torus volume is exact in ℚ[π]** (Pappus: V = 2πR·A), so a filleted rim
+  costs a surface type, not a number field.
+- **Trimmed quadrics at 90° are exact**, because sin/cos of a right angle are
+  0 and ±1. A rounded box is the tractable case; arbitrary trims are not, and
+  should keep refusing.
 
-### P5 — `export_step`/`export_brep` on the remaining representations
-STEP is now written **once** against the canonical B-rep
-(`forgekernel.stepbody`), emitting `PLANE`, `CYLINDRICAL_SURFACE` and
-`SPHERICAL_SURFACE` analytically with shared edges. Bare cylinders, bosses and
-spheres export; what still refuses is the same four converters as P1, plus
-`CONICAL_SURFACE`. The acceptance test is a manifold oracle **on the emitted
-file** — every `EDGE_CURVE` used by exactly two faces, in opposite directions
-once `ADVANCED_FACE`'s same_sense flag is folded in. A file that merely opens
-proves nothing; one that fails this will not boolean, mesh for CAM, or import
-as a solid.
-
-`export_brep` (10 refusals) needs the forge text format to describe non-planar
-solids at all — that is a format decision, not a geometry one, and it should
-follow ADR-0004's byte-canonical rule.
+The order that pays: **trimmed quadrics → torus → conic sections**, cheapest
+and least risky first. Each one should land with its own oracle (analytic
+volume AND Monte Carlo) before the next starts — every silent wrong-volume bug
+this kernel has had was caught by an oracle, never by the suite.
 
 ### Deliberately deferred
 - **engrave** — text strokes rotate by arbitrary angles, which leave ℚ[√d]
