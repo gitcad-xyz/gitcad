@@ -232,6 +232,66 @@ def assembly_mesh_payload(manifest_path: Path, kernel: Kernel) -> dict:
     }
 
 
+def view_dependencies(path: Path, text: str, kind: str) -> list[Path]:
+    """Every file the current view is built FROM, besides the watched one.
+
+    The reload poll hashed only the watched file, so editing a member part
+    while watching the assembly changed nothing on screen — precisely the case
+    where someone is watching a design being built. Resolution failures are
+    swallowed: a half-written dependency must not break the poll, and the next
+    tick picks it up.
+    """
+    out: list[Path] = []
+    try:
+        if kind == "assembly":
+            for _name, (_s, _t, _r, part) in _assembly_part_files(path).items():
+                out.append(part)
+        elif kind == "pcba":
+            from gitcad.pcba import pcba_sources
+
+            src = pcba_sources(text, str(path.parent))
+            out.append(src["board"])
+            out.extend(src.get("schematics") or [])
+        elif kind == "model":
+            doc = Document.loads(text)
+            for f in doc.features:
+                if f.op == "import" and f.params.get("file"):
+                    p = Path(f.params["file"])
+                    out.append(p if p.is_absolute() else path.parent / p)
+    except Exception:                          # noqa: BLE001 - see docstring
+        pass
+    return [p for p in out if p != path]
+
+
+def _assembly_part_files(manifest_path: Path) -> dict:
+    """Instance -> the part file backing it, without building any geometry."""
+    from gitcad.part import Assembly
+
+    asm = Assembly.loads(manifest_path.read_text(encoding="utf-8"))
+    root = manifest_path.parent
+    out = {}
+    for inst in asm.instances:
+        for pat in (f"{inst.part}.part", f"{inst.part}.pcba",
+                    f"{inst.part}/part.json"):
+            for cand in root.rglob(pat):
+                out[inst.name] = (None, None, None, cand)
+                break
+            if inst.name in out:
+                break
+    return out
+
+
+def _version_digest(path: Path, text: str, kind: str) -> str:
+    """A content hash over the watched file AND everything it is built from."""
+    h = hashlib.sha256(text.encode())
+    for dep in sorted(view_dependencies(path, text, kind), key=str):
+        try:
+            h.update(b"\0" + str(dep).encode() + b"\0" + dep.read_bytes())
+        except OSError:
+            h.update(b"\0missing\0")           # a deleted dep is a change too
+    return h.hexdigest()
+
+
 def resolve_import_paths(doc: Document, base: Path) -> Document:
     """Import-op file params are project-relative in committed models
     (portability); builds resolve them against the MODEL's directory."""
@@ -348,9 +408,18 @@ class _Handler(BaseHTTPRequestHandler):
             text = self.path_watched.read_text(encoding="utf-8")
             if self.path == "/":
                 self._send(200, PAGE.encode(), "text/html; charset=utf-8")
-            elif self.path == "/api/version":
-                digest = hashlib.sha256(text.encode()).hexdigest()
+            elif self.path.startswith("/api/activity"):
+                from urllib.parse import parse_qs, urlparse
+
+                from gitcad.activity import Activity
+
+                q = parse_qs(urlparse(self.path).query)
+                since = int((q.get("since") or ["0"])[0])
+                state = Activity(self.path_watched).state(since)
+                self._send(200, json.dumps(state).encode(), "application/json")
+            elif self.path.startswith("/api/version"):
                 kind = detect_kind(text)
+                digest = _version_digest(self.path_watched, text, kind)
                 self._send(200, json.dumps({"version": digest, "kind": kind,
                                             "name": self.path_watched.name,
                                             "review_base": self.review_base}).encode(),
@@ -434,6 +503,31 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # surface errors to the page, never crash
             self._send(500, json.dumps({"error": f"{type(exc).__name__}: {exc}"}).encode(),
                        "application/json")
+
+    def do_POST(self) -> None:  # noqa: N802 - http.server API
+        """The human's half of the loop: answering a question the agent asked."""
+        try:
+            if self.path != "/api/answer":
+                self._send(404, b"not found", "text/plain")
+                return
+            from gitcad.activity import Activity
+
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > 64 * 1024:                  # an answer is a short string
+                self._send(413, b'{"error": "too large"}', "application/json")
+                return
+            body = json.loads(self.rfile.read(n) or b"{}")
+            qid, choice = body.get("id"), body.get("choice")
+            if not isinstance(qid, str) or not isinstance(choice, str):
+                self._send(400, b'{"error": "id and choice must be strings"}',
+                           "application/json")
+                return
+            Activity(self.path_watched).answer(qid, choice[:2000])
+            self._send(200, b'{"ok": true}', "application/json")
+        except Exception as exc:
+            self._send(500, json.dumps(
+                {"error": f"{type(exc).__name__}: {exc}"}).encode(),
+                "application/json")
 
 
 def serve(path: str, port: int = 8137, kernel: Kernel | None = None,

@@ -36,3 +36,7 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+
+# disposable evidence, never source (ADR-0004): the live activity log the
+# viewer tails while an agent works
+.gitcad/

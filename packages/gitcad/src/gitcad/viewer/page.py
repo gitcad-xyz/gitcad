@@ -62,12 +62,47 @@ PAGE = r"""<!DOCTYPE html>
   #explodebox{position:fixed;right:12px;top:40px;display:none;align-items:center;
               gap:8px;color:var(--dim);z-index:5}
   #explodebox input{width:140px;accent-color:var(--acc)}
+  /* the live rail: what the agent is doing, right now. Always visible on
+     every tab — watching the work happen is the point, not a view of it. */
+  #live{position:fixed;right:12px;bottom:38px;width:330px;max-height:46vh;
+        display:none;flex-direction:column;gap:3px;z-index:6;font-size:11px;
+        overflow:hidden;pointer-events:none}
+  #live .ev{background:rgba(13,17,23,.86);border-left:2px solid var(--line);
+            padding:3px 8px;color:var(--dim);border-radius:0 3px 3px 0;
+            white-space:pre-wrap;opacity:.55}
+  #live .ev:last-child{opacity:1;color:var(--ink);border-left-color:#3fb950}
+  #live .ev.problem{border-left-color:#f85149;color:#f85149;opacity:1}
+  #live .ev.done{border-left-color:var(--acc)}
+  #live .ev .who{color:#3fb950}
+  #livehead{display:flex;align-items:center;gap:6px;color:#3fb950;
+            background:rgba(13,17,23,.86);padding:3px 8px;border-radius:3px}
+  #livedot{width:7px;height:7px;border-radius:50%;background:#3fb950;
+           animation:pulse 1.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+  /* a question BLOCKS the eye: the agent is stopped until this is answered */
+  #ask{position:fixed;left:50%;top:44px;transform:translateX(-50%);z-index:9;
+       display:none;max-width:620px;background:#161b22;border:1px solid #d29922;
+       border-radius:8px;padding:12px 16px;box-shadow:0 8px 30px rgba(0,0,0,.6)}
+  #ask h4{margin:0 0 8px;color:#d29922;font-size:12px;letter-spacing:.04em;
+          text-transform:uppercase}
+  #ask .q{color:var(--ink);font-size:13px;margin-bottom:10px;white-space:pre-wrap}
+  #ask .opts{display:flex;gap:8px;flex-wrap:wrap}
+  #ask button{font:inherit;font-size:12px;color:var(--ink);background:#21262d;
+              border:1px solid var(--line);border-radius:5px;padding:4px 12px;
+              cursor:pointer}
+  #ask button:hover{border-color:#d29922;color:#d29922}
+  #ask input{font:inherit;font-size:12px;color:var(--ink);background:#0d1117;
+             border:1px solid var(--line);border-radius:5px;padding:4px 8px;
+             flex:1;min-width:180px}
 </style></head><body>
 <canvas id="gl"></canvas><div id="board"></div><div id="sheets"></div>
 <div id="checks"></div><div id="review"></div><div id="drawing"></div>
 <div id="tabs"></div>
 <div id="explodebox"><span>explode</span>
   <input id="explodeslider" type="range" min="0" max="100" value="0"></div>
+<div id="live"></div>
+<div id="ask"><h4>the agent is waiting on you</h4>
+  <div class="q"></div><div class="opts"></div></div>
 <div id="hud"></div><div id="sel"></div><div id="measure"></div>
 <div id="err"></div><div id="logo">gitcad</div>
 <script>
@@ -255,16 +290,26 @@ function raycast(px, py){
 
 // -- selection: click a body, see what it is ---------------------------------
 const selHud = document.getElementById("sel");
-function applySelection(idx){
-  selected = idx;
+let activeName = null;                   // the instance the AGENT is working on
+
+// One recolour pass carries BOTH highlights: the human's selection (amber) and
+// the agent's current subject (green). They are different questions — "what am
+// I looking at" and "what is being changed under me" — so one must never clear
+// the other.
+function recolor(){
   const cols = new Float32Array(baseCols);
+  const paint = (g, r, gr, b, k) => {
+    for(let v = g.v0; v <= g.v1; v++){
+      cols[3*v]   = Math.min(1, cols[3*v]   * k + r);
+      cols[3*v+1] = Math.min(1, cols[3*v+1] * k + gr);
+      cols[3*v+2] = Math.min(1, cols[3*v+2] * k + b);
+    }
+  };
+  const ai = activeName ? groups.findIndex(g => g.name === activeName) : -1;
+  if(ai >= 0) paint(groups[ai], 0.05, 0.55, 0.15, 0.35);      // green
+  if(selected >= 0) paint(groups[selected], 0.55, 0.45, 0.10, 0.5);  // amber
   if(selected >= 0){
     const g = groups[selected];
-    for(let v = g.v0; v <= g.v1; v++){
-      cols[3*v] = Math.min(1, cols[3*v] * 0.5 + 0.55);
-      cols[3*v+1] = Math.min(1, cols[3*v+1] * 0.5 + 0.45);
-      cols[3*v+2] = Math.min(1, cols[3*v+2] * 0.3 + 0.1);
-    }
     selHud.textContent = `selected: ${g.name}  (${g.part})\n` +
       `centroid (${g.centroid.map(v=>v.toFixed(1)).join(", ")}) · ` +
       `${(g.i1 - g.i0) / 3} tris · click again to deselect`;
@@ -273,7 +318,14 @@ function applySelection(idx){
   }
   gl.bindBuffer(gl.ARRAY_BUFFER, cb);
   gl.bufferData(gl.ARRAY_BUFFER, cols, gl.STATIC_DRAW);
-  syncSheetHighlight(selected >= 0 ? groups[selected].name : null);
+  syncSheetHighlight(selected >= 0 ? groups[selected].name
+                                   : (ai >= 0 ? activeName : null));
+}
+function applySelection(idx){ selected = idx; recolor(); }
+function setActive(name){
+  if(name === activeName) return;
+  activeName = name;
+  if(basePos) recolor();
 }
 function selectAt(px, py){
   const hit = raycast(px, py);
@@ -590,7 +642,78 @@ document.getElementById("explodeslider").addEventListener("input", e => {
   explode = Number(e.target.value) / 100;
   applyExplode();
 });
+
+// -- the live rail: watch the agent work --------------------------------------
+// Polled faster than the geometry, and independently: narration should arrive
+// while a build is still running, not after it lands on disk.
+const liveEl = document.getElementById("live");
+const askEl = document.getElementById("ask");
+let liveSeq = 0, liveLog = [], answering = null;
+
+function ago(t){
+  const s = Math.max(0, Date.now() / 1000 - t);
+  return s < 60 ? `${s | 0}s` : s < 3600 ? `${s / 60 | 0}m` : `${s / 3600 | 0}h`;
+}
+function renderLive(active){
+  if(!liveLog.length){ liveEl.style.display = "none"; return; }
+  liveEl.style.display = "flex";
+  const head = active
+    ? `<div id="livehead"><span id="livedot"></span>working on ` +
+      `<b>${esc(active.instance || "the design")}</b></div>`
+    : "";
+  liveEl.innerHTML = head + liveLog.slice(-9).map(e => {
+    const cls = e.kind === "problem" ? "problem" : e.kind === "done" ? "done" : "";
+    const who = e.instance ? `<span class="who">${esc(e.instance)}</span> ` : "";
+    return `<div class="ev ${cls}">${who}${esc(e.text || e.kind)}` +
+           `<span style="float:right;opacity:.6">${ago(e.t)}</span></div>`;
+  }).join("");
+}
+function esc(s){
+  return String(s == null ? "" : s).replace(/[&<>"]/g,
+    c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+function renderAsk(q){
+  if(!q || answering === q.id){ askEl.style.display = "none"; return; }
+  askEl.style.display = "block";
+  askEl.querySelector(".q").textContent = q.text || "";
+  const opts = askEl.querySelector(".opts");
+  opts.innerHTML = "";
+  const send = async choice => {
+    answering = q.id; askEl.style.display = "none";
+    await fetch("/api/answer", {method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({id: q.id, choice: String(choice)})});
+  };
+  for(const o of (q.options || [])){
+    const b = document.createElement("button");
+    b.textContent = o; b.onclick = () => send(o);
+    opts.appendChild(b);
+  }
+  if(!(q.options || []).length){       // free-text question
+    const inp = document.createElement("input");
+    inp.placeholder = "type an answer, then Enter";
+    inp.onkeydown = e => { if(e.key === "Enter" && inp.value.trim())
+                             send(inp.value.trim()); };
+    opts.appendChild(inp);
+    setTimeout(() => inp.focus(), 0);
+  }
+}
+async function pollLive(){
+  try {
+    const s = await (await fetch("/api/activity?since=" + liveSeq)).json();
+    if(s.events && s.events.length){
+      liveLog = liveLog.concat(s.events).slice(-60);
+      liveSeq = s.seq;
+    }
+    setActive(s.active ? s.active.instance : null);
+    renderLive(s.active);
+    renderAsk(s.pending);
+  } catch(e){ /* the log is optional; the viewer stands alone without it */ }
+  setTimeout(pollLive, 500);
+}
+
 renderTabs();
 poll();
+pollLive();
 </script></body></html>
 """
