@@ -357,3 +357,52 @@ def test_a_union_falls_through_to_the_seams_own_distribution(k) -> None:
     wider = k.transform(k.cylinder(2, 100), translate=(15, 15, 4.5))
     with pytest.raises(Exception, match="wider than the lathe"):
         k.boolean("cut", boss, wider)
+
+
+ROUNDED_POCKETS = [
+    ("circular", lambda k, mid: k.transform(k.cylinder(1, 100), translate=mid),
+     math.pi * 10),
+    ("square", lambda k, mid: k.transform(k.box(2, 2, 100), translate=mid), 40.0),
+]
+
+
+@pytest.mark.parametrize("label,make,want", ROUNDED_POCKETS,
+                         ids=[r[0] for r in ROUNDED_POCKETS])
+def test_a_pocket_sinks_into_a_rounded_boxs_flat(label, make, want) -> None:
+    """A rounded box's flats are ORDINARY PLANES, so nothing about the fillets
+    participates as long as the mouth stays clear of them — it is the same
+    construction a lathe pocket uses with the source body left general."""
+    from forgekernel.quadric import RoundedBox
+
+    k = RefKernel()
+    rb = RoundedBox(20, 20, 20, 3)
+    out = k.boolean("cut", rb, make(k, (10, 10, 10)))
+    assert k.mass_props(rb)["volume"] - k.mass_props(out)["volume"] \
+        == pytest.approx(want)
+
+
+@pytest.mark.parametrize("label,make,want", ROUNDED_POCKETS,
+                         ids=[r[0] for r in ROUNDED_POCKETS])
+def test_a_pocketed_rounded_box_meshes_watertight(label, make, want) -> None:
+    from collections import defaultdict
+
+    from forgekernel import body as B
+    from forgekernel.quadric import RoundedBox
+
+    k = RefKernel()
+    out = k.boolean("cut", RoundedBox(20, 20, 20, 3), make(k, (10, 10, 10)))
+    ec = defaultdict(int)
+    for a, b, c in B.tessellate(out, 0.1)["triangles"]:
+        for e in ((a, b), (b, c), (c, a)):
+            ec[tuple(sorted(e))] += 1
+    assert all(n == 2 for n in ec.values())
+
+
+def test_a_pocket_reaching_a_rounded_boxs_fillet_refuses(k) -> None:
+    """Past the flat the mouth would meet a quarter-cylinder band, and the cap
+    is no longer the only face it cuts."""
+    from forgekernel.quadric import RoundedBox
+
+    tool = k.transform(k.cylinder(1, 100), translate=(2, 10, 10))
+    with pytest.raises(Exception, match="strictly inside one flat"):
+        k.boolean("cut", RoundedBox(20, 20, 20, 3), tool)

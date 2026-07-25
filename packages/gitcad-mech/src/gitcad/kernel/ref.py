@@ -462,6 +462,10 @@ class RefKernel:
                     out.append(self.boolean("cut", m, b))
             return DisjointUnion._unchecked(out)
         if op == "cut":
+            rb = self._pocket_rounded(a, b)
+            if rb is not None:
+                return rb
+        if op == "cut":
             pocket = self._pocket_lathe(a, b)
             if pocket is not None:
                 return pocket
@@ -1058,6 +1062,36 @@ class RefKernel:
             return [p for i, p in enumerate(pts) if p not in pts[:i]], \
                 shape.cx, shape.cy
         return None, None, None
+
+    def _pocket_rounded(self, a, tool):
+        """Cut an axis-aligned tool into a rounded box, whose flats are
+        ordinary planes -- nothing about the fillets participates as long as
+        the mouth stays clear of them."""
+        from forgekernel import body as B
+        from forgekernel.brep import Solid
+        from forgekernel.quadric import Cyl, RoundedBox, _exact_bbox
+
+        if not isinstance(a, RoundedBox):
+            return None
+        tb = _exact_bbox(tool)
+        if tb is None:
+            return None
+        (tx0, ty0, tz0), (tx1, ty1, tz1) = tb
+        if isinstance(tool, Cyl):
+            foot = ("circle", tool.cx, tool.cy, tool.r)
+        elif isinstance(tool, Solid) and tool.volume() == (
+                tx1 - tx0) * (ty1 - ty0) * (tz1 - tz0):
+            foot = ("rect", tx0, ty0, tx1, ty1)
+        else:
+            return None
+        (sx0, sy0, sz0), (sx1, sy1, sz1) = _exact_bbox(a)
+        za, zb = max(tz0, sz0), min(tz1, sz1)
+        if za >= zb:
+            return None
+        if (za == sz0) == (zb == sz1):
+            _nope("boolean.cut(a pocket open at neither end is an internal "
+                  "cavity, and one open at both would split the solid)", "K2.2")
+        return _pocket_into_body(B.to_body(a).faces, foot, za, zb, zb == sz1)
 
     def _pocket_lathe(self, a, tool):
         """Cut an axis-aligned rectangular prism into a solid of revolution."""
@@ -1851,4 +1885,99 @@ def _pocket_lathe_body(prof, cx, cy, rect, za, zb, open_top):
     nvec = (Q(0), Q(0), nz)
     faces.append(B.Face(B.Plane(nvec, Q(zc) * nz),
                         (ring(zc, True, nvec),), True))
+    return B.Body(tuple(faces))
+
+
+def _pocket_into_body(src, foot, za, zb, open_top):
+    """Sink an axis-aligned pocket into a body that has a FLAT cap at the open
+    end. ``foot`` is ("circle", cx, cy, r) or ("rect", x0, y0, x1, y1).
+
+    Exactly the construction a lathe pocket uses, with the source body left
+    general: the open end's cap gains the mouth as an inner loop, the tool
+    contributes its walls, and the closed end a floor. A rounded box's flats
+    are ordinary planes, so nothing about the fillets participates as long as
+    the mouth stays clear of them.
+    """
+    from fractions import Fraction as Q
+    from forgekernel import body as B
+
+    zo = Q(zb) if open_top else Q(za)
+    zc = Q(za) if open_top else Q(zb)
+
+    def mouth(z, n, positive):
+        if foot[0] == "circle":
+            _k, cx, cy, r = foot
+            c = B._circle_at(cx, cy, z, r)
+            if (n[2] > 0) != positive:
+                c = B.Circle(c.c, tuple(-x for x in c.n), c.ref, c.r)
+            p = (Q(cx) + Q(r), Q(cy), Q(z))
+            return B.Loop((B.Edge(c, p, p),))
+        _k, x0, y0, x1, y1 = foot
+        pts = [(Q(x), Q(y), Q(z)) for x, y in
+               ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
+        lp = B.Loop(tuple(B.Edge(B.Line(pts[i], tuple(
+            pts[(i + 1) % 4][k] - pts[i][k] for k in range(3))),
+            pts[i], pts[(i + 1) % 4]) for i in range(4)))
+        if (B._planar_loop_area2(lp, n) > 0) == positive:
+            return lp
+        pts.reverse()
+        return B.Loop(tuple(B.Edge(B.Line(pts[i], tuple(
+            pts[(i + 1) % 4][k] - pts[i][k] for k in range(3))),
+            pts[i], pts[(i + 1) % 4]) for i in range(4)))
+
+    caps = [i for i, f in enumerate(src)
+            if isinstance(f.surface, B.Plane) and f.surface.n[0] == 0
+            and f.surface.n[1] == 0 and B._plane_point(f.surface)[2] == zo]
+    if len(caps) != 1:
+        _nope(f"boolean.cut(the pocket's open end meets {len(caps)} planar "
+              "faces, not exactly one)", "K2.2")
+    cap = src[caps[0]]
+    # the mouth must sit strictly inside the cap, clear of any fillet
+    ring = [tuple(float(x) for x in e.v0) for e in cap.loops[0].edges]
+    probe = ([(foot[1] + foot[3], foot[2]), (foot[1] - foot[3], foot[2]),
+              (foot[1], foot[2] + foot[3]), (foot[1], foot[2] - foot[3])]
+             if foot[0] == "circle"
+             else [(foot[1], foot[2]), (foot[3], foot[2]),
+                   (foot[3], foot[4]), (foot[1], foot[4])])
+    if len(cap.loops) != 1 or not all(
+            _point_in_poly([(p[0], p[1]) for p in ring], q) for q in probe):
+        _nope("boolean.cut(the pocket does not sit strictly inside one flat "
+              "face)", "K2.2")
+
+    faces = []
+    for i, f in enumerate(src):
+        faces.append(B.Face(f.surface, f.loops + (mouth(zo, f.surface.n, False),),
+                            f.sense) if i == caps[0] else f)
+
+    nz = Q(1) if open_top else Q(-1)
+    fl = (Q(0), Q(0), nz)
+    faces.append(B.Face(B.Plane(fl, zc * nz), (mouth(zc, fl, True),), True))
+
+    if foot[0] == "circle":
+        _k, cx, cy, r = foot
+        axis = (Q(0), Q(0), Q(1))
+        rims = tuple(B.Edge(B._circle_at(cx, cy, z, r),
+                            (Q(cx) + Q(r), Q(cy), Q(z)), (Q(cx) + Q(r), Q(cy), Q(z)))
+                     for z in (Q(za), Q(zb)))
+        faces.append(B.Face(B.Cylinder((Q(cx), Q(cy), Q(za)), axis, Q(r)),
+                            (B.Loop(rims),), False))   # a bore faces INWARD
+    else:
+        _k, x0, y0, x1, y1 = foot
+        corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+        for i in range(4):
+            (ax, ay), (bx, by) = corners[i], corners[(i + 1) % 4]
+            d = (Q(by - ay), Q(ax - bx), Q(0))
+            n = tuple(-v for v in d)
+            pts = [(Q(ax), Q(ay), Q(za)), (Q(bx), Q(by), Q(za)),
+                   (Q(bx), Q(by), Q(zb)), (Q(ax), Q(ay), Q(zb))]
+            lp = B.Loop(tuple(B.Edge(B.Line(pts[j], tuple(
+                pts[(j + 1) % 4][k] - pts[j][k] for k in range(3))),
+                pts[j], pts[(j + 1) % 4]) for j in range(4)))
+            if B._planar_loop_area2(lp, n) < 0:
+                rp = list(reversed(pts))
+                lp = B.Loop(tuple(B.Edge(B.Line(rp[j], tuple(
+                    rp[(j + 1) % 4][k] - rp[j][k] for k in range(3))),
+                    rp[j], rp[(j + 1) % 4]) for j in range(4)))
+            faces.append(B.Face(B.Plane(n, sum(n[k] * pts[0][k] for k in range(3))),
+                                (lp,), True))
     return B.Body(tuple(faces))
