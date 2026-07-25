@@ -867,11 +867,13 @@ class RefKernel:
         for i in range(n):
             (x1, y1), (x2, y2) = bottom[i], bottom[(i + 1) % n]
             dx, dy = x2 - x1, y2 - y1
-            # convexity: next turn must be left
-            (x3, y3) = bottom[(i + 2) % n]
-            cross = dx * (y3 - y2) - dy * (x3 - x2)
-            if cross <= 0:
-                raise ValueError("shell(non-convex prism profile) — K4.2")
+            # NOT a convexity check. A reflex corner's inset is perfectly
+            # well defined — two inset lines still meet at a point — so
+            # refusing every L-bracket was too strong. What can actually go
+            # wrong is the inset SELF-INTERSECTING or escaping the profile
+            # where a notch is narrower than 2t, and that is checked on the
+            # finished polygon below, where it is a property of the answer
+            # rather than a guess about the input.
             # |d| must be rational (Pythagorean edge)
             l2 = dx * dx + dy * dy
             num, den = l2.numerator, l2.denominator
@@ -893,11 +895,18 @@ class RefKernel:
                 raise ValueError("shell: degenerate inset corner")
             inset.append(((c1 * b2 - c2 * b1) / det,
                           (a1 * c2 - a2 * c1) / det))
-        # validity: the inset must still be a CCW convex polygon
-        in_area2 = sum(inset[i][0] * inset[(i + 1) % n][1]
-                       - inset[(i + 1) % n][0] * inset[i][1] for i in range(n))
+        # validity, checked on the RESULT: same orientation, strictly smaller,
+        # simple, and wholly inside the profile it hollows
+        in_area2 = _signed_area2(inset)
         if in_area2 <= 0:
             raise ValueError("shell too thick: inset profile collapses")
+        if in_area2 >= area2:
+            raise ValueError("shell: the inset is not smaller than the profile")
+        if not _is_simple(inset):
+            raise ValueError(
+                "shell(thickness makes the void self-intersect) — K4.2")
+        if not all(_point_in_poly(bottom, q) for q in inset):
+            raise ValueError("shell(the void escapes the profile) — K4.2")
         void = self._fk.prism(inset, z1 - z0 - 2 * t)
         void = self._fk.translate(void, 0, 0, z0 + t)
         return self._fk.boolean("cut", shape, void)

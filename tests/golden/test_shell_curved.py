@@ -98,3 +98,44 @@ def test_hollowing_a_sphere_thinner_than_itself_refuses(k) -> None:
 
     with pytest.raises(Exception, match="exceeds the sphere"):
         k.shell(Sphere(0, 0, 0, 6), [], 9.0)
+
+
+NONCONVEX = [
+    # outer 64 mm2 x 6; inset by 1 is 28 mm2 x 4 -> 384 - 112
+    ("L-prism t=1", [(0, 0), (10, 0), (10, 4), (4, 4), (4, 10), (0, 10)],
+     6, 1, 272),
+    # inset by 1/2 is 45 mm2 x 5 -> 384 - 225
+    ("L-prism t=0.5", [(0, 0), (10, 0), (10, 4), (4, 4), (4, 10), (0, 10)],
+     6, 0.5, 159),
+    # a U: the SLOT FLOOR insets DOWNWARD, because the material is below it.
+    # outer 78 x 5; inset 24 x 3 -> 390 - 72
+    ("U-channel", [(0, 0), (12, 0), (12, 10), (9, 10), (9, 3), (3, 3),
+                   (3, 10), (0, 10)], 5, 1, 318),
+]
+
+
+@pytest.mark.parametrize("label,profile,h,t,want", NONCONVEX,
+                         ids=[n[0] for n in NONCONVEX])
+def test_a_non_convex_prism_can_be_hollowed(label, profile, h, t, want) -> None:
+    """A reflex corner's inset is perfectly well defined — two inset lines
+    still meet at a point — so refusing every L-bracket was too strong. What
+    can actually go wrong is the inset SELF-INTERSECTING or escaping the
+    profile where a notch is narrower than 2t, and that is now checked on the
+    finished polygon, where it is a property of the ANSWER rather than a guess
+    about the input."""
+    from forgekernel.kernel import prism
+
+    k = RefKernel()
+    out = k.shell(prism(profile, h), [], t)
+    assert k.mass_props(out)["volume"] == pytest.approx(want)
+
+
+def test_a_notch_narrower_than_the_wall_refuses(k) -> None:
+    """Where the slot is thinner than 2t the inset inverts, and a bow tie has
+    a NEGATIVE Green's integral — the void would add material."""
+    from forgekernel.kernel import prism
+
+    narrow = [(0, 0), (12, 0), (12, 10), (7, 10), (7, 3), (5, 3), (5, 10),
+              (0, 10)]
+    with pytest.raises(Exception):
+        k.shell(prism(narrow, 5), [], 2.0)
