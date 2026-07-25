@@ -421,12 +421,23 @@ class RefKernel:
             return out
         if op == "cut" and isinstance(a, DisjointUnion):
             # (A u B) \ C distributes over disjoint members, and cutting only
-            # SHRINKS each one, so disjointness survives without re-checking
-            try:
-                return DisjointUnion._unchecked(
-                    [self.boolean("cut", m, b) for m in a.members])
-            except KernelError:
-                raise
+            # SHRINKS each one, so disjointness survives without re-checking.
+            # A member the tool provably MISSES comes back untouched — asking
+            # the member to cut itself against something it never meets is how
+            # a boss lost a cell to "the prism splits the lathe".
+            from forgekernel.quadric import _exact_bbox
+
+            tb = _exact_bbox(b)
+            out = []
+            for m in a.members:
+                mb = _exact_bbox(m)
+                if tb is not None and mb is not None and any(
+                        tb[1][k] <= mb[0][k] or mb[1][k] <= tb[0][k]
+                        for k in range(3)):
+                    out.append(m)
+                else:
+                    out.append(self.boolean("cut", m, b))
+            return DisjointUnion._unchecked(out)
         if op == "cut":
             pocket = self._pocket_lathe(a, b)
             if pocket is not None:

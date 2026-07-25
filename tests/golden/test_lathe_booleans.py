@@ -202,10 +202,14 @@ def test_cutting_a_disjoint_union_distributes_over_its_members(k) -> None:
     from forgekernel.quadric import DisjointUnion
 
     boss = DisjointUnion([Solid.box(30, 30, 3), Cyl(15, 15, 4, 3, 9)])
-    tool = k.transform(k.box(2, 2, 100), translate=(1, 1, -50))
+    # a tool that reaches only the plate: the boss member is provably missed
+    # and must come back UNTOUCHED rather than be asked to cut itself against
+    # something it never meets
+    tool = k.transform(k.box(2, 2, 3), translate=(1, 1, 0))
     out = k.boolean("cut", boss, tool)
-    assert isinstance(out, DisjointUnion)
-    assert k.mass_props(out)["volume"] < k.mass_props(boss)["volume"]
+    assert isinstance(out, DisjointUnion) and len(out.members) == 2
+    assert k.mass_props(out)["volume"] == pytest.approx(
+        k.mass_props(boss)["volume"] - 4 * 3)
 
 
 def test_a_rounded_box_has_no_sharp_edge_to_blend(k) -> None:
