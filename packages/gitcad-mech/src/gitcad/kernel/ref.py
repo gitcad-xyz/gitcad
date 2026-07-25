@@ -111,10 +111,15 @@ def _edge_point(e, t) -> list[float]:
     return [pt[i] + s * d[i] for i in range(3)]
 
 
-def _edge_midpoint(e) -> list[float]:
+def _edge_midpoint(e):
     """Midpoint of a logical straight edge (``tmin``/``tmax`` are the along-dir
-    coordinates), for geometry-based edge selection."""
-    return _edge_point(e, (float(e["tmin"]) + float(e["tmax"])) / 2)
+    coordinates), for geometry-based edge selection.
+
+    EXACT. This picks which edges an op acts on, which is a topology decision,
+    so it may not round: ``tmin``/``tmax`` and the direction are already exact
+    and their mean is a ratio of them (ADR-0019).
+    """
+    return _edge_point(e, (e["tmin"] + e["tmax"]) / 2)
 
 
 def _edge_length(e) -> float:
@@ -766,7 +771,10 @@ class RefKernel:
             # edge pairing: in a closed shell every edge is shared by exactly
             # two faces.
             bad = _B.manifold_violations(shape)
-            if float(_B.volume(shape)) <= 0:
+            # the exact sign, not float(...) <= 0: a solid whose true volume is
+            # a hair above zero must not validate as inside-out because the
+            # double rounded to 0.0
+            if _B.volume(shape) <= 0:
                 bad = list(bad) + ["nonpositive-volume"]
             return ValidationReport(
                 ok=not bad,
@@ -776,7 +784,7 @@ class RefKernel:
         if isinstance(shape, DrilledSolid):
             bad = shape.watertight_violations()
             return ValidationReport(
-                ok=not bad and float(shape.volume()) > 0,
+                ok=not bad and shape.volume() > 0,
                 checks={"method": "exact-composite",
                         "bores": len(shape.bores)},
                 violations=list(bad))
@@ -810,7 +818,10 @@ class RefKernel:
     def revolve(self, profile, angle_deg=360.0):
         from forgekernel.quadric import RevolveSolid
 
-        if angle_deg != 360.0:
+        # `!= 360` not `!= 360.0`: whether a revolve is FULL decides whether the
+        # result has end caps, so it is topology. Fraction(360) == 360 exactly
+        # while the float literal invites a caller passing 359.9999999999999
+        if angle_deg != 360:
             _nope("revolve(partial angle)", "K2.2")
         segs = profile.get("segments", [])
         if any(s.get("kind") != "line" for s in segs):
@@ -1400,8 +1411,12 @@ class RefKernel:
         out = shape
         for idx in edges:
             e = all_edges[idx]
-            dirv = [float(x) for x in e["dir"]]
-            axes = [i for i in range(3) if abs(dirv[i]) > 1e-12]
+            # EXACTLY, on both counts: which axis an edge runs along and which
+            # bbox face its midpoint lies on together decide WHICH EDGES get
+            # chamfered, and that is topology. `> 1e-12` and `< 1e-9` were
+            # tolerances standing in for tests that are exact over ℚ and ℚ[√d]
+            # alike — the direction and the bounds are exact to begin with.
+            axes = [i for i in range(3) if e["dir"][i] != 0]
             if len(axes) != 1:
                 _nope("chamfer(non-axis-aligned edge)", "K5.2 (general blends)")
             ea = axes[0]
@@ -1409,9 +1424,9 @@ class RefKernel:
             mid = _edge_midpoint(e)
 
             def _snap(val, loi, hii):
-                if abs(val - float(loi)) < 1e-9:
+                if val == loi:
                     return loi, 1
-                if abs(val - float(hii)) < 1e-9:
+                if val == hii:
                     return hii, -1
                 return None
 
