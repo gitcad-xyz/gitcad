@@ -20,6 +20,50 @@ _K3 = "arrives at K3 (NURBS/SSI)"
 _K5 = "arrives at K5 (blends)"
 
 
+def _audited(body, op: str):
+    """Check the ANSWER before returning it. The whole burn-down in one rule.
+
+    Every silent wrong number this kernel has produced came from validating the
+    INPUT by sampling instead of validating the OUTPUT: a guard probed four
+    points of a footprint, or asked whether a tool's volume matched its bbox,
+    and a shape that satisfied the probe but not the property sailed through.
+    A property test can always be satisfied by something that is not the thing;
+    the constructed body cannot lie about what it is.
+
+    Two exact checks, both cheap enough to run on every construction:
+
+      * every edge shared by exactly two faces — the closed-shell oracle, which
+        catches a rim minted twice, a T-junction left unsplit, a face dropped;
+      * positive volume, by the EXACT sign, so an inside-out body cannot pass
+        by rounding to zero.
+
+    Mesh watertightness is deliberately NOT here: it needs a tessellation per
+    call, and it belongs in the differential harness that already samples
+    deflections. Torus faces carry no boundary loops yet (#130), so a body with
+    one is exempted from pairing rather than failing on a known gap — the
+    volume check still applies.
+    """
+    from forgekernel import body as B
+    from gitcad.errors import GeometryInvalidError
+
+    if not isinstance(body, B.Body):
+        return body
+    bad = []
+    if not any(isinstance(f.surface, B.Torus) for f in body.faces):
+        bad += B.manifold_violations(body)
+    if B.volume(body) <= 0:
+        bad.append(f"volume is not positive ({float(B.volume(body)):.6g})")
+    if bad:
+        raise GeometryInvalidError(
+            f"{op} built an invalid body — refusing to return it: "
+            + "; ".join(bad[:4]),
+            FailureSignature(op=op, diagnostic="AnswerAudit", kernel="ref"),
+            stage="audit", predicate="answer_is_a_closed_solid",
+            measured={"violations": len(bad), "faces": len(body.faces)},
+            remedy="this is a kernel defect, not a bad request — please report it")
+    return body
+
+
 def _nope(op: str, stage: str, *, predicate: str | None = None,
           measured: dict | None = None, remedy: str | None = None):
     """Refuse, and say enough that the caller can do something about it.
@@ -1089,7 +1133,7 @@ class RefKernel:
                               "gap is two voids, not one)", "K2.1")
                     faces = _bore_stack_into_body(faces, cx, cy, bands,
                                                   sz0, sz1).faces
-                return B.Body(faces)
+                return _audited(B.Body(faces), "fillet(drilled solid)")
             if isinstance(shape, DisjointUnion):
                 from forgekernel import body as B
 
@@ -1541,9 +1585,9 @@ class RefKernel:
         else:
             # the ball is used up: the cavity is a sharp-cornered box
             void = translate(Solid.box(ia, ib, ic), ox + t, oy + t, oz + t)
-        return B.Body(B.to_body(shape).faces
+        return _audited(B.Body(B.to_body(shape).faces
                       + tuple(B.Face(f.surface, f.loops, not f.sense)
-                              for f in B.to_body(void).faces))
+                              for f in B.to_body(void).faces)), "shell(hollow sphere)")
 
     def _shell_drilled(self, shape, t):
         """Hollow a drilled solid, COLLAR AND ALL, or return None.
@@ -1606,9 +1650,9 @@ class RefKernel:
         except ValueError as exc:
             _nope(f"shell(drilled solid: the collar does not fit — {exc})",
                   "K4.2")
-        return B.Body(B.to_body(shape).faces
+        return _audited(B.Body(B.to_body(shape).faces
                       + tuple(B.Face(f.surface, f.loops, not f.sense)
-                              for f in B.to_body(void).faces))
+                              for f in B.to_body(void).faces)), "shell(rounded box)")
 
     def _shell_lathe(self, shape, t):
         """Hollow a solid of revolution: the void is the profile inset by t,
@@ -1624,9 +1668,9 @@ class RefKernel:
             return None
         inner = RevolveSolid(self._inset_profile(prof, t), cx, cy)
         void = B.to_body(inner)
-        return B.Body(B.to_body(shape).faces
+        return _audited(B.Body(B.to_body(shape).faces
                       + tuple(B.Face(f.surface, f.loops, not f.sense)
-                              for f in void.faces))
+                              for f in void.faces)), "shell(drilled solid)")
 
     def shell(self, shape, remove_faces, thickness):
         from forgekernel.brep import Solid
@@ -1680,9 +1724,9 @@ class RefKernel:
                 if inner.r <= 0:
                     _nope("shell(thickness exceeds the sphere's radius)", "K4.2")
                 void = B.to_body(inner)
-                return B.Body(B.to_body(shape).faces
+                return _audited(B.Body(B.to_body(shape).faces
                               + tuple(B.Face(f.surface, f.loops, not f.sense)
-                                      for f in void.faces))
+                                      for f in void.faces)), "shell(lathe)")
             rounded = self._shell_rounded(shape, t)
             if rounded is not None:
                 return rounded
@@ -2253,7 +2297,7 @@ def _pocket_lathe_body(prof, cx, cy, rect, za, zb, open_top):
     nvec = (Q(0), Q(0), nz)
     faces.append(B.Face(B.Plane(nvec, Q(zc) * nz),
                         (ring(zc, True, nvec),), True))
-    return B.Body(tuple(faces))
+    return _audited(B.Body(tuple(faces)), "boolean.cut(lathe pocket)")
 
 
 def _cap_index_at(src, zo, probe):
@@ -2356,7 +2400,7 @@ def _bore_stack_into_body(src, cx, cy, bands, sz0, sz1):
         faces.append(B.Face(B.Plane((Q(0), Q(0), Q(1)), Q(zs)),
                             (circ_loop(zs, rout), circ_loop(zs, rin)),
                             r1 > r0))
-    return B.Body(tuple(faces))
+    return _audited(B.Body(tuple(faces)), "boolean.cut(bore stack)")
 
 
 def _pocket_into_body(src, foot, za, zb, open_top, through=False):
@@ -2452,4 +2496,4 @@ def _pocket_into_body(src, foot, za, zb, open_top, through=False):
                     rp[j], rp[(j + 1) % 4]) for j in range(4)))
             faces.append(B.Face(B.Plane(n, sum(n[k] * pts[0][k] for k in range(3))),
                                 (lp,), True))
-    return B.Body(tuple(faces))
+    return _audited(B.Body(tuple(faces)), "boolean.cut(pocket)")
