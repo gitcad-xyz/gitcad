@@ -1571,26 +1571,38 @@ def _lathe_body(segs, cx, cy):
 
 
 def _bore_lathe_profile(prof, tool_r, zlo, zhi):
-    """Bore a coaxial hole of radius ``tool_r`` through a lathed profile.
+    """Bore a coaxial hole through OR into a lathed profile.
 
-    A cylinder coaxial with a solid of revolution cuts it into another solid
-    of revolution — no surface–surface intersection and no conic sections,
-    because the tool's wall meets the profile plane in a straight line. The
-    profile's points ON THE AXIS become the bore wall.
-
-    Refuses unless the bore passes clean through and stays strictly inside the
-    material: a partial bore leaves a blind pocket whose floor is a new face,
-    and a bore wider than the part at some height is a different solid
-    entirely.
+    Through and blind are the same operation on the profile: the region
+    [0, r] x [za, zb] is removed from it. A blind bore simply leaves a floor
+    where the tool stopped, and the axis below it stays solid — so the result
+    is still a closed (r, z) profile and still a solid of revolution. No
+    surface-surface intersection either way.
     """
     zs = [z for _r, z in prof]
-    if zlo > min(zs) or zhi < max(zs):
-        _nope("boolean.cut(bore does not pass through the lathe)", "K2.2")
-    on_axis = [i for i, (r, _z) in enumerate(prof) if r == 0]
-    if not on_axis:
-        _nope("boolean.cut(lathe already has a bore)", "K2.2")
-    for i, (r, _z) in enumerate(prof):
-        if i not in on_axis and r < tool_r:
+    zmin, zmax = min(zs), max(zs)
+    za, zb = max(zlo, zmin), min(zhi, zmax)
+    if za >= zb:
+        _nope("boolean.cut(bore misses the lathe in z)", "K2.2")
+    for r, z in prof:
+        if r != 0 and r < tool_r and za <= z <= zb:
             _nope("boolean.cut(bore is wider than the lathe at some height)",
                   "K2.2")
-    return [(tool_r if r == 0 else r, z) for r, z in prof]
+    if za > zmin and zb < zmax:
+        _nope("boolean.cut(a bore open at neither end leaves an internal "
+              "cavity)", "K2.2")
+    out = []
+    n = len(prof)
+    for i in range(n):
+        r, z = prof[i]
+        r2, z2 = prof[(i + 1) % n]
+        inside = za <= z <= zb
+        out.append((tool_r if (r == 0 and inside) else r, z))
+        # where the axis crosses the tool's end, step out to the bore wall and
+        # leave the floor behind
+        if r == 0 and r2 == 0:
+            for edge in (za, zb):
+                if min(z, z2) < edge < max(z, z2):
+                    step = [(tool_r, edge), (0, edge)]
+                    out.extend(step if z > z2 else list(reversed(step)))
+    return out

@@ -50,11 +50,21 @@ def test_a_coaxial_bore_stays_a_solid_of_revolution(label, build, want) -> None:
         assert v == pytest.approx(k.mass_props(s)["volume"] - math.pi * 9)
 
 
-def test_a_bore_that_does_not_pass_through_refuses(k) -> None:
-    """A partial bore leaves a blind pocket whose floor is a new face — a
-    different solid, not a clamped profile."""
+def test_a_blind_coaxial_bore_is_still_a_solid_of_revolution(k) -> None:
+    """Through and blind are the SAME operation on the profile — a blind bore
+    just leaves a floor where the tool stopped, and the axis below it stays
+    solid. A d=10 x 12 cylinder bored r=1 from z=6 up loses exactly 6 pi."""
+    tool = k.transform(k.cylinder(1, 100), translate=(0, 0, 6))
+    out = k.boolean("cut", Cyl(0, 0, 5, 0, 12), tool)
+    assert isinstance(out, RevolveSolid)
+    assert k.mass_props(out)["volume"] == pytest.approx(math.pi * (300 - 6))
+
+
+def test_a_bore_open_at_neither_end_refuses(k) -> None:
+    """That is an internal cavity, not a hole: the profile would need a second
+    loop, and the result is no longer one closed (r, z) boundary."""
     short = k.transform(k.cylinder(1, 4), translate=(0, 0, 2))
-    with pytest.raises(Exception, match="pass through"):
+    with pytest.raises(Exception, match="neither end"):
         k.boolean("cut", Cyl(0, 0, 5, 0, 12), short)
 
 
