@@ -1017,12 +1017,50 @@ class RefKernel:
             r = (radius if isinstance(radius, Fraction)
                  else Fraction(str(radius)))
             if isinstance(shape, DrilledSolid):
-                # filleting a planar base yields a RoundedBox, which has no
-                # polygon soup left to re-drill against — and a bore breaking
-                # out through a rounded edge is exactly the case the
-                # full-height-column precondition exists to catch
-                _nope("fillet(drilled solid: the rounded base cannot be "
-                      "re-drilled)", "K2.1")
+                # Filleting a planar base yields a RoundedBox, which has no
+                # polygon soup left to re-drill against — but it does not need
+                # any: each bore is a HOLE through that rounded box, which is
+                # the pocket construction with a circular footprint, and its
+                # own cap guard is what checks the bore has not been swallowed
+                # by a rounded edge. That guard is the reason this is
+                # expressible at all; it refuses exactly when the bore's mouth
+                # would reach a fillet band, where these are not the faces.
+                from forgekernel import body as B
+                from forgekernel.quadric import _exact_bbox
+
+                from collections import defaultdict
+
+                out = self.fillet(shape.base, (), radius)
+                (_x0, _y0, sz0), (_x1, _y1, sz1) = _exact_bbox(out)
+                faces = B.to_body(out).faces
+                # Coaxial bores are ONE stepped void, not several independent
+                # ones — the same grouping from_drilled does. Cutting them
+                # separately would punch the wider mouth into a cap that
+                # already carries the narrower one and leave the shoulder
+                # unbuilt.
+                groups = defaultdict(list)
+                for c in shape.bores:
+                    groups[(Fraction(c.cx), Fraction(c.cy))].append(c)
+                for (cx, cy), cyls in groups.items():
+                    zs = sorted({z for c in cyls
+                                 for z in (max(Fraction(c.z0), sz0),
+                                           min(Fraction(c.z1), sz1))})
+                    bands = []
+                    for za, zb in zip(zs, zs[1:]):
+                        mid = (za + zb) / 2
+                        rs = [Fraction(c.r) for c in cyls
+                              if Fraction(c.z0) <= mid <= Fraction(c.z1)]
+                        if rs:
+                            bands.append((za, zb, max(rs)))
+                    if not bands:
+                        continue                  # this stack misses in z
+                    if any(bands[i][1] != bands[i + 1][0]
+                           for i in range(len(bands) - 1)):
+                        _nope("fillet(drilled solid: a coaxial stack with a "
+                              "gap is two voids, not one)", "K2.1")
+                    faces = _bore_stack_into_body(faces, cx, cy, bands,
+                                                  sz0, sz1).faces
+                return B.Body(faces)
             if isinstance(shape, DisjointUnion):
                 from forgekernel import body as B
 
@@ -1132,10 +1170,17 @@ class RefKernel:
         za, zb = max(tz0, sz0), min(tz1, sz1)
         if za >= zb:
             return None
-        if (za == sz0) == (zb == sz1):
+        open_bot, open_top = za == sz0, zb == sz1
+        if not (open_bot or open_top):
             _nope("boolean.cut(a pocket open at neither end is an internal "
-                  "cavity, and one open at both would split the solid)", "K2.2")
-        return _pocket_into_body(B.to_body(a).faces, foot, za, zb, zb == sz1)
+                  "cavity)", "K2.2")
+        # Open at BOTH ends is a HOLE, not a split. That refusal read the two
+        # cases as one; a slot reaching the boundary would indeed cut the part
+        # in two, but a footprint strictly inside both flats — which the cap
+        # guard already insists on — leaves it exactly as connected as a
+        # drilled plate. Same faces, two mouths and no floor.
+        return _pocket_into_body(B.to_body(a).faces, foot, za, zb, open_top,
+                                 through=open_bot and open_top)
 
     def _pocket_lathe(self, a, tool):
         """Cut an axis-aligned rectangular prism into a solid of revolution."""
@@ -1404,6 +1449,47 @@ class RefKernel:
             _nope("shell(void escapes the solid)", "K4.2")
         return out
 
+    def _shell_rounded(self, shape, t):
+        """Hollow a rounded box. The inward offset is EXACT, by construction.
+
+        A rounded box is a Minkowski sum: ``core ⊕ ball(r)``, where the core is
+        the box of dimensions ``(a−2r, b−2r, c−2r)``. Eroding a convex Minkowski
+        sum by ``ball(t)`` just takes it back off the ball —
+
+            (core ⊕ B_r) ⊖ B_t  =  core ⊕ B_{r−t}     for t ≤ r
+                                =  core ⊖ B_{t−r}     for t > r
+
+        — so the void is another rounded box on the SAME core, and both cases
+        collapse to overall dimensions ``(a−2t, b−2t, c−2t)`` with ball radius
+        ``max(r−t, 0)``. Nothing is approximated and no surface is offset
+        numerically, which is why this one is expressible where the general
+        K4.2 offset is not: past ``t = r`` the corners simply go sharp.
+
+        This is the same shape as the hollow-sphere case above — outer faces,
+        plus the void's faces turned inside out.
+        """
+        from forgekernel import body as B
+        from forgekernel.brep import Solid
+        from forgekernel.kernel import translate
+        from forgekernel.quadric import RoundedBox
+
+        if not isinstance(shape, RoundedBox):
+            return None
+        a, b, c, r = shape.a, shape.b, shape.c, shape.r
+        ox, oy, oz = shape.origin
+        ia, ib, ic = a - 2 * t, b - 2 * t, c - 2 * t
+        if min(ia, ib, ic) <= 0:
+            _nope("shell(thickness leaves no cavity in the rounded box)", "K4.2")
+        if t < r:
+            void = RoundedBox(ia, ib, ic, r - t,
+                              origin=(ox + t, oy + t, oz + t))
+        else:
+            # the ball is used up: the cavity is a sharp-cornered box
+            void = translate(Solid.box(ia, ib, ic), ox + t, oy + t, oz + t)
+        return B.Body(B.to_body(shape).faces
+                      + tuple(B.Face(f.surface, f.loops, not f.sense)
+                              for f in B.to_body(void).faces))
+
     def _shell_lathe(self, shape, t):
         """Hollow a solid of revolution: the void is the profile inset by t,
         lathed and turned inside out. Its faces are the inner solid's with
@@ -1474,6 +1560,9 @@ class RefKernel:
                 return B.Body(B.to_body(shape).faces
                               + tuple(B.Face(f.surface, f.loops, not f.sense)
                                       for f in void.faces))
+            rounded = self._shell_rounded(shape, t)
+            if rounded is not None:
+                return rounded
             lathe = self._shell_lathe(shape, t)
             if lathe is not None:
                 return lathe
@@ -2037,21 +2126,117 @@ def _pocket_lathe_body(prof, cx, cy, rect, za, zb, open_top):
     return B.Body(tuple(faces))
 
 
-def _pocket_into_body(src, foot, za, zb, open_top):
-    """Sink an axis-aligned pocket into a body that has a FLAT cap at the open
-    end. ``foot`` is ("circle", cx, cy, r) or ("rect", x0, y0, x1, y1).
+def _cap_index_at(src, zo, probe):
+    """Index of the one flat face a mouth opens through at ``zo``, guarded.
 
-    Exactly the construction a lathe pocket uses, with the source body left
-    general: the open end's cap gains the mouth as an inner loop, the tool
-    contributes its walls, and the closed end a floor. A rounded box's flats
-    are ordinary planes, so nothing about the fillets participates as long as
-    the mouth stays clear of them.
+    The mouth must sit strictly inside that cap, clear of any fillet. The ring
+    is taken EXACTLY (no ``float()``) and tested strictly on all four sides —
+    see ``_point_strictly_in_poly`` for what each of those was hiding.
+
+    ``probe`` bounds the whole mouth because both footprints are axis-aligned:
+    for a rectangle the probes ARE its corners, and for a circle the axis
+    extremes do it because a rounded box's flat cap is an axis-aligned
+    RECTANGLE. Convexity alone would NOT be enough — a diamond cap
+    ``|x| + |y| <= 21/10`` admits a mouth of r = 2 at all four probes while the
+    circle escapes at 45° — so the polygon guard here is doing real work, not
+    merely excluding arcs.
+    """
+    from forgekernel import body as B
+
+    hits = [i for i, f in enumerate(src)
+            if isinstance(f.surface, B.Plane) and f.surface.n[0] == 0
+            and f.surface.n[1] == 0 and B._plane_point(f.surface)[2] == zo]
+    if len(hits) != 1:
+        _nope(f"boolean.cut(the pocket's open end meets {len(hits)} planar "
+              "faces, not exactly one)", "K2.2")
+    cap = src[hits[0]]
+    if len(cap.loops) != 1 or any(not isinstance(e.curve, B.Line)
+                                  for e in cap.loops[0].edges):
+        _nope("boolean.cut(the pocket's open end is not a single polygonal "
+              "face)", "K2.2")
+    ring = [(e.v0[0], e.v0[1]) for e in cap.loops[0].edges]
+    if not all(_point_strictly_in_poly(ring, q) for q in probe):
+        _nope("boolean.cut(the pocket does not sit strictly inside one flat "
+              "face)", "K2.2")
+    return hits[0]
+
+
+def _bore_stack_into_body(src, cx, cy, bands, sz0, sz1):
+    """Sink a COAXIAL STACK of circular bores into a body with flat caps.
+
+    ``bands`` is [(za, zb, r), ...] in z order and contiguous — the same form
+    ``body.from_drilled`` builds for a counterbore. One cylindrical wall per
+    band; a shoulder annulus wherever the radius steps; a mouth in the cap at
+    an end that reaches the outside, and a floor disk at one that does not.
+
+    A single band is exactly the circular pocket, so this generalises it rather
+    than duplicating it — what it adds is the shoulder, which is why a stepped
+    hole needed a construction of its own instead of two independent pockets.
     """
     from fractions import Fraction as Q
     from forgekernel import body as B
 
-    zo = Q(zb) if open_top else Q(za)
-    zc = Q(za) if open_top else Q(zb)
+    faces = list(src)
+    axis = (Q(0), Q(0), Q(1))
+
+    def circ_loop(z, r):
+        p = (Q(cx) + Q(r), Q(cy), Q(z))
+        return B.Loop((B.Edge(B._circle_at(cx, cy, z, r), p, p),))
+
+    # the stack's two outer ends: each either opens through a cap, or stops
+    # inside material and needs a floor of its own (the blind case)
+    for z, r, boundary, up in ((bands[0][0], bands[0][2], Q(sz0), True),
+                               (bands[-1][1], bands[-1][2], Q(sz1), False)):
+        if Q(z) == boundary:
+            probe = [(cx + r, cy), (cx - r, cy), (cx, cy + r), (cx, cy - r)]
+            i = _cap_index_at(faces, Q(z), probe)
+            f = faces[i]
+            faces[i] = B.Face(f.surface, f.loops + (circ_loop(z, r),), f.sense)
+        else:
+            # _disk_face keeps the plane normal at +z and carries the direction
+            # in `sense`, which is the convention from_drilled uses and the one
+            # the writer's bound orientation is derived against
+            faces.append(B._disk_face(cx, cy, z, r, up))
+
+    for za, zb, r in bands:
+        rims = tuple(B.Edge(B._circle_at(cx, cy, z, r),
+                            (Q(cx) + Q(r), Q(cy), Q(z)),
+                            (Q(cx) + Q(r), Q(cy), Q(z))) for z in (Q(za), Q(zb)))
+        faces.append(B.Face(B.Cylinder((Q(cx), Q(cy), Q(za)), axis, Q(r)),
+                            (B.Loop(rims),), False))      # a bore faces INWARD
+
+    for (_a, zs, r0), (_b, _c, r1) in zip(bands, bands[1:]):
+        if r0 == r1:
+            continue                                      # no step, no shoulder
+        rin, rout = min(r0, r1), max(r0, r1)
+        # the exposed ring faces INTO the wider bore
+        faces.append(B.Face(B.Plane((Q(0), Q(0), Q(1)), Q(zs)),
+                            (circ_loop(zs, rout), circ_loop(zs, rin)),
+                            r1 > r0))
+    return B.Body(tuple(faces))
+
+
+def _pocket_into_body(src, foot, za, zb, open_top, through=False):
+    """Sink an axis-aligned pocket into a body that has a FLAT cap at each open
+    end. ``foot`` is ("circle", cx, cy, r) or ("rect", x0, y0, x1, y1).
+
+    Exactly the construction a lathe pocket uses, with the source body left
+    general: each open end's cap gains the mouth as an inner loop, the tool
+    contributes its walls, and a closed end a floor. A rounded box's flats are
+    ordinary planes, so nothing about the fillets participates as long as the
+    mouth stays clear of them.
+
+    ``through`` opens BOTH ends — a hole rather than a pocket. That was refused
+    on the grounds that it "would split the solid", which is only true of a slot
+    reaching the boundary: a footprint strictly inside both flats leaves the
+    part every bit as connected as a drilled plate is. Same faces, two mouths
+    and no floor.
+    """
+    from fractions import Fraction as Q
+    from forgekernel import body as B
+
+    opens = (Q(za), Q(zb)) if through else ((Q(zb),) if open_top else (Q(za),))
+    closed = () if through else ((Q(za),) if open_top else (Q(zb),))
 
     def mouth(z, n, positive):
         if foot[0] == "circle":
@@ -2079,44 +2264,23 @@ def _pocket_into_body(src, foot, za, zb, open_top):
             pts[(i + 1) % 4][k] - pts[i][k] for k in range(3))),
             pts[i], pts[(i + 1) % 4]) for i in range(4)))
 
-    caps = [i for i, f in enumerate(src)
-            if isinstance(f.surface, B.Plane) and f.surface.n[0] == 0
-            and f.surface.n[1] == 0 and B._plane_point(f.surface)[2] == zo]
-    if len(caps) != 1:
-        _nope(f"boolean.cut(the pocket's open end meets {len(caps)} planar "
-              "faces, not exactly one)", "K2.2")
-    cap = src[caps[0]]
-    # The mouth must sit strictly inside the cap, clear of any fillet. The ring
-    # is taken EXACTLY (no float()) and tested strictly on all four sides —
-    # see _point_strictly_in_poly for what each of those was hiding.
-    #
-    # Both footprints are axis-aligned, so probing the four extremes bounds the
-    # whole mouth: for a rectangle they ARE the mouth's corners, and for a
-    # circle the axis extremes plus convexity of the cap give the rest. The cap
-    # must therefore be a polygon — an arc edge would make its vertex list an
-    # inscribed chord polygon and the containment claim would no longer follow.
-    if len(cap.loops) != 1 or any(not isinstance(e.curve, B.Line)
-                                  for e in cap.loops[0].edges):
-        _nope("boolean.cut(the pocket's open end is not a single polygonal "
-              "face)", "K2.2")
-    ring = [(e.v0[0], e.v0[1]) for e in cap.loops[0].edges]
     probe = ([(foot[1] + foot[3], foot[2]), (foot[1] - foot[3], foot[2]),
               (foot[1], foot[2] + foot[3]), (foot[1], foot[2] - foot[3])]
              if foot[0] == "circle"
              else [(foot[1], foot[2]), (foot[3], foot[2]),
                    (foot[3], foot[4]), (foot[1], foot[4])])
-    if not all(_point_strictly_in_poly(ring, q) for q in probe):
-        _nope("boolean.cut(the pocket does not sit strictly inside one flat "
-              "face)", "K2.2")
 
+    punched = {_cap_index_at(src, z, probe): z for z in opens}
     faces = []
     for i, f in enumerate(src):
-        faces.append(B.Face(f.surface, f.loops + (mouth(zo, f.surface.n, False),),
-                            f.sense) if i == caps[0] else f)
+        faces.append(B.Face(f.surface,
+                            f.loops + (mouth(punched[i], f.surface.n, False),),
+                            f.sense) if i in punched else f)
 
-    nz = Q(1) if open_top else Q(-1)
-    fl = (Q(0), Q(0), nz)
-    faces.append(B.Face(B.Plane(fl, zc * nz), (mouth(zc, fl, True),), True))
+    for zc in closed:
+        nz = Q(1) if open_top else Q(-1)
+        fl = (Q(0), Q(0), nz)
+        faces.append(B.Face(B.Plane(fl, zc * nz), (mouth(zc, fl, True),), True))
 
     if foot[0] == "circle":
         _k, cx, cy, r = foot
