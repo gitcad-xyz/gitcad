@@ -1490,6 +1490,54 @@ class RefKernel:
                       + tuple(B.Face(f.surface, f.loops, not f.sense)
                               for f in B.to_body(void).faces))
 
+    def _shell_drilled(self, shape, t):
+        """Hollow a drilled solid, COLLAR AND ALL, or return None.
+
+        Shell offsets every boundary face inward by t. A bore's cylindrical
+        wall is a boundary face, so the void must stop r+t from the axis and a
+        tube of metal is left around the hole. That is the whole difference
+        from "shell the base then re-drill", which built no tube and was
+        silently 170 mm³ light on a plate with one blind bore.
+
+        Exactly expressible while every bore goes STRAIGHT THROUGH: the void is
+        then the inset base minus the enlarged cylinders — an intersection of
+        two eroded sets, so its corners stay sharp and no new surface type
+        appears. A BLIND bore is different in kind: eroding around its floor's
+        reentrant rim sweeps a torus, which is a K4.2 offset and not this.
+        """
+        from forgekernel import body as B
+        from forgekernel.brep import Solid
+        from forgekernel.kernel import translate
+        from forgekernel.quadric import Cyl, DrilledSolid
+
+        box = self._box_check(shape.base)
+        if box is None:
+            return None                 # a general prism base: K4.1's inset
+        (bx0, by0, bz0), (bx1, by1, bz1) = box
+        if any(Fraction(c.z0) > bz0 or Fraction(c.z1) < bz1 for c in shape.bores):
+            _nope("shell(drilled solid: a BLIND bore's floor erodes to a "
+                  "torus, not a cylinder)", "K4.2 (offset surfaces)")
+        if min(bx1 - bx0, by1 - by0, bz1 - bz0) <= 2 * t:
+            _nope("shell(thickness leaves no cavity)", "K4.2")
+        inner = translate(Solid.box(bx1 - bx0 - 2 * t, by1 - by0 - 2 * t,
+                                    bz1 - bz0 - 2 * t),
+                          bx0 + t, by0 + t, bz0 + t)
+        void = DrilledSolid(inner, [])
+        try:
+            for c in shape.bores:
+                # the collar: the void keeps t clear of the bore's wall.
+                # DrilledSolid.cut is what checks the enlarged cylinder still
+                # fits inside the cavity and clears its neighbours, so a collar
+                # that would break out refuses there rather than here.
+                void = void.cut(Cyl(c.cx, c.cy, Fraction(c.r) + t,
+                                    bz0 + t, bz1 - t))
+        except ValueError as exc:
+            _nope(f"shell(drilled solid: the collar does not fit — {exc})",
+                  "K4.2")
+        return B.Body(B.to_body(shape).faces
+                      + tuple(B.Face(f.surface, f.loops, not f.sense)
+                              for f in B.to_body(void).faces))
+
     def _shell_lathe(self, shape, t):
         """Hollow a solid of revolution: the void is the profile inset by t,
         lathed and turned inside out. Its faces are the inner solid's with
@@ -1519,6 +1567,9 @@ class RefKernel:
                  else Fraction(str(thickness)))
             if isinstance(shape, DrilledSolid):
                 if shape.bores:
+                    coll = self._shell_drilled(shape, t)
+                    if coll is not None:
+                        return coll
                     # SHELLING A DRILLED SOLID NEEDS A COLLAR. Shell offsets
                     # every boundary face inward by t, and the bore's own
                     # cylindrical wall is a boundary face: the void must stop

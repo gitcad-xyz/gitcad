@@ -10,6 +10,7 @@ subtracts the void and the volume comes out exact with no boolean at all.
 from __future__ import annotations
 
 import math
+from fractions import Fraction
 
 import pytest
 
@@ -38,22 +39,36 @@ def test_a_shelled_tube_hollows_the_wall_not_the_bore(k) -> None:
         math.pi * ((36 - 9) * 10 - (25 - 16) * 8))
 
 
-def test_shelling_a_drilled_solid_refuses_because_the_bore_needs_a_collar(k):
+@pytest.mark.parametrize("t", [1, Fraction(3, 2), 2])
+def test_shelling_a_drilled_plate_builds_the_bore_a_collar(k, t) -> None:
     """Shell offsets EVERY boundary face inward by t, and a bore's cylindrical
-    wall is a boundary face — so the void must stop r+t from the axis, leaving
-    a tube of metal around the hole.
+    wall is a boundary face — so the void stops r+t from the axis and a tube of
+    metal is left around the hole.
 
-    "Shell the base, then re-drill" builds no such tube. It was refusing only
-    where the bore reached the cavity, and blaming the barrel arithmetic; where
-    the bore stayed inside one wall it SUCCEEDED and was silently wrong. A
+    "Shell the base, then re-drill" built no such tube, and was not refusing: a
     30x30x10 plate with a blind Ø4 bore in its top wall, shelled t=2, reported
     4918.867 against a true 5088.81 +- 6.69 (4M-sample Monte Carlo) — 170 mm3
-    of collar simply absent, in a shape the kernel called good."""
-    reached = DrilledSolid(Solid.box(40, 20, 5), [Cyl(20, 10, 4, 0, 5)])
-    inside_one_wall = DrilledSolid(Solid.box(30, 30, 10), [Cyl(15, 15, 2, 8, 10)])
-    for plate in (reached, inside_one_wall):
-        with pytest.raises(Exception, match="collar"):
-            k.shell(plate, [], 2.0)
+    of collar simply absent, in a shape the kernel called good.
+
+    With every bore going straight through, the void is the inset base MINUS
+    the enlarged cylinders: an intersection of two eroded sets, so its corners
+    stay sharp and no new surface type appears."""
+    plate = DrilledSolid(Solid.box(40, 20, 5), [Cyl(20, 10, 4, 0, 5)])
+    out = k.shell(plate, [], t)
+    truth = ((40 * 20 * 5 - math.pi * 16 * 5)
+             - ((40 - 2 * t) * (20 - 2 * t) * (5 - 2 * t)
+                - math.pi * (4 + t) ** 2 * (5 - 2 * t)))
+    assert k.mass_props(out)["volume"] == pytest.approx(float(truth))
+
+
+def test_a_blind_bore_refuses_because_its_floor_erodes_to_a_torus(k) -> None:
+    """A blind bore is different IN KIND, not just in difficulty: eroding
+    around the reentrant rim where its floor meets its wall sweeps a torus, and
+    that is a K4.2 offset surface rather than the sharp intersection the
+    through case is."""
+    blind = DrilledSolid(Solid.box(30, 30, 10), [Cyl(15, 15, 3, 4, 10)])
+    with pytest.raises(Exception, match="torus"):
+        k.shell(blind, [], 2)
     # a DrilledSolid carrying NO bores is just its base, and still shells
     assert k.mass_props(k.shell(DrilledSolid(Solid.box(20, 20, 20), []),
                                 [], 2.0))["volume"] == 20 ** 3 - 16 ** 3
