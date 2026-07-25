@@ -411,6 +411,28 @@ class RefKernel:
                     op="boolean.cut", diagnostic="NotYetImplemented",
                     kernel="ref"))
         if op == "cut" and isinstance(b, Solid) and isinstance(a, DrilledSolid):
+            from forgekernel.quadric import _exact_bbox
+
+            tb = _exact_bbox(b)
+            if tb is not None and b.volume() == (tb[1][0] - tb[0][0]) * (
+                    tb[1][1] - tb[0][1]) * (tb[1][2] - tb[0][2]):
+                # A tool sitting entirely inside a bore removes NOTHING: the
+                # material is already gone. Exactly decidable (a rectangle is
+                # inside a disc iff its corners are), and it is the honest
+                # answer where cutting one out of the OTHER shape would need
+                # a square-minus-circular-segment area and leave Q[pi].
+                (tx0, ty0, tz0), (tx1, ty1, tz1) = tb
+                (_sx0, _sy0, sz0), (_sx1, _sy1, sz1) = _exact_bbox(a.base)
+                lo_z, hi_z = max(tz0, sz0), min(tz1, sz1)
+                for c in a.bores:
+                    corners_in = max((x - c.cx) ** 2 + (y - c.cy) ** 2
+                                     for x in (tx0, tx1)
+                                     for y in (ty0, ty1)) <= c.r * c.r
+                    # a rectangle lies inside a disc exactly when its corners
+                    # do (both convex), and the part of the tool that could
+                    # remove anything is only what overlaps the solid in z
+                    if corners_in and c.z0 <= lo_z and hi_z <= c.z1:
+                        return a
             base = self.boolean("cut", a.base, b)
             out = DrilledSolid(base, [])
             try:

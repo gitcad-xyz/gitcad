@@ -291,3 +291,44 @@ def test_a_union_holding_a_cut_member_still_meshes(k) -> None:
     u = k.boolean("union", Cyl(0, 0, 5, 0, 12), far)
     cut = k.boolean("cut", u, k.transform(k.box(2, 2, 20), translate=(-1, -1, 6)))
     assert len(k.tessellate(cut, deflection=0.2)["triangles"]) > 0
+
+
+def test_a_tool_entirely_inside_a_bore_removes_nothing(k) -> None:
+    """The material is already gone. Exactly decidable — a rectangle lies
+    inside a disc exactly when its corners do, both being convex — and it is
+    the honest answer, because cutting the tool out of the REMAINING shape
+    would need a square-minus-circular-segment area and leave Q[pi]."""
+    from forgekernel.brep import Solid
+    from forgekernel.quadric import DrilledSolid
+
+    plate = DrilledSolid(Solid.box(40, 20, 5), [Cyl(20, 10, 4, 0, 5)])
+    tool = k.transform(k.box(2, 2, 100), translate=(20, 10, 2.5))
+    out = k.boolean("cut", plate, tool)
+    assert k.mass_props(out)["volume"] == pytest.approx(
+        k.mass_props(plate)["volume"])
+
+
+def test_a_tool_outside_the_bore_still_cuts(k) -> None:
+    """The no-op must not swallow a real cut."""
+    from forgekernel.brep import Solid
+    from forgekernel.quadric import DrilledSolid
+
+    plate = DrilledSolid(Solid.box(40, 20, 5), [Cyl(20, 10, 4, 0, 5)])
+    tool = k.transform(k.box(2, 2, 100), translate=(2, 2, -50))
+    out = k.boolean("cut", plate, tool)
+    assert k.mass_props(plate)["volume"] - k.mass_props(out)["volume"] \
+        == pytest.approx(2 * 2 * 5)
+
+
+def test_a_tool_straddling_a_counterbore_step_refuses(k) -> None:
+    """Only the wider bore contains the tool's footprint, and only above its
+    floor. Below that the tool is outside the narrow bore, so the removed area
+    is a square minus a circular segment — an arcsin, outside Q[pi]."""
+    from forgekernel.brep import Solid
+    from forgekernel.quadric import DrilledSolid
+
+    cb = (DrilledSolid(Solid.box(30, 30, 10), [])
+          .cut(Cyl(15, 15, 2, 0, 10)).cut(Cyl(15, 15, 4, 7, 10)))
+    tool = k.transform(k.box(2, 2, 100), translate=(15, 15, 5))
+    with pytest.raises(Exception):
+        k.boolean("cut", cb, tool)
