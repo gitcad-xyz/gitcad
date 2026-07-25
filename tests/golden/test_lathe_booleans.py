@@ -220,3 +220,74 @@ def test_a_rounded_box_has_no_sharp_edge_to_blend(k) -> None:
     rb = RoundedBox(20, 20, 20, 3)
     assert k.fillet(rb, [], 1) is rb
     assert k.chamfer(rb, [], 1) is rb
+
+
+@pytest.mark.parametrize("depth", [1, 3, 4, 6, 11])
+def test_a_blind_bore_from_the_BOTTOM_removes_its_own_depth(k, depth) -> None:
+    """RevolveSolid normalises the loop, so the axis always descends and the
+    traversal direction is CONSTANT — it cannot say which way to step. Crossing
+    the tool's near end and its far end need OPPOSITE orders, and getting it
+    wrong emitted a shark fin that removed pi r^2 H/3 whatever depth was asked
+    for. It was right at depth 4 by coincidence (H/3 = 4), which is exactly the
+    depth a casual test would pick."""
+    s = Cyl(0, 0, 5, 0, 12)
+    out = k.boolean("cut", s, Cyl(0, 0, 1, -50, depth))
+    removed = k.mass_props(s)["volume"] - k.mass_props(out)["volume"]
+    assert removed == pytest.approx(math.pi * depth)
+
+
+def test_a_bore_through_a_cone_apex_cannot_ADD_material(k) -> None:
+    """The wall guard skipped an apex because it tested r != 0, so boring a
+    cone's tip moved the wall OUTWARD: 293.2 against an uncut 261.8, a solid
+    made larger by cutting it."""
+    with pytest.raises(Exception, match="wider than the lathe"):
+        k.boolean("cut", Cone(0, 0, 5, 0, 0, 10), Cyl(0, 0, 1, -5, 15))
+
+
+def test_a_pocket_inside_a_coaxial_bore_removes_no_air(k) -> None:
+    """The wall minimum runs over BOTH walls, so on a tube it is the BORE
+    radius and any footprint fitting inside the bore passed — 'removing'
+    20 mm^3 of air and leaving the shell open."""
+    tube = RevolveSolid([(2, 0), (5, 0), (5, 10), (2, 10)], 0, 0)
+    tool = k.transform(k.box(2, 2, 25), translate=(-1, -1, -20))
+    with pytest.raises(Exception, match="not solid to the axis"):
+        k.boolean("cut", tube, tool)
+
+
+def test_a_pocket_spanning_a_cone_apex_refuses(k) -> None:
+    """No planar face exists at the apex, so the mouth was never punched and
+    the four wall tops dangled: an OPEN shell returned as a solid."""
+    tool = k.transform(k.box(2, 2, 20), translate=(-1, -1, 5))
+    with pytest.raises(Exception):
+        k.boolean("cut", Cone(0, 0, 5, 0, 0, 10), tool)
+
+
+def test_a_pocket_meeting_two_caps_at_one_height_refuses(k) -> None:
+    """A lathe can have SEVERAL planar faces at one z — here an annular groove
+    in the top. Punching the mouth into all of them removed 20 where the truth
+    is 12, and the mesh came back watertight, so nothing downstream noticed."""
+    grooved = RevolveSolid([(0, 0), (10, 0), (10, 6), (8, 6), (8, 4),
+                            (5, 4), (5, 6), (0, 6)], 0, 0)
+    tool = k.transform(k.box(2, 2, 17), translate=(-1, -1, 3))
+    with pytest.raises(Exception, match="planar faces"):
+        k.boolean("cut", grooved, tool)
+
+
+def test_a_forge_refusal_reaches_the_caller_as_a_kernel_error(k) -> None:
+    """An honest refusal from the kernel must not escape the seam as a bare
+    ValueError — a caller cannot tell that from a bug."""
+    from gitcad.errors import KernelError
+
+    u = k.boolean("union", Cone(0, 0, 2, 5, 0, 10), Cyl(0, 0, 3, -20, 10))
+    with pytest.raises(KernelError):
+        k.mass_props(u)
+
+
+def test_a_union_holding_a_cut_member_still_meshes(k) -> None:
+    """Distributing a cut can leave a canonical Body as a member, and asking
+    one for .cx is a bare AttributeError — the union measured fine but was
+    unrenderable."""
+    far = k.transform(k.box(2, 2, 2), translate=(500, 500, 500))
+    u = k.boolean("union", Cyl(0, 0, 5, 0, 12), far)
+    cut = k.boolean("cut", u, k.transform(k.box(2, 2, 20), translate=(-1, -1, 6)))
+    assert len(k.tessellate(cut, deflection=0.2)["triangles"]) > 0

@@ -488,6 +488,15 @@ class RefKernel:
     # -- metrics --------------------------------------------------------------
 
     def mass_props(self, shape) -> dict[str, float]:
+        try:
+            return self._mass_props(shape)
+        except ValueError as exc:
+            # forge refuses honestly when a value leaves the exact field (an
+            # irrational profile crossover, say). Letting that out as a bare
+            # ValueError is the defect -- callers cannot tell it from a bug.
+            _nope(f"mass_props({exc})", _K2)
+
+    def _mass_props(self, shape) -> dict[str, float]:
         from forgekernel import body as B
 
         if isinstance(shape, B.Body):
@@ -1060,17 +1069,30 @@ class RefKernel:
         n = len(prof)
         for i in range(n):
             (r1, w1), (r2, w2) = prof[i], prof[(i + 1) % n]
-            if w1 == w2:
-                continue                       # a disk bounds nothing radially
+            if w1 == w2 or (r1 == 0 and r2 == 0):
+                # a disk bounds nothing radially, and the AXIS is not a wall —
+                # excluding it by value (r > 0) also dropped a wall tapering to
+                # zero, so exclude it by TYPE and keep genuine zeros in
+                continue
             lo_, hi_ = (w1, w2) if w1 < w2 else (w2, w1)
             ca, cbz = max(lo_, za), min(hi_, zb)
             if ca > cbz:
                 continue
             for zz in (ca, cbz):
                 walls.append(r1 + (r2 - r1) * (zz - w1) / (w2 - w1))
-        solid = [w for w in walls if w > 0]
-        if not solid or far2 >= min(w * w for w in solid):
+        if not walls or far2 >= min(w * w for w in walls):
+            # `w > 0` used to drop a wall TAPERING TO ZERO, so a pocket
+            # spanning a cone's apex was accepted — and with no cap at that z
+            # its mouth was never punched, returning an OPEN shell as a solid
             _nope("boolean.cut(the prism reaches the lathe's wall)", "K2.2")
+        pairs = list(zip(prof, prof[1:] + prof[:1]))
+        if not any(r1 == 0 and r2 == 0 and min(w1, w2) <= za
+                   and max(w1, w2) >= zb for (r1, w1), (r2, w2) in pairs):
+            # the minimum above is over BOTH walls, so on a tube it is the
+            # BORE radius and any footprint fitting inside the bore passed —
+            # "removing" 20 mm^3 of air, and leaving the shell open
+            _nope("boolean.cut(the prism's column is not solid to the axis: a "
+                  "coaxial bore runs through it)", "K2.2")
         return _pocket_lathe_body(prof, cx, cy, (x0, y0, x1, y1), za, zb,
                                   open_top)
 
@@ -1679,10 +1701,22 @@ def _bore_lathe_profile(prof, tool_r, zlo, zhi):
     za, zb = max(zlo, zmin), min(zhi, zmax)
     if za >= zb:
         _nope("boolean.cut(bore misses the lathe in z)", "K2.2")
-    for r, z in prof:
-        if r != 0 and r < tool_r and za <= z <= zb:
-            _nope("boolean.cut(bore is wider than the lathe at some height)",
-                  "K2.2")
+    n = len(prof)
+    for i in range(n):
+        (r1, w1), (r2, w2) = prof[i], prof[(i + 1) % n]
+        if w1 == w2 or (r1 == 0 and r2 == 0):
+            continue                       # a disk / the axis bounds nothing
+        lo_, hi_ = (w1, w2) if w1 < w2 else (w2, w1)
+        ca, cb = max(lo_, za), min(hi_, zb)
+        if ca > cb:
+            continue
+        for zz in (ca, cb):
+            # the wall SHRINKS between vertices, and an APEX (r = 0) is a wall
+            # too: excluding it by `r != 0` let a bore through a cone's tip
+            # move the wall outward and report MORE volume than the uncut solid
+            if r1 + (r2 - r1) * (zz - w1) / (w2 - w1) < tool_r:
+                _nope("boolean.cut(bore is wider than the lathe at some "
+                      "height)", "K2.2")
     if za > zmin and zb < zmax:
         _nope("boolean.cut(a bore open at neither end leaves an internal "
               "cavity)", "K2.2")
@@ -1696,10 +1730,18 @@ def _bore_lathe_profile(prof, tool_r, zlo, zhi):
         # where the axis crosses the tool's end, step out to the bore wall and
         # leave the floor behind
         if r == 0 and r2 == 0:
-            for edge in (za, zb):
+            # RevolveSolid normalises the loop, so the axis always descends and
+            # `z > z2` was constant — the direction alone cannot say which way
+            # to step. Crossing za (blind from the TOP) and crossing zb (blind
+            # from the BOTTOM) need OPPOSITE orders; getting it wrong emitted a
+            # "shark fin" that removed pi r^2 H/3 whatever the depth asked for.
+            down = z > z2
+            for edge in ((zb, za) if down else (za, zb)):
                 if min(z, z2) < edge < max(z, z2):
                     step = [(tool_r, edge), (0, edge)]
-                    out.extend(step if z > z2 else list(reversed(step)))
+                    if (edge == za) != down:
+                        step.reverse()
+                    out.extend(step)
     return out
 
 
@@ -1743,15 +1785,24 @@ def _pocket_lathe_body(prof, cx, cy, rect, za, zb, open_top):
         return oriented(pts, n, positive)
 
     faces = []
-    for f in B.to_body(RevolveSolid(prof, cx, cy)).faces:
-        s = f.surface
-        if (isinstance(s, B.Plane) and s.n[0] == 0 and s.n[1] == 0
-                and B._plane_point(s)[2] == zo):
-            # the cap at the OPEN end gains the pocket mouth as an inner loop,
-            # wound against the outer one
+    src = B.to_body(RevolveSolid(prof, cx, cy)).faces
+    caps = [i for i, f in enumerate(src)
+            if isinstance(f.surface, B.Plane) and f.surface.n[0] == 0
+            and f.surface.n[1] == 0 and B._plane_point(f.surface)[2] == zo]
+    if len(caps) != 1:
+        # a lathe can have SEVERAL planar faces at one z (an annular groove
+        # reaching that end), and punching the mouth into all of them removed
+        # 20 where the truth was 12 — with a watertight mesh, so nothing
+        # downstream noticed. Zero caps means the open end is an apex.
+        _nope(f"boolean.cut(the pocket's open end meets {len(caps)} planar "
+              "faces, not exactly one)", "K2.2")
+    for i, f in enumerate(src):
+        if i == caps[0]:
             # an inner loop winds AGAINST the outer one about the surface
             # normal, whichever way that normal happens to point
-            faces.append(B.Face(s, f.loops + (ring(zo, False, s.n),), f.sense))
+            faces.append(B.Face(f.surface,
+                                f.loops + (ring(zo, False, f.surface.n),),
+                                f.sense))
         else:
             faces.append(f)
 
