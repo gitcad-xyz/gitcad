@@ -911,13 +911,98 @@ class RefKernel:
             raise KernelError(str(exc), FailureSignature(
                 op="fillet", diagnostic="NotYetImplemented", kernel="ref"))
 
+    def _lathe_profile(self, shape):
+        """The (r, z) profile of anything that is a solid of revolution."""
+        from forgekernel.quadric import Cone as QCone, Cyl, RevolveSolid
+
+        if isinstance(shape, RevolveSolid):
+            return list(shape.loop), shape.cx, shape.cy
+        if isinstance(shape, Cyl):
+            r, z0, z1 = Fraction(shape.r), Fraction(shape.z0), Fraction(shape.z1)
+            return [(Fraction(0), z0), (r, z0), (r, z1), (Fraction(0), z1)], \
+                shape.cx, shape.cy
+        if isinstance(shape, QCone):
+            r1, r2 = Fraction(shape.r1), Fraction(shape.r2)
+            z0, z1 = Fraction(shape.z0), Fraction(shape.z1)
+            pts = [(Fraction(0), z0)] if r1 else []
+            pts += [(r1, z0), (r2, z1)]
+            pts += [(Fraction(0), z1)] if r2 else []
+            return [p for i, p in enumerate(pts) if p not in pts[:i]], \
+                shape.cx, shape.cy
+        return None, None, None
+
+    def _chamfer_lathe(self, shape, d):
+        """Chamfer a solid of revolution by chamfering its PROFILE.
+
+        A 45° cut on a lathed rim sweeps a cone frustum, so the chamfered
+        solid is still a solid of revolution — no new surface type, no
+        approximation, and the metrics stay exact in ℚ[π]. Only CONVEX
+        corners are cut (a concave one is an internal step, where a chamfer
+        would add material rather than remove it), and never a corner on the
+        axis, which is not an edge of the solid at all.
+        """
+        from forgekernel.quadric import RevolveSolid
+
+        prof, cx, cy = self._lathe_profile(shape)
+        if prof is None:
+            return None
+        n = len(prof)
+        area2 = sum(prof[i][0] * prof[(i + 1) % n][1]
+                    - prof[(i + 1) % n][0] * prof[i][1] for i in range(n))
+        turn = 1 if area2 > 0 else -1
+        out = []
+        for i in range(n):
+            p0, p1, p2 = prof[i - 1], prof[i], prof[(i + 1) % n]
+            a = (p1[0] - p0[0], p1[1] - p0[1])
+            b = (p2[0] - p1[0], p2[1] - p1[1])
+            cross = a[0] * b[1] - a[1] * b[0]
+            la2, lb2 = a[0] ** 2 + a[1] ** 2, b[0] ** 2 + b[1] ** 2
+            if p1[0] == 0 or cross * turn <= 0 or not la2 or not lb2:
+                out.append(p1)
+                continue
+            if d * d * 4 > la2 or d * d * 4 > lb2:
+                _nope("chamfer(distance exceeds half the profile edge)", "K5.2")
+            from forgekernel.body import _rational_sqrt
+
+            ka = _rational_sqrt(la2)
+            kb = _rational_sqrt(lb2)
+            if ka is None or kb is None:
+                _nope("chamfer(profile edge with irrational length)", _K2)
+            out.append((p1[0] - a[0] * d / ka, p1[1] - a[1] * d / ka))
+            out.append((p1[0] + b[0] * d / kb, p1[1] + b[1] * d / kb))
+        return RevolveSolid(out, cx, cy)
+
     def chamfer(self, shape, edges, distance):
         from forgekernel.kernel import chamfer as fk_chamfer
 
         if not edges:
+            from forgekernel.brep import Solid
+            from forgekernel.quadric import DisjointUnion, DrilledSolid
+
+            d = (distance if isinstance(distance, Fraction)
+                 else Fraction(str(distance)))
+            if isinstance(shape, DrilledSolid):
+                # chamfer the BASE and re-drill: DrilledSolid.cut validates
+                # that every bore still lands inside the (now smaller) solid,
+                # so a bore the chamfer ate into refuses rather than silently
+                # producing a part with a broken-out hole
+                base = self.chamfer(shape.base, (), distance)
+                out = DrilledSolid(base, [])
+                for b in shape.bores:
+                    out = out.cut(b)
+                return out
+            if isinstance(shape, DisjointUnion):
+                # members are disjoint and a chamfer only REMOVES material,
+                # so they stay disjoint
+                return DisjointUnion._unchecked(
+                    [self.chamfer(m, (), distance) for m in shape.members])
+            if not isinstance(shape, Solid):
+                lathe = self._chamfer_lathe(shape, d)
+                if lathe is not None:
+                    return lathe
             try:
                 return fk_chamfer(shape, distance)
-            except ValueError as exc:
+            except (ValueError, AttributeError) as exc:
                 raise KernelError(str(exc), FailureSignature(
                     op="chamfer", diagnostic="NotYetImplemented", kernel="ref"))
 
