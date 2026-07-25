@@ -410,6 +410,10 @@ class RefKernel:
                 raise KernelError(str(exc), FailureSignature(
                     op="boolean.cut", diagnostic="NotYetImplemented",
                     kernel="ref"))
+        if op == "cut":
+            pocket = self._pocket_lathe(a, b)
+            if pocket is not None:
+                return pocket
         if isinstance(b, Cyl) and op == "cut":
             lathe = self._bore_lathe(a, b)
             if lathe is not None:
@@ -980,6 +984,46 @@ class RefKernel:
             return [p for i, p in enumerate(pts) if p not in pts[:i]], \
                 shape.cx, shape.cy
         return None, None, None
+
+    def _pocket_lathe(self, a, tool):
+        """Cut an axis-aligned rectangular prism into a solid of revolution."""
+        from forgekernel.brep import Solid
+        from forgekernel.quadric import _exact_bbox
+
+        if not isinstance(tool, Solid):
+            return None
+        prof, cx, cy = self._lathe_profile(a)
+        if prof is None:
+            return None
+        bb = _exact_bbox(tool)
+        if bb is None:
+            return None
+        (x0, y0, z0), (x1, y1, z1) = bb
+        if tool.volume() != (x1 - x0) * (y1 - y0) * (z1 - z0):
+            return None                       # not a solid axis-aligned box
+        zs = [z for _r, z in prof]
+        zmin, zmax = min(zs), max(zs)
+        za, zb = max(z0, zmin), min(z1, zmax)
+        if za >= zb:
+            return None                       # misses in z: not our case
+        open_top, open_bot = zb == zmax, za == zmin
+        if not (open_top or open_bot):
+            _nope("boolean.cut(a pocket open at neither end is an internal "
+                  "cavity)", "K2.2")
+        if open_top and open_bot:
+            _nope("boolean.cut(a prism open at both ends splits the lathe)",
+                  "K2.2")
+        # the footprint must stay strictly inside the material over [za, zb],
+        # or the prism breaks out through a wall and the faces are not these
+        far2 = max((x - cx) ** 2 + (y - cy) ** 2
+                   for x in (x0, x1) for y in (y0, y1))
+        near2 = min(r * r for r, z in prof if za <= z <= zb) if any(
+            za <= z <= zb for _r, z in prof) else None
+        edge_r = [r for r, z in prof if za <= z <= zb and r > 0]
+        if not edge_r or far2 >= min(r * r for r in edge_r):
+            _nope("boolean.cut(the prism reaches the lathe's wall)", "K2.2")
+        return _pocket_lathe_body(prof, cx, cy, (x0, y0, x1, y1), za, zb,
+                                  open_top)
 
     def _bore_lathe(self, a, tool):
         """A coaxial cylinder through a solid of revolution is another solid
@@ -1606,3 +1650,71 @@ def _bore_lathe_profile(prof, tool_r, zlo, zhi):
                     step = [(tool_r, edge), (0, edge)]
                     out.extend(step if z > z2 else list(reversed(step)))
     return out
+
+
+def _pocket_lathe_body(prof, cx, cy, rect, za, zb, open_top):
+    """A solid of revolution with an axis-aligned rectangular POCKET.
+
+    A plane parallel to a lathe's axis meets its cylindrical faces in straight
+    LINES and its disks in chords, so a prism pocket needs no conic sections
+    and no new surface type — only the topology has to be built: the open
+    end's cap gains an inner loop, the prism contributes four planar walls,
+    and a blind pocket contributes a floor.
+    """
+    from fractions import Fraction as Q
+    from forgekernel import body as B
+    from forgekernel.quadric import RevolveSolid
+
+    x0, y0, x1, y1 = rect
+    zc = za if open_top else zb                 # the closed (floor) end
+    zo = zb if open_top else za                 # the open end
+    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+
+    def loop_of(pts):
+        return B.Loop(tuple(
+            B.Edge(B.Line(pts[i], tuple(pts[(i + 1) % len(pts)][k] - pts[i][k]
+                                        for k in range(3))),
+                   pts[i], pts[(i + 1) % len(pts)]) for i in range(len(pts))))
+
+    def oriented(pts, n, positive):
+        """Wind a polygon so its signed area about n has the wanted sign.
+
+        Guessing this from the corner order is how the first attempt failed:
+        an outer loop wound the wrong way reads as NEGATIVE AREA, and the
+        exact volume refuses outright rather than quietly halving.
+        """
+        lp = loop_of(pts)
+        a2 = B._planar_loop_area2(lp, n)
+        return lp if (a2 > 0) == positive else loop_of(list(reversed(pts)))
+
+    def ring(z, positive, n):
+        pts = [(Q(x), Q(y), Q(z)) for x, y in corners]
+        return oriented(pts, n, positive)
+
+    faces = []
+    for f in B.to_body(RevolveSolid(prof, cx, cy)).faces:
+        s = f.surface
+        if (isinstance(s, B.Plane) and s.n[0] == 0 and s.n[1] == 0
+                and B._plane_point(s)[2] == zo):
+            # the cap at the OPEN end gains the pocket mouth as an inner loop,
+            # wound against the outer one
+            # an inner loop winds AGAINST the outer one about the surface
+            # normal, whichever way that normal happens to point
+            faces.append(B.Face(s, f.loops + (ring(zo, False, s.n),), f.sense))
+        else:
+            faces.append(f)
+
+    for i in range(4):
+        (ax, ay), (bx, by) = corners[i], corners[(i + 1) % 4]
+        d = (Q(by - ay), Q(ax - bx), Q(0))       # outward = into the pocket
+        pts = [(Q(ax), Q(ay), Q(za)), (Q(bx), Q(by), Q(za)),
+               (Q(bx), Q(by), Q(zb)), (Q(ax), Q(ay), Q(zb))]
+        n = tuple(-v for v in d)
+        faces.append(B.Face(B.Plane(n, sum(n[k] * pts[0][k] for k in range(3))),
+                            (oriented(pts, n, True),), True))
+
+    nz = Q(1) if open_top else Q(-1)             # floor faces INTO the pocket
+    nvec = (Q(0), Q(0), nz)
+    faces.append(B.Face(B.Plane(nvec, Q(zc) * nz),
+                        (ring(zc, True, nvec),), True))
+    return B.Body(tuple(faces))

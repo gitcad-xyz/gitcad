@@ -101,3 +101,60 @@ def test_a_union_with_a_far_away_box_is_a_disjoint_union(label, build) -> None:
     assert isinstance(out, DisjointUnion)
     assert k.mass_props(out)["volume"] == pytest.approx(
         k.mass_props(s)["volume"] + 8)
+
+
+POCKETS = [
+    ("cylinder", lambda: Cyl(0, 0, 5, 0, 12)),
+    ("cone", lambda: Cone(0, 0, 2, 5, 0, 10)),
+    ("stepped shaft",
+     lambda: RevolveSolid([(0, 0), (4, 0), (4, 5), (7, 5), (7, 9), (0, 9)], 0, 0)),
+]
+
+
+@pytest.mark.parametrize("label,build", POCKETS, ids=[p[0] for p in POCKETS])
+def test_a_prism_pocket_removes_exactly_its_own_volume(label, build) -> None:
+    """A plane PARALLEL to a lathe's axis meets its cylindrical faces in
+    straight LINES and its disks in chords — no conic sections and no new
+    surface type. Only the topology has to be built: the open end's cap gains
+    an inner loop, the prism contributes four walls, and a blind pocket a
+    floor."""
+    k = RefKernel()
+    s = build()
+    lo, hi = k.bbox(s)
+    mid = tuple((lo[i] + hi[i]) / 2 for i in range(3))
+    out = k.boolean("cut", s, k.transform(k.box(2, 2, 100), translate=mid))
+    removed = k.mass_props(s)["volume"] - k.mass_props(out)["volume"]
+    assert removed == pytest.approx(4 * (hi[2] - mid[2]))
+
+
+@pytest.mark.parametrize("label,build", POCKETS, ids=[p[0] for p in POCKETS])
+def test_a_pocketed_lathe_meshes_watertight(label, build) -> None:
+    from collections import defaultdict
+
+    from forgekernel import body as B
+
+    k = RefKernel()
+    s = build()
+    lo, hi = k.bbox(s)
+    mid = tuple((lo[i] + hi[i]) / 2 for i in range(3))
+    out = k.boolean("cut", s, k.transform(k.box(2, 2, 100), translate=mid))
+    ec = defaultdict(int)
+    for a, b, c in B.tessellate(out, 0.05)["triangles"]:
+        for e in ((a, b), (b, c), (c, a)):
+            ec[tuple(sorted(e))] += 1
+    assert all(n == 2 for n in ec.values())
+
+
+def test_a_prism_reaching_the_wall_refuses(k) -> None:
+    """Then it breaks OUT through the cylindrical face, the outer wall is no
+    longer whole, and these are not the right faces at all."""
+    tool = k.transform(k.box(2, 2, 100), translate=(4, 0, 6))
+    with pytest.raises(Exception, match="reaches the lathe"):
+        k.boolean("cut", Cyl(0, 0, 5, 0, 12), tool)
+
+
+def test_a_prism_open_at_both_ends_refuses(k) -> None:
+    """It would split the lathe into two solids, not pocket one."""
+    tool = k.transform(k.box(2, 2, 100), translate=(0, 0, -40))
+    with pytest.raises(Exception, match="both ends"):
+        k.boolean("cut", Cyl(0, 0, 5, 0, 12), tool)
