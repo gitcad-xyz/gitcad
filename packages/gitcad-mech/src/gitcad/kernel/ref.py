@@ -861,6 +861,33 @@ class RefKernel:
         from forgekernel.kernel import fillet_box
         from forgekernel.quadric import FilletedBox
 
+        if not isinstance(shape, Solid) and not edges:
+            from forgekernel.quadric import DisjointUnion, DrilledSolid
+
+            r = (radius if isinstance(radius, Fraction)
+                 else Fraction(str(radius)))
+            if isinstance(shape, DrilledSolid):
+                # filleting a planar base yields a RoundedBox, which has no
+                # polygon soup left to re-drill against — and a bore breaking
+                # out through a rounded edge is exactly the case the
+                # full-height-column precondition exists to catch
+                _nope("fillet(drilled solid: the rounded base cannot be "
+                      "re-drilled)", "K2.1")
+            if isinstance(shape, DisjointUnion):
+                from forgekernel import body as B
+
+                parts = [self.fillet(m, (), radius) for m in shape.members]
+                if any(isinstance(q, B.Body) for q in parts):
+                    return B.Body(tuple(f for q in parts
+                                        for f in B.to_body(q).faces))
+                return DisjointUnion._unchecked(parts)
+            prof, cx, cy = self._lathe_profile(shape)
+            if prof is not None:
+                # a fillet on a lathed rim sweeps a TORUS, so the blend lives
+                # on the (r, z) profile just as the chamfer does — and the
+                # volume needs pi^2, which is why forge grew Q[pi] as a
+                # polynomial ring rather than a + b*pi
+                return _lathe_body(_fillet_profile(prof, r), cx, cy)
         if not isinstance(shape, Solid):
             _nope("fillet(non-planar base)", "K5 (general blends)")
         box = self._box_check(shape)
@@ -1411,3 +1438,65 @@ def _point_in_poly(poly, q) -> bool:
             if q[0] < x1 + (q[1] - y1) * (x2 - x1) / (y2 - y1):
                 inside = not inside
     return inside
+
+
+def _fillet_profile(prof, r):
+    """Round every convex RIGHT-ANGLE corner of an (r, z) profile.
+
+    Returns segments: ``("line", p0, p1)`` and ``("arc", centre, p0, p1)``.
+    Only right angles between axis-aligned edges — the tangent points and the
+    arc centre are then rational, and revolving the arc sweeps exactly a
+    QUARTER of a torus tube, which is what keeps the volume in ℚ[π].
+    """
+    prof = _drop_collinear_2d(prof)
+    n = len(prof)
+    area2 = _signed_area2(prof)
+    turn = 1 if area2 > 0 else -1
+    cut = {}
+    for i in range(n):
+        p0, p1, p2 = prof[i - 1], prof[i], prof[(i + 1) % n]
+        a = (p1[0] - p0[0], p1[1] - p0[1])
+        b = (p2[0] - p1[0], p2[1] - p1[1])
+        cross = a[0] * b[1] - a[1] * b[0]
+        if p1[0] == 0 or cross * turn <= 0:
+            continue                       # on the axis, or concave
+        if (a[0] and a[1]) or (b[0] and b[1]) or a[0] * b[0] + a[1] * b[1] != 0:
+            _nope("fillet(non-right-angle lathe corner)", "K5.2")
+        la = abs(a[0]) if a[0] else abs(a[1])
+        lb = abs(b[0]) if b[0] else abs(b[1])
+        if 2 * r > la or 2 * r > lb:
+            _nope("fillet(radius exceeds half the profile edge)", "K5.2")
+        ua = (a[0] / la, a[1] / la)
+        ub = (b[0] / lb, b[1] / lb)
+        ta = (p1[0] - r * ua[0], p1[1] - r * ua[1])
+        tb = (p1[0] + r * ub[0], p1[1] + r * ub[1])
+        # inward normal of the incoming edge is (-dz, dr)/|d| for a positively
+        # wound profile; for a right angle the two agree on the centre
+        na = (-ua[1] * turn, ua[0] * turn)
+        cen = (ta[0] + r * na[0], ta[1] + r * na[1])
+        cut[i] = (cen, ta, tb)
+
+    segs, pts = [], []
+    for i in range(n):
+        pts.append(cut[i][1] if i in cut else prof[i])
+        if i in cut:
+            pts.append(cut[i][2])
+    j = 0
+    out = []
+    for i in range(n):
+        start = pts[j]
+        if i in cut:
+            out.append(("arc", cut[i][0], cut[i][1], cut[i][2]))
+            j += 2
+        else:
+            j += 1
+        nxt = pts[j % len(pts)]
+        out.append(("line", pts[(j - 1) % len(pts)], nxt))
+    return [sg for sg in out if sg[0] == "arc"
+            or (sg[1][0], sg[1][1]) != (sg[2][0], sg[2][1])]
+
+
+def _lathe_body(segs, cx, cy):
+    from forgekernel import body as B
+
+    return B.lathe_body(segs, cx, cy)
