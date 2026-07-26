@@ -281,6 +281,47 @@ what actually blocks them:
     cone                      x fillet(all) / chamfer(all)   K5.2 / irrational slant
     sphere                    x cut cylinder   <-- see below
 
+> **#121 partial close (planar prism, shelled box — 331/345).** Both cells
+> were, as the analysis said, pure ℚ[π]. The two that closed:
+>
+> * **`planar prism x fillet(all)`** — `FilletedPrism` (quadric.py): a right
+>   prism over any rectilinear simple polygon, every edge blended at one r.
+>   The reentrant corner takes an INSIDE fillet, and where that concave
+>   vertical blend meets each cap band the ball's centre sweeps a quarter
+>   TORUS (major 2r, minor r) — the source of the π² term `n_rf·r³/2`. The
+>   probe's L: `3752 + 178π/3 + π²/2`. Closed-form derivation, guards and the
+>   full Monte-Carlo verification record are in the class docstring and
+>   `tests/golden/test_fillet_rectilinear.py`. Soundness of the guard set:
+>   every blend feature lies within r of the boundary element that generates
+>   it, so requiring all edges ≥ 2r long and all NON-ADJACENT edge pairs
+>   ≥ 2r apart (exact, and it doubles as the simplicity test) makes features
+>   from distinct elements disjoint. It is a REPRESENTATION, not a Body: a
+>   canonical form needs azimuthally-trimmed torus patches and planar loops
+>   mixing lines and arcs, neither of which `body.py` has yet — tessellate /
+>   STEP / entities(edge) refuse honestly, so the differential oracle SKIPS
+>   it (its volume was pinned by decomposed MC instead: A∩B and the
+>   reentrant wedge to ±0.009 / ±0.001).
+> * **`shelled box x fillet(all)`** — a hollow box's cavity edges are
+>   concave, so their blends ADD material: the cavity becomes exactly the
+>   rounded box of its own dimensions, strictly inside the outer one for any
+>   wall t > 0. The result IS a canonical Body (outer 26 faces + cavity 26
+>   sense-flipped), meshes, exports STEP, and sits in the differential
+>   oracle: residual 0.0016%, mc z 0.7.
+>
+> **Found on the way, the backlog's own defect class:** `_box_check`
+> (fillet's box gate) accepted any prism whose vertices are a subset of the
+> bbox corners — `fillet(triangular prism, [], 1)` returned a RoundedBox
+> holding TWICE the prism's material, silently, on main. The vertex screen
+> now confirms with `_is_axis_box`'s exact symmetric difference. Chamfer had
+> only been protected by accident (the diagonal face's irrational normal
+> refuses downstream). Both new detectors use the same idiom: rebuild the
+> claimed shape, require both exact boolean differences empty.
+>
+> Still open in this family: `chamfered box x fillet(all)` (the blend runs
+> along edges whose faces have √2 normals — needs ℚ[√2][π] carried through
+> a canonical form that can hold it), and `loft x fillet(all)` is a WALL
+> (Gelfond–Schneider, see `_EXACT_FIELD_BOUNDARY`).
+
 **`sphere x cut cylinder` is the cheapest cell on the board and it has been
 mis-filed.** The probe's tool is `cylinder(1, 100)` translated to the bbox
 midpoint of `sphere(6)` — which is the ORIGIN. So the cut is coaxial and

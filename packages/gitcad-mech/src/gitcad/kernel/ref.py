@@ -860,8 +860,8 @@ class RefKernel:
         vol = _exact_volume(shape)
         if isinstance(shape, (Cone, Sphere)):
             shape = AxisStack(shape.cx, shape.cy, [shape])
-        from forgekernel.quadric import FilletedBox
-        if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, FilletedBox)):
+        from forgekernel.quadric import FilletedBox, FilletedPrism
+        if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, FilletedBox, FilletedPrism)):
             cx, cy, cz = shape.centroid_f()
             return _mp(vol, cx, cy, cz)
         c = shape.centroid()
@@ -963,6 +963,9 @@ class RefKernel:
             return [{"surface": "sphere-lens"}]
         if isinstance(shape, RoundedBox):
             return [{"surface": "rounded-box"}]
+        from forgekernel.quadric import FilletedPrism as _FPr
+        if isinstance(shape, _FPr):
+            return [{"surface": "filleted-prism"}]
         if isinstance(shape, MiteredSweep):
             return [{"surface": "swept"}]
         if isinstance(shape, DisjointUnion):
@@ -1014,7 +1017,8 @@ class RefKernel:
                         "provenance": shape.provenance},
                 violations=[])
         from forgekernel.quadric import FilletedBox as _FB
-        if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, _FB)):
+        from forgekernel.quadric import FilletedPrism as _FP
+        if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, _FB, _FP)):
             return ValidationReport(ok=True, checks={"method": "analytic"},
                                     violations=[])
         from forgekernel import body as _B
@@ -1278,6 +1282,15 @@ class RefKernel:
             for vx, vy, vz in pp.verts:
                 if (vx, vy) not in corners or vz not in (lo[2], hi[2]):
                     return None
+        # The vertex screen alone is SATISFIABLE by a non-box: a triangular
+        # prism's vertices are a subset of the box corners, and fillet(all)
+        # on one sailed through here and returned a RoundedBox holding twice
+        # the prism's material — a silent wrong answer (found by the
+        # rectilinear-prism failing test; chamfer only escaped because the
+        # diagonal face's irrational normal happens to refuse downstream).
+        # Ask the point-set question directly, like _is_axis_box does.
+        if not _is_axis_box(self, shape, (lo, hi)):
+            return None
         return lo, hi
 
     def _sorted_edges(self, shape):
@@ -1368,6 +1381,14 @@ class RefKernel:
             _nope("fillet(non-planar base)", "K5 (general blends)")
         box = self._box_check(shape)
         if box is None:
+            if not edges:
+                r = (radius if isinstance(radius, Fraction)
+                     else Fraction(str(radius)))
+                out = self._fillet_hollow_box(shape, r)
+                if out is None:
+                    out = self._fillet_rect_prism(shape, r)
+                if out is not None:
+                    return out
             _nope("fillet(non-box)", "K5.2 (general blends)")
         lo, hi = box
         if not edges:
@@ -1410,6 +1431,141 @@ class RefKernel:
             specs.append((axis_name[a], side[0], side[1]))
         try:
             return FilletedBox(lo, hi, specs, radius)
+        except ValueError as exc:
+            raise KernelError(str(exc), FailureSignature(
+                op="fillet", diagnostic="NotYetImplemented", kernel="ref"))
+
+    def _fillet_hollow_box(self, shape, r):
+        """fillet(all) on a CLOSED HOLLOW BOX — a box with a fully-enclosed
+        box cavity (what ``shell(box)`` builds) — or None if ``shape`` is not
+        one.
+
+        The outer edges round into the rounded box; the cavity's edges are
+        CONCAVE, so their blends ADD material and the cavity becomes exactly
+        the rounded box of its own dimensions. Containment is strict for any
+        wall thickness t > 0: a point within r of the cavity core has every
+        per-axis deficit to the OUTER core smaller by t, so the cavity's
+        rounded form lies strictly inside the outer one and the two face sets
+        never meet. The B-rep is therefore the outer rounded box's 26 faces
+        plus the cavity's 26 sense-flipped, and the volume is the difference
+        of the two Steiner forms (for the probe's 20³/t=2/r=1: 3856 + 12π,
+        Monte-Carlo membership 3893.63 ± 0.63 against 3893.699).
+
+        Detection is SOUND, not structural: a candidate outer-minus-inner is
+        rebuilt from the two vertex boxes and compared by exact symmetric
+        difference (both boolean cuts must have volume exactly zero) — the
+        lesson of the box predicate that was satisfiable by non-boxes.
+        """
+        from forgekernel import body as B
+        from forgekernel import csg
+        from forgekernel.brep import Solid
+        from forgekernel.quadric import RoundedBox
+
+        lo, hi = shape.bbox()
+        inner = [v for p in shape.polys for v in p.verts
+                 if all(lo[c] < v[c] < hi[c] for c in range(3))]
+        if not inner:
+            return None
+        ilo = tuple(min(v[c] for v in inner) for c in range(3))
+        ihi = tuple(max(v[c] for v in inner) for c in range(3))
+        if any(ihi[c] <= ilo[c] for c in range(3)):
+            return None
+        try:
+            outer_box = Solid.box(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2],
+                                  "fhb.outer").translated(lo)
+            inner_box = Solid.box(ihi[0] - ilo[0], ihi[1] - ilo[1],
+                                  ihi[2] - ilo[2], "fhb.inner").translated(ilo)
+            candidate = csg.cut(outer_box, inner_box)
+            if (csg.cut(shape, candidate).volume() != 0
+                    or csg.cut(candidate, shape).volume() != 0):
+                return None
+        except (ArithmeticError, ValueError, TypeError, IndexError):
+            return None            # not a shape the exact engine can settle
+        if 2 * r > min(ihi[c] - ilo[c] for c in range(3)):
+            _nope("fillet(shelled box: 2r exceeds the cavity's smallest "
+                  "dimension, so the cavity blends would collide)", "K5.2")
+        try:
+            outer_rb = RoundedBox(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2],
+                                  r, lo)
+            cavity_rb = RoundedBox(ihi[0] - ilo[0], ihi[1] - ilo[1],
+                                   ihi[2] - ilo[2], r, ilo)
+        except ValueError as exc:
+            raise KernelError(str(exc), FailureSignature(
+                op="fillet", diagnostic="NotYetImplemented", kernel="ref"))
+        faces = (B.from_rounded_box(outer_rb).faces
+                 + tuple(B.Face(f.surface, f.loops, not f.sense)
+                         for f in B.from_rounded_box(cavity_rb).faces))
+        return _audited(B.Body(faces), "fillet(shelled box)")
+
+    def _fillet_rect_prism(self, shape, r):
+        """fillet(all) on a rectilinear right prism, or None if ``shape`` is
+        not one. The profile is recovered from the bottom cap's boundary
+        edges, then the identification is made SOUND by rebuilding the prism
+        and requiring the exact symmetric difference to vanish — only then is
+        the profile handed to ``FilletedPrism``, whose own guards decide
+        expressibility (its docstring carries the mathematics and the
+        Monte-Carlo verification record)."""
+        from forgekernel import csg
+        from forgekernel.brep import Solid
+        from forgekernel.quadric import FilletedPrism
+
+        lo, hi = shape.bbox()
+        z0, z1 = lo[2], hi[2]
+        if z1 <= z0:
+            return None
+        if any(v[2] not in (z0, z1) for p in shape.polys for v in p.verts):
+            return None
+        bottom = [p for p in shape.polys
+                  if all(v[2] == z0 for v in p.verts)]
+        if not bottom:
+            return None
+        # boundary = directed edges whose reverse never appears
+        counts: dict = {}
+        for p in bottom:
+            vs = [(v[0], v[1]) for v in p.verts]
+            for a, b in zip(vs, vs[1:] + vs[:1]):
+                counts[(a, b)] = counts.get((a, b), 0) + 1
+        nxt: dict = {}
+        for (a, b), n in counts.items():
+            if counts.get((b, a), 0) == 0:
+                if a in nxt:
+                    return None            # pinched vertex: not a simple loop
+                nxt[a] = b
+        if not nxt:
+            return None
+        start = next(iter(nxt))
+        loop = [start]
+        cur = nxt[start]
+        while cur != start:
+            loop.append(cur)
+            cur = nxt.get(cur)
+            if cur is None or len(loop) > len(nxt):
+                return None
+        if len(loop) != len(nxt):
+            return None                    # more than one boundary loop
+        # merge vertices the triangulation left on straight runs
+        merged = []
+        m = len(loop)
+        for i in range(m):
+            pv, v, nx = loop[(i - 1) % m], loop[i], loop[(i + 1) % m]
+            e0 = (v[0] - pv[0], v[1] - pv[1])
+            e1 = (nx[0] - v[0], nx[1] - v[1])
+            if e0[0] * e1[1] - e0[1] * e1[0] == 0 \
+                    and e0[0] * e1[0] + e0[1] * e1[1] > 0:
+                continue
+            merged.append(v)
+        if len(merged) < 3:
+            return None
+        try:
+            candidate = Solid.prism(merged, z1 - z0, "frp").translated(
+                (Fraction(0), Fraction(0), z0))
+            if (csg.cut(shape, candidate).volume() != 0
+                    or csg.cut(candidate, shape).volume() != 0):
+                return None
+        except (ArithmeticError, ValueError, TypeError, IndexError):
+            return None            # not a shape the exact engine can settle
+        try:
+            return FilletedPrism(merged, z0, z1 - z0, r)
         except ValueError as exc:
             raise KernelError(str(exc), FailureSignature(
                 op="fillet", diagnostic="NotYetImplemented", kernel="ref"))
