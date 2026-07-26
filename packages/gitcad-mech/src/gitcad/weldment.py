@@ -36,7 +36,7 @@ class StructuralProfile:
     def rect_tube(w, h, t) -> "StructuralProfile":
         # float() before :g is REQUIRED, not cosmetic. Fraction.__format__ only
         # accepts a format spec from Python 3.12; on 3.10 (our declared floor)
-        # f"{fraction:g}" raises TypeError. This is a NAME, so a float is right
+        # f"{float(fraction):g}" raises TypeError. This is a NAME, so a float is right
         # here — the exact value stays in `area` below. ADR-0019 is unaffected:
         # no float decides anything.
         w, h, t = F(w), F(h), F(t)

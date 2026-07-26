@@ -25,7 +25,7 @@ def pick_and_place(board: Board) -> str:
     w.writerow(["Designator", "Value", "Package", "PosX", "PosY", "Rotation", "Side"])
     for c in sorted(board.components, key=lambda c: c.ref):
         w.writerow([c.ref, c.value, c.footprint.name,
-                    f"{c.x:.3f}", f"{c.y:.3f}", f"{c.rot:.1f}", c.side])
+                    f"{float(c.x):.3f}", f"{float(c.y):.3f}", f"{float(c.rot):.1f}", c.side])
     return buf.getvalue()
 
 

@@ -33,11 +33,11 @@ def board_stats(board: Board) -> dict:
     for c in board.components:
         for p in c.footprint.pads:
             if p.drill is not None:
-                drills[f"{p.drill:g}"] = drills.get(f"{p.drill:g}", 0) + 1
+                drills[f"{float(p.drill):g}"] = drills.get(f"{float(p.drill):g}", 0) + 1
     for v in board.vias:
-        drills[f"{v.drill:g}"] = drills.get(f"{v.drill:g}", 0) + 1
+        drills[f"{float(v.drill):g}"] = drills.get(f"{float(v.drill):g}", 0) + 1
     for m in board.mounting_holes:
-        drills[f"{m.drill:g}"] = drills.get(f"{m.drill:g}", 0) + 1
+        drills[f"{float(m.drill):g}"] = drills.get(f"{float(m.drill):g}", 0) + 1
     nets = {n for c in board.components for n in c.nets.values() if n}
     track_len = sum(math.hypot(t.x2 - t.x1, t.y2 - t.y1) for t in board.tracks)
     return {
@@ -90,10 +90,10 @@ def check_length_match(board: Board, pairs: list[tuple[str, str]],
             violations.append(f"length-match-unrouted:{missing}")
             continue
         delta = abs(la - lb)
-        detail[f"{a}~{b}"] = f"{la}mm vs {lb}mm (d={delta:.3f}mm)"
+        detail[f"{a}~{b}"] = f"{la}mm vs {lb}mm (d={float(delta):.3f}mm)"
         if delta > tol_mm + 1e-9:
             violations.append(
-                f"length-mismatch:{a}~{b}:d={delta:.3f}mm>{tol_mm:g}mm")
+                f"length-mismatch:{a}~{b}:d={float(delta):.3f}mm>{float(tol_mm):g}mm")
     return ValidationReport(ok=not violations,
                             checks={"pairs": detail, "tol_mm": tol_mm},
                             violations=violations)

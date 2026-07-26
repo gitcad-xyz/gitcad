@@ -16,7 +16,7 @@ def _render(holes: list[tuple[float, float, float]]) -> str:
 
     lines = ["M48", f";GenerationSoftware,gitcad,{_gitcad_version}", "METRIC,TZ"]
     for d in diameters:
-        lines.append(f"T{tool_of[d]:02d}C{d:.3f}")
+        lines.append(f"T{tool_of[d]:02d}C{float(d):.3f}")
     lines.append("%")
     lines.append("G90")
     lines.append("G05")
@@ -24,7 +24,7 @@ def _render(holes: list[tuple[float, float, float]]) -> str:
         lines.append(f"T{tool_of[d]:02d}")
         for dd, x, y in sorted(holes):
             if dd == d:
-                lines.append(f"X{x:.3f}Y{y:.3f}")
+                lines.append(f"X{float(x):.3f}Y{float(y):.3f}")
     lines.append("M30")
     return "\n".join(lines) + "\n"
 

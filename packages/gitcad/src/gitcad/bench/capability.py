@@ -220,7 +220,7 @@ def to_markdown(result: dict) -> str:
                  "∎ outside any exact field, permanently · — n/a")
     lines.append("")
     lines.append(f"**Coverage: {tally.get('ok', 0)}/{total} "
-                 f"({100 * tally.get('ok', 0) / total:.0f}%) working, "
+                 f"({float(100 * tally.get('ok', 0) / total):.0f}%) working, "
                  f"{tally.get('refused', 0)} gaps, "
                  f"{tally.get('exact-field', 0)} at the exact-field "
                  "boundary (permanent), "

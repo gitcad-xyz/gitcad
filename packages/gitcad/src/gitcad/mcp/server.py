@@ -342,7 +342,7 @@ def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3",
         tol = dim_tols.get(f.id)
         if tol:
             parts.append(tol["fit"] if "fit" in tol
-                         else f"+{tol.get('plus', 0):g}/-{tol.get('minus', 0):g}")
+                         else f"+{float(tol.get('plus', 0)):g}/-{float(tol.get('minus', 0)):g}")
         if parts:
             rp = resolve_value(f.params, env)
             threads[(round(float(rp["x"]), 3), round(float(rp["y"]), 3))] = " ".join(parts)
@@ -1122,7 +1122,7 @@ def assembly_fasteners(assembly_body: dict[str, Any], parts: list[str],
                           for n, i in asm.instances.items()},
             "mates": [{"a": m.a, "b": m.b} for m in asm.mates]}
     return {**result, "assembly": body,
-            "bolt_sizes": sorted({f"{a['thread']}x{a['length']:g}"
+            "bolt_sizes": sorted({f"{a['thread']}x{float(a['length']):g}"
                                   for a in result["added"]}),
             "ok": r.ok, "violations": r.violations}
 

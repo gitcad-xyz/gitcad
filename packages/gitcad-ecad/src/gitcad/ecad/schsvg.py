@@ -39,7 +39,7 @@ def _is_power(net: str) -> bool:
 
 
 def _f(v: float) -> str:
-    return f"{v:.2f}".rstrip("0").rstrip(".")
+    return f"{float(v):.2f}".rstrip("0").rstrip(".")
 
 
 class _Sym:

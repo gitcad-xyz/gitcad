@@ -82,10 +82,10 @@ class _GerberFile:
 
 def _pad_spec(w: float, h: float, shape: str) -> str:
     if shape == "circle":
-        return f"C,{max(w, h):.6f}"
+        return f"C,{float(max(w, h)):.6f}"
     if shape == "obround":
-        return f"O,{w:.6f}X{h:.6f}"
-    return f"R,{w:.6f}X{h:.6f}"
+        return f"O,{float(w):.6f}X{float(h):.6f}"
+    return f"R,{float(w):.6f}X{float(h):.6f}"
 
 
 def copper(board: Board, side: str) -> str:
@@ -110,10 +110,10 @@ def copper(board: Board, side: str) -> str:
             g.flash(_pad_spec(w, h, pad.shape), bx, by)
     for t in board.tracks:
         if t.layer == side:
-            g.line(f"C,{t.width:.6f}", t.x1, t.y1, t.x2, t.y2)
+            g.line(f"C,{float(t.width):.6f}", t.x1, t.y1, t.x2, t.y2)
     for v in board.vias:
         if side in v.span(names):     # blind/buried barrels only touch their span
-            g.flash(f"C,{v.diameter:.6f}", v.x, v.y)
+            g.flash(f"C,{float(v.diameter):.6f}", v.x, v.y)
     for z in board.zones:
         if z.layer == side and z.kind == "copper":   # keepouts never emit
             g.region(z.polygon)

@@ -88,7 +88,7 @@ def to_spice(sch: Schematic, *, title: str | None = None) -> tuple[str, dict]:
         v = net_voltage(net, sch.net_specs)
         if v and _node(net) != "0":
             rail_idx += 1
-            lines.append(f"VRAIL{rail_idx} {_node(net)} 0 {v:g}")
+            lines.append(f"VRAIL{rail_idx} {_node(net)} 0 {float(v):g}")
 
     models = sorted({comp.attrs["spice"]["model"]
                      for comp in sch.components
@@ -150,9 +150,9 @@ def sim_check(sch: Schematic, checks: list[dict]) -> ValidationReport:
             continue
         v = got[node]
         if "min" in c and v < c["min"] - 1e-12:
-            violations.append(f"sim-under:{c['node']}:{v:g}<{c['min']:g}")
+            violations.append(f"sim-under:{c['node']}:{float(v):g}<{float(c['min']):g}")
         if "max" in c and v > c["max"] + 1e-12:
-            violations.append(f"sim-over:{c['node']}:{v:g}>{c['max']:g}")
+            violations.append(f"sim-over:{c['node']}:{float(v):g}>{float(c['max']):g}")
 
     return ValidationReport(
         ok=not violations,

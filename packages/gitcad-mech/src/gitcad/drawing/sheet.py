@@ -99,7 +99,7 @@ class Drawing:
 
 
 def _fmt(v: float) -> str:
-    return f"{v:.1f}".rstrip("0").rstrip(".")
+    return f"{float(v):.1f}".rstrip("0").rstrip(".")
 
 
 def _transform(polys, scale: float, ox: float, oy: float, bmin: Point):

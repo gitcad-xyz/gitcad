@@ -19,15 +19,15 @@ def _entity_lines(profile: Profile) -> list[str]:
         to = tuple(seg["to"])
         if seg["kind"] == "line":
             out += ["0", "LINE", "8", "CUT",
-                    "10", f"{prev[0]:.6f}", "20", f"{prev[1]:.6f}",
-                    "11", f"{to[0]:.6f}", "21", f"{to[1]:.6f}"]
+                    "10", f"{float(prev[0]):.6f}", "20", f"{float(prev[1]):.6f}",
+                    "11", f"{float(to[0]):.6f}", "21", f"{float(to[1]):.6f}"]
         else:  # three-point arc -> center/radius/angles
             cx, cy, r, a1, a2, ccw = _arc_params(prev, tuple(seg["via"]), to)
             if not ccw:
                 a1, a2 = a2, a1   # DXF arcs are always CCW start->end
             out += ["0", "ARC", "8", "CUT",
-                    "10", f"{cx:.6f}", "20", f"{cy:.6f}", "40", f"{r:.6f}",
-                    "50", f"{math.degrees(a1):.6f}", "51", f"{math.degrees(a2):.6f}"]
+                    "10", f"{float(cx):.6f}", "20", f"{float(cy):.6f}", "40", f"{float(r):.6f}",
+                    "50", f"{float(math.degrees(a1)):.6f}", "51", f"{float(math.degrees(a2)):.6f}"]
         prev = to
     return out
 

@@ -77,7 +77,7 @@ def check_interference(
             if vol > _VOL_TOL:
                 overlaps[f"{na}<->{nb}"] = round(vol, 4)
             if vol > tol:
-                violations.append(f"interference:{na}<->{nb}:overlap={vol:.3f}mm3")
+                violations.append(f"interference:{na}<->{nb}:overlap={float(vol):.3f}mm3")
 
     return ValidationReport(
         ok=not violations,

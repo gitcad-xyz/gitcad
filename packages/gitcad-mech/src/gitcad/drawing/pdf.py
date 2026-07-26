@@ -20,7 +20,7 @@ def render_pdf(d: Drawing) -> bytes:
     objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
     objects.append(b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
     objects.append(
-        f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w_pt:.2f} {h_pt:.2f}] "
+        f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {float(w_pt):.2f} {float(h_pt):.2f}] "
         f"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".encode()
     )
     objects.append(
@@ -50,22 +50,22 @@ def _esc(text: str) -> str:
 
 def _content_stream(d: Drawing) -> bytes:
     # Sheet coords are mm y-up; PDF user space is points y-up. One scale, no flip.
-    s: list[str] = [f"{MM:.6f} 0 0 {MM:.6f} 0 0 cm", "1 J 1 j"]
+    s: list[str] = [f"{float(MM):.6f} 0 0 {float(MM):.6f} 0 0 cm", "1 J 1 j"]
 
     def polyline(poly, width: float, dash: str | None = None) -> None:
-        s.append(f"{width:.3f} w")
+        s.append(f"{float(width):.3f} w")
         s.append(f"[{dash}] 0 d" if dash else "[] 0 d")
         (x0, y0), *rest = poly
-        s.append(f"{x0:.3f} {y0:.3f} m")
+        s.append(f"{float(x0):.3f} {float(y0):.3f} m")
         for x, y in rest:
-            s.append(f"{x:.3f} {y:.3f} l")
+            s.append(f"{float(x):.3f} {float(y):.3f} l")
         s.append("S")
 
     def text(x: float, y: float, size: float, value: str, rotate90: bool = False) -> None:
         if rotate90:
-            s.append(f"BT /F1 {size:.2f} Tf 0 1 -1 0 {x:.3f} {y:.3f} Tm ({_esc(value)}) Tj ET")
+            s.append(f"BT /F1 {float(size):.2f} Tf 0 1 -1 0 {float(x):.3f} {float(y):.3f} Tm ({_esc(value)}) Tj ET")
         else:
-            s.append(f"BT /F1 {size:.2f} Tf {x:.3f} {y:.3f} Td ({_esc(value)}) Tj ET")
+            s.append(f"BT /F1 {float(size):.2f} Tf {float(x):.3f} {float(y):.3f} Td ({_esc(value)}) Tj ET")
 
     # Border
     polyline([(5, 5), (d.width - 5, 5), (d.width - 5, d.height - 5), (5, d.height - 5), (5, 5)], 0.3)
@@ -97,11 +97,11 @@ def _content_stream(d: Drawing) -> bytes:
         k = 0.552284749 * r
         s.append("0.13 w")
         s.append("[] 0 d")
-        s.append(f"{cx + r:.3f} {cy:.3f} m")
-        s.append(f"{cx + r:.3f} {cy + k:.3f} {cx + k:.3f} {cy + r:.3f} {cx:.3f} {cy + r:.3f} c")
-        s.append(f"{cx - k:.3f} {cy + r:.3f} {cx - r:.3f} {cy + k:.3f} {cx - r:.3f} {cy:.3f} c")
-        s.append(f"{cx - r:.3f} {cy - k:.3f} {cx - k:.3f} {cy - r:.3f} {cx:.3f} {cy - r:.3f} c")
-        s.append(f"{cx + k:.3f} {cy - r:.3f} {cx + r:.3f} {cy - k:.3f} {cx + r:.3f} {cy:.3f} c")
+        s.append(f"{float(cx + r):.3f} {float(cy):.3f} m")
+        s.append(f"{float(cx + r):.3f} {float(cy + k):.3f} {float(cx + k):.3f} {float(cy + r):.3f} {float(cx):.3f} {float(cy + r):.3f} c")
+        s.append(f"{float(cx - k):.3f} {float(cy + r):.3f} {float(cx - r):.3f} {float(cy + k):.3f} {float(cx - r):.3f} {float(cy):.3f} c")
+        s.append(f"{float(cx - r):.3f} {float(cy - k):.3f} {float(cx - k):.3f} {float(cy - r):.3f} {float(cx):.3f} {float(cy - r):.3f} c")
+        s.append(f"{float(cx + k):.3f} {float(cy - r):.3f} {float(cx + r):.3f} {float(cy - k):.3f} {float(cx + r):.3f} {float(cy):.3f} c")
         s.append("S")
 
     for c in d.callouts:
@@ -121,7 +121,7 @@ def _content_stream(d: Drawing) -> bytes:
     x0, y0 = d.width - 5 - w, 5.0
     polyline([(x0, y0), (x0 + w, y0), (x0 + w, y0 + h), (x0, y0 + h), (x0, y0)], 0.3)
     text(x0 + 3, y0 + h - 6.5, 3.5, d.title)
-    text(x0 + 3, y0 + h - 12.0, 3.0, f"SCALE {d.scale:g}:1   UNITS mm   SHEET {d.sheet}")
+    text(x0 + 3, y0 + h - 12.0, 3.0, f"SCALE {float(d.scale):g}:1   UNITS mm   SHEET {d.sheet}")
     text(x0 + 3, y0 + 2.5, 3.0, "gitcad - generated drawing")
 
     return "\n".join(s).encode("latin-1", errors="replace")

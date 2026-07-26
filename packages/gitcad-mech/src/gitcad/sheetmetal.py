@@ -154,7 +154,7 @@ class SheetMetal:
             min_edge = self._ossb(f) + 2 * self.thickness
             for h in f.holes:
                 if h.v < min_edge:
-                    violations.append(f"hole-too-close-to-bend:{label}:v={h.v:g}")
+                    violations.append(f"hole-too-close-to-bend:{label}:v={float(h.v):g}")
             for c in f.children:
                 walk(c, label, chained=True)
 
@@ -165,7 +165,7 @@ class SheetMetal:
                 d = {"n": self.height - h.v, "s": h.v,
                      "e": self.width - h.u, "w": h.u}[f.edge] if f.edge in _EDGES else 1e9
                 if d < self._ossb(f) + 2 * self.thickness:
-                    violations.append(f"hole-too-close-to-bend:base({f.edge}):u={h.u:g},v={h.v:g}")
+                    violations.append(f"hole-too-close-to-bend:base({f.edge}):u={float(h.u):g},v={float(h.v):g}")
         return ValidationReport(ok=not violations,
                                 checks={"flanges": _count(self.flanges),
                                         "holes": len(self.base_holes)
@@ -255,17 +255,17 @@ class SheetMetal:
         pts = fp["outline"] + [fp["outline"][0]]
         for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
             lines += ["0", "LINE", "8", "CUT",
-                      "10", f"{x1:.6f}", "20", f"{y1:.6f}",
-                      "11", f"{x2:.6f}", "21", f"{y2:.6f}"]
+                      "10", f"{float(x1):.6f}", "20", f"{float(y1):.6f}",
+                      "11", f"{float(x2):.6f}", "21", f"{float(y2):.6f}"]
         for b in fp["bends"]:
             layer = "BEND_UP" if b["direction"] == "up" else "BEND_DOWN"
             (x1, y1), (x2, y2) = b["p1"], b["p2"]
             lines += ["0", "LINE", "8", layer,
-                      "10", f"{x1:.6f}", "20", f"{y1:.6f}",
-                      "11", f"{x2:.6f}", "21", f"{y2:.6f}"]
+                      "10", f"{float(x1):.6f}", "20", f"{float(y1):.6f}",
+                      "11", f"{float(x2):.6f}", "21", f"{float(y2):.6f}"]
         for hx, hy, d in fp["holes"]:
             lines += ["0", "CIRCLE", "8", "HOLES",
-                      "10", f"{hx:.6f}", "20", f"{hy:.6f}", "40", f"{d / 2:.6f}"]
+                      "10", f"{float(hx):.6f}", "20", f"{float(hy):.6f}", "40", f"{float(d / 2):.6f}"]
         lines += ["0", "ENDSEC", "0", "EOF"]
         return "\n".join(lines) + "\n"
 

@@ -19,7 +19,7 @@ _C = {
 
 
 def _f(v: float) -> str:
-    return f"{v:.3f}".rstrip("0").rstrip(".")
+    return f"{float(v):.3f}".rstrip("0").rstrip(".")
 
 
 def board_to_svg(board: Board, *, margin: float = 3.0) -> str:

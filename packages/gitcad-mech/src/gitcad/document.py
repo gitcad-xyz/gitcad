@@ -240,14 +240,14 @@ class Document:
             if t["kind"] == "gdt":
                 refs = "|".join(t.get("datum_refs", []))
                 sym = self.GDT_SYMBOLS[t["symbol"]]
-                fcf = f"{sym} {t['value']:g}" + (f" |{refs}" if refs else "")
+                fcf = f"{sym} {float(t['value']):g}" + (f" |{refs}" if refs else "")
                 notes.append(f"[{fcf}]  [{t['feature']}]")
         for t in self.tolerances:
             if t["kind"] == "dim":
                 if "fit" in t:
                     spec = t["fit"]
                 else:
-                    spec = f"+{t.get('plus', 0):g}/-{t.get('minus', 0):g}"
+                    spec = f"+{float(t.get('plus', 0)):g}/-{float(t.get('minus', 0)):g}"
                 notes.append(f"{t['param']} {spec}  [{t['feature']}]")
         return notes
 

@@ -43,7 +43,7 @@ def bolt_family(d: float) -> Document:
     doc.add(Feature(op="boolean", params={"kind": "union"},
                     inputs=[shaft, head_up]))
     for length in _STD_LENGTHS:
-        doc.set_configuration(f"M{d:g}x{length}", {"L": length})
+        doc.set_configuration(f"M{float(d):g}x{length}", {"L": length})
     return doc
 
 
@@ -61,8 +61,8 @@ def bolt_part(thread: str, length: float) -> PartManifest:
                             spec={"thread": thread, "length": length})},
         properties={"standard": "ISO4762", "thread": thread, "length": length},
     )
-    safe = f"{thread}x{length:g}".replace(".", "_")
-    return PartManifest(id=f"prt_bolt_{safe.lower()}", name=f"{thread}x{length:g} SHCS",
+    safe = f"{thread}x{float(length):g}".replace(".", "_")
+    return PartManifest(id=f"prt_bolt_{safe.lower()}", name=f"{thread}x{float(length):g} SHCS",
                         domain="mech", version="1.0.0", interface=iface,
                         body={"kind": "fastener", "standard": "ISO4762"})
 

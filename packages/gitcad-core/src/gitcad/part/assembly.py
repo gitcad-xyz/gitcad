@@ -190,7 +190,7 @@ class Assembly:
             pos_a, pos_b = inst_a.port_position(pa), inst_b.port_position(pb)
             dist = math.dist(pos_a, pos_b)   # full 3D coincidence
             if dist > _TOL:
-                violations.append(f"mate-position-mismatch:{m.a}<->{m.b}:d={dist:.3f}mm")
+                violations.append(f"mate-position-mismatch:{m.a}<->{m.b}:d={float(dist):.3f}mm")
         # checks states METHOD and coverage so ok=True can never overstate what
         # was verified (frame orientation is not yet checked, only position).
         return ValidationReport(

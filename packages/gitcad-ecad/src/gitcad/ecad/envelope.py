@@ -65,10 +65,10 @@ def check_envelopes(sch: Schematic) -> ValidationReport:
             if v is not None:
                 vmax = spec.get("v_abs_max")
                 if vmax is not None and v > float(vmax) + 1e-9:
-                    violations.append(f"pin-overvoltage:{net}:{pr}:{v:g}>{float(vmax):g}")
+                    violations.append(f"pin-overvoltage:{net}:{pr}:{float(v):g}>{float(vmax):g}")
                 vopmin = spec.get("v_op_min")
                 if vopmin is not None and v < float(vopmin) - 1e-9:
-                    violations.append(f"pin-underpowered:{net}:{pr}:{v:g}<{float(vopmin):g}")
+                    violations.append(f"pin-underpowered:{net}:{pr}:{float(v):g}<{float(vopmin):g}")
             if "i_draw_ma" in spec:
                 draws.append((pr, float(spec["i_draw_ma"])))
             if "i_source_ma" in spec:
@@ -84,7 +84,7 @@ def check_envelopes(sch: Schematic) -> ValidationReport:
                 rails[net]["utilization"] = round(draw / cap, 3) if cap else None
                 if draw > cap + 1e-9:
                     violations.append(
-                        f"rail-overload:{net}:draw={draw:g}ma>cap={cap:g}ma")
+                        f"rail-overload:{net}:draw={float(draw):g}ma>cap={float(cap):g}ma")
 
     return ValidationReport(
         ok=not violations,

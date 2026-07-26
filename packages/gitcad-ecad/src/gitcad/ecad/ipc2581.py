@@ -27,12 +27,12 @@ def _pad_primitive(pad_key: tuple, idx: int) -> str:
     shape, w, h = pad_key
     if shape == "circle":
         return (f'<EntryStandard id="PRIM_{idx}">'
-                f'<Circle diameter="{max(w, h):.6f}"/></EntryStandard>')
+                f'<Circle diameter="{float(max(w, h)):.6f}"/></EntryStandard>')
     if shape == "obround":
         return (f'<EntryStandard id="PRIM_{idx}">'
-                f'<Oval width="{w:.6f}" height="{h:.6f}"/></EntryStandard>')
+                f'<Oval width="{float(w):.6f}" height="{float(h):.6f}"/></EntryStandard>')
     return (f'<EntryStandard id="PRIM_{idx}">'
-            f'<RectCenter width="{w:.6f}" height="{h:.6f}"/></EntryStandard>')
+            f'<RectCenter width="{float(w):.6f}" height="{float(h):.6f}"/></EntryStandard>')
 
 
 def to_ipc2581(board: Board, *, origination: str = "1970-01-01T00:00:00") -> str:
@@ -75,7 +75,7 @@ def to_ipc2581(board: Board, *, origination: str = "1970-01-01T00:00:00") -> str
     x.append('<DictionaryLineDesc units="MILLIMETER">')
     for w, i in sorted(line_ids.items(), key=lambda kv: kv[1]):
         x.append(f'<EntryLineDesc id="LINE_{i}">'
-                 f'<LineDesc lineEnd="ROUND" lineWidth="{w:.6f}"/></EntryLineDesc>')
+                 f'<LineDesc lineEnd="ROUND" lineWidth="{float(w):.6f}"/></EntryLineDesc>')
     x.append('</DictionaryLineDesc>')
     x.append('<DictionaryStandard units="MILLIMETER">')
     for key, idx in sorted(pad_keys.items(), key=lambda kv: kv[1]):
@@ -138,21 +138,21 @@ def to_ipc2581(board: Board, *, origination: str = "1970-01-01T00:00:00") -> str
                  f'</Layer>')
     # Stackup: copper foils + equal dielectrics summing to board thickness
     x.append(f'<Stackup name="Primary_Stackup" '
-             f'overallThickness="{board.thickness:.4f}" tolPlus="0" tolMinus="0" '
+             f'overallThickness="{float(board.thickness):.4f}" tolPlus="0" tolMinus="0" '
              f'whereMeasured="METAL">')
     x.append('<StackupGroup name="Primary_Stackup_Group" '
-             f'thickness="{board.thickness:.4f}" tolPlus="0" tolMinus="0">')
+             f'thickness="{float(board.thickness):.4f}" tolPlus="0" tolMinus="0">')
     copper_t = 0.035
     dielectric = (board.thickness - n * copper_t) / (n - 1)
     seq = 1
     for i, layer in enumerate(copper):
         x.append(f'<StackupLayer layerOrGroupRef="{escape(layer)}" '
-                 f'thickness="{copper_t:.4f}" tolPlus="0" tolMinus="0" '
+                 f'thickness="{float(copper_t):.4f}" tolPlus="0" tolMinus="0" '
                  f'sequence="{seq}"/>')
         seq += 1
         if i < n - 1:
             x.append(f'<StackupLayer layerOrGroupRef="dielectric_{i + 1}" '
-                     f'thickness="{dielectric:.4f}" tolPlus="0" tolMinus="0" '
+                     f'thickness="{float(dielectric):.4f}" tolPlus="0" tolMinus="0" '
                      f'sequence="{seq}"/>')
             seq += 1
     x.append('</StackupGroup></Stackup>')
@@ -163,9 +163,9 @@ def to_ipc2581(board: Board, *, origination: str = "1970-01-01T00:00:00") -> str
     if pts[0] != pts[-1]:
         pts.append(pts[0])
     x.append('<Profile><Polygon>')
-    x.append(f'<PolyBegin x="{pts[0][0]:.6f}" y="{pts[0][1]:.6f}"/>')
+    x.append(f'<PolyBegin x="{float(pts[0][0]):.6f}" y="{float(pts[0][1]):.6f}"/>')
     for px, py in pts[1:]:
-        x.append(f'<PolyStepSegment x="{px:.6f}" y="{py:.6f}"/>')
+        x.append(f'<PolyStepSegment x="{float(px):.6f}" y="{float(py):.6f}"/>')
     x.append('</Polygon></Profile>')
 
     # Packages
@@ -177,7 +177,7 @@ def to_ipc2581(board: Board, *, origination: str = "1970-01-01T00:00:00") -> str
         for pad in fp.pads:
             x.append(f'<Pin number="{escape(pad.name)}" type="SURFACE" '
                      f'electricalType="ELECTRICAL">'
-                     f'<Location x="{pad.x:.6f}" y="{pad.y:.6f}"/></Pin>')
+                     f'<Location x="{float(pad.x):.6f}" y="{float(pad.y):.6f}"/></Pin>')
         x.append('</Package>')
 
     # Components
@@ -185,8 +185,8 @@ def to_ipc2581(board: Board, *, origination: str = "1970-01-01T00:00:00") -> str
         x.append(f'<Component refDes="{escape(comp.ref)}" '
                  f'packageRef="{escape(comp.footprint.name)}" '
                  f'layerRef="{escape(comp.side)}" part="{escape(comp.value)}">'
-                 f'<Xform rotation="{comp.rot:.1f}"/>'
-                 f'<Location x="{comp.x:.6f}" y="{comp.y:.6f}"/></Component>')
+                 f'<Xform rotation="{float(comp.rot):.1f}"/>'
+                 f'<Location x="{float(comp.x):.6f}" y="{float(comp.y):.6f}"/></Component>')
 
     # LogicalNets
     for net, prs in sorted(nets.items()):
@@ -207,7 +207,7 @@ def to_ipc2581(board: Board, *, origination: str = "1970-01-01T00:00:00") -> str
                 key = (pad.shape, pad.w, pad.h)
                 net = comp.nets.get(pad.name, "")
                 x.append(f'<Set net="{escape(net)}"><Pad>'
-                         f'<Location x="{bx:.6f}" y="{by:.6f}"/>'
+                         f'<Location x="{float(bx):.6f}" y="{float(by):.6f}"/>'
                          f'<StandardPrimitiveRef id="PRIM_{pad_keys[key]}"/>'
                          f'</Pad></Set>')
         for via in board.vias:
@@ -215,14 +215,14 @@ def to_ipc2581(board: Board, *, origination: str = "1970-01-01T00:00:00") -> str
                 continue
             key = ("circle", via.diameter, via.diameter)
             x.append(f'<Set net="{escape(via.net)}" padUsage="VIA"><Pad>'
-                     f'<Location x="{via.x:.6f}" y="{via.y:.6f}"/>'
+                     f'<Location x="{float(via.x):.6f}" y="{float(via.y):.6f}"/>'
                      f'<StandardPrimitiveRef id="PRIM_{pad_keys[key]}"/>'
                      f'</Pad></Set>')
         for t in sorted((t for t in board.tracks if t.layer == layer),
                         key=lambda t: (t.x1, t.y1, t.x2, t.y2)):
             x.append(f'<Set net="{escape(t.net)}"><Features>'
-                     f'<Line startX="{t.x1:.6f}" startY="{t.y1:.6f}" '
-                     f'endX="{t.x2:.6f}" endY="{t.y2:.6f}">'
+                     f'<Line startX="{float(t.x1):.6f}" startY="{float(t.y1):.6f}" '
+                     f'endX="{float(t.x2):.6f}" endY="{float(t.y2):.6f}">'
                      f'<LineDescRef id="LINE_{line_ids[t.width]}"/></Line>'
                      f'</Features></Set>')
         for z in board.zones:
@@ -232,9 +232,9 @@ def to_ipc2581(board: Board, *, origination: str = "1970-01-01T00:00:00") -> str
             if zpts[0] != zpts[-1]:
                 zpts.append(zpts[0])
             x.append(f'<Set net="{escape(z.net)}"><Features><Polygon>')
-            x.append(f'<PolyBegin x="{zpts[0][0]:.6f}" y="{zpts[0][1]:.6f}"/>')
+            x.append(f'<PolyBegin x="{float(zpts[0][0]):.6f}" y="{float(zpts[0][1]):.6f}"/>')
             for px, py in zpts[1:]:
-                x.append(f'<PolyStepSegment x="{px:.6f}" y="{py:.6f}"/>')
+                x.append(f'<PolyStepSegment x="{float(px):.6f}" y="{float(py):.6f}"/>')
             x.append('</Polygon></Features></Set>')
         x.append('</LayerFeature>')
 
@@ -245,19 +245,19 @@ def to_ipc2581(board: Board, *, origination: str = "1970-01-01T00:00:00") -> str
             if pad.drill is not None:
                 x.append(f'<Set net="{escape(comp.nets.get(pad.name, ""))}">'
                          f'<Hole name="{escape(comp.ref)}.{escape(pad.name)}" '
-                         f'diameter="{pad.drill:.6f}" platingStatus="PLATED" '
-                         f'plusTol="0" minusTol="0" x="{bx:.6f}" y="{by:.6f}"/></Set>')
+                         f'diameter="{float(pad.drill):.6f}" platingStatus="PLATED" '
+                         f'plusTol="0" minusTol="0" x="{float(bx):.6f}" y="{float(by):.6f}"/></Set>')
     for i, via in enumerate(board.vias):
         if via.kind(copper) != "through":
             continue                     # blind/buried drill in their span layer
         x.append(f'<Set net="{escape(via.net)}" padUsage="VIA">'
-                 f'<Hole name="via{i}" diameter="{via.drill:.6f}" '
+                 f'<Hole name="via{i}" diameter="{float(via.drill):.6f}" '
                  f'platingStatus="VIA" plusTol="0" minusTol="0" '
-                 f'x="{via.x:.6f}" y="{via.y:.6f}"/></Set>')
+                 f'x="{float(via.x):.6f}" y="{float(via.y):.6f}"/></Set>')
     for mh in board.mounting_holes:
         x.append(f'<Set net=""><Hole name="{escape(mh.name)}" '
-                 f'diameter="{mh.drill:.6f}" platingStatus="NONPLATED" '
-                 f'plusTol="0" minusTol="0" x="{mh.x:.6f}" y="{mh.y:.6f}"/></Set>')
+                 f'diameter="{float(mh.drill):.6f}" platingStatus="NONPLATED" '
+                 f'plusTol="0" minusTol="0" x="{float(mh.x):.6f}" y="{float(mh.y):.6f}"/></Set>')
     x.append('</LayerFeature>')
 
     # blind/buried spans: one LayerFeature per span, holes only (the oracle
@@ -268,9 +268,9 @@ def to_ipc2581(board: Board, *, origination: str = "1970-01-01T00:00:00") -> str
             if (via.layer_from, via.layer_to) != (a, b):
                 continue
             x.append(f'<Set net="{escape(via.net)}" padUsage="VIA">'
-                     f'<Hole name="via{i}" diameter="{via.drill:.6f}" '
+                     f'<Hole name="via{i}" diameter="{float(via.drill):.6f}" '
                      f'platingStatus="VIA" plusTol="0" minusTol="0" '
-                     f'x="{via.x:.6f}" y="{via.y:.6f}"/></Set>')
+                     f'x="{float(via.x):.6f}" y="{float(via.y):.6f}"/></Set>')
         x.append('</LayerFeature>')
 
     x.append('</Step></CadData></Ecad>')

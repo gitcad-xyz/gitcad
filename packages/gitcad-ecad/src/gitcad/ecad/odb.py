@@ -23,16 +23,16 @@ from gitcad.errors import GitcadError
 
 
 def _f(v: float) -> str:
-    return f"{v:.4f}".rstrip("0").rstrip(".")
+    return f"{float(v):.4f}".rstrip("0").rstrip(".")
 
 
 def _sym_pad(shape: str, w: float, h: float) -> str:
     """ODB++ symbol name; dimensions in µm (metric symbol convention)."""
     if shape == "circle":
-        return f"r{max(w, h) * 1000:.1f}"
+        return f"r{float(max(w, h) * 1000):.1f}"
     if shape == "obround":
-        return f"oval{w * 1000:.1f}x{h * 1000:.1f}"
-    return f"rect{w * 1000:.1f}x{h * 1000:.1f}"
+        return f"oval{float(w * 1000):.1f}x{float(h * 1000):.1f}"
+    return f"rect{float(w * 1000):.1f}x{float(h * 1000):.1f}"
 
 
 class _Features:
@@ -47,7 +47,7 @@ class _Features:
 
     def pad(self, x: float, y: float, sym_name: str, rot: float = 0.0) -> None:
         self.records.append(
-            f"P {_f(x)} {_f(y)} {self.sym(sym_name)} P 0 8 {rot:.1f}")
+            f"P {_f(x)} {_f(y)} {self.sym(sym_name)} P 0 8 {float(rot):.1f}")
 
     def line(self, x1, y1, x2, y2, sym_name: str) -> None:
         self.records.append(
@@ -157,7 +157,7 @@ def to_odb(board: Board, *, creation: str = "19700101.000000") -> dict[str, str]
                 f.pad(via.x, via.y, _sym_pad("circle", via.diameter, via.diameter))
         for t in board.tracks:
             if t.layer == layer:
-                f.line(t.x1, t.y1, t.x2, t.y2, f"r{t.width * 1000:.1f}")
+                f.line(t.x1, t.y1, t.x2, t.y2, f"r{float(t.width * 1000):.1f}")
         for z in board.zones:
             if z.layer == layer and z.kind == "copper":
                 f.surface(z.polygon)
@@ -201,11 +201,11 @@ def to_odb(board: Board, *, creation: str = "19700101.000000") -> dict[str, str]
         for ci, comp in enumerate(sorted(comps, key=lambda c: c.ref)):
             lines.append(f"# CMP {ci}")
             lines.append(f"CMP {pkg_idx[comp.footprint.name]} {_f(comp.x)} "
-                         f"{_f(comp.y)} {comp.rot:.1f} N {comp.ref} "
+                         f"{_f(comp.y)} {float(comp.rot):.1f} N {comp.ref} "
                          f"{comp.value or comp.footprint.name} ;")
             for pi, (pad, bx, by, rot) in enumerate(comp.placed_pads()):
                 n = comp.nets.get(pad.name, "")
-                lines.append(f"TOP {pi} {_f(bx)} {_f(by)} {rot:.1f} N "
+                lines.append(f"TOP {pi} {_f(bx)} {_f(by)} {float(rot):.1f} N "
                              f"{net_idx.get(n, 0)} {pi} {pad.name}")
             lines.append("")
         files[f"steps/pcb/layers/{lname}/components"] = "\n".join(lines) + "\n"
@@ -217,15 +217,15 @@ def to_odb(board: Board, *, creation: str = "19700101.000000") -> dict[str, str]
                      plated: bool) -> None:
         f = _Features()
         for d, hx, hy in holes:
-            f.pad(hx, hy, f"r{d * 1000:.1f}")
+            f.pad(hx, hy, f"r{float(d * 1000):.1f}")
         files[f"steps/pcb/layers/{name}/features"] = f.render()
         files[f"steps/pcb/layers/{name}/attrlist"] = "UNITS=MM\n"
         tl = ["UNITS=MM", "THICKNESS=0", "USER_PARAMS=", "TOOLS {"]
         for i, d in enumerate(sorted({d for d, _, _ in holes}), start=1):
             tl += [f"    NUM={i}", f"    TYPE={'PLATED' if plated else 'NON_PLATED'}",
                    "    TYPE2=STANDARD", "    MIN_TOL=0", "    MAX_TOL=0",
-                   "    BIT=", f"    FINISH_SIZE={d * 1000:.1f}",
-                   f"    DRILL_SIZE={d * 1000:.1f}"]
+                   "    BIT=", f"    FINISH_SIZE={float(d * 1000):.1f}",
+                   f"    DRILL_SIZE={float(d * 1000):.1f}"]
         tl += ["}", ""]
         files[f"steps/pcb/layers/{name}/tools"] = "\n".join(tl)
 
@@ -256,7 +256,7 @@ def to_odb(board: Board, *, creation: str = "19700101.000000") -> dict[str, str]
             n = comp.nets.get(pad.name, "")
             w, h = (pad.h, pad.w) if round(rot) % 180 == 90 else (pad.w, pad.h)
             cn.append(f"{net_idx.get(n, 0)} 0 {_f(bx)} {_f(by)} {side_flag} "
-                      f"{w:.2f} {h:.2f} e s")
+                      f"{float(w):.2f} {float(h):.2f} e s")
     files["steps/pcb/netlists/cadnet/netlist"] = "\n".join(cn) + "\n"
 
     # -- minimal eda/data ------------------------------------------------------

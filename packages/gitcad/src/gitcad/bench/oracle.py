@@ -274,8 +274,8 @@ def main() -> None:  # pragma: no cover - CLI
         errs = "  ".join(f"{e * 100:+7.4f}%" for e in r.errors)
         flag = "" if r.ok else ("   <-- " + ("DIVERGES" if not r.converges
                                              else "DISAGREES"))
-        print(f"{r.shape:24s} {r.exact:12.3f}   {errs}   "
-              f"{r.residual * 100:8.4f}%  {r.z:5.2f}{flag}")
+        print(f"{r.shape:24s} {float(r.exact):12.3f}   {errs}   "
+              f"{float(r.residual * 100):8.4f}%  {float(r.z):5.2f}{flag}")
     bad = [r for r in rows if not r.ok]
     print(f"\n{len(rows)} shapes · {len(bad)} failing")
     print("RESIDUAL is the number that matters: the exact volume against the "

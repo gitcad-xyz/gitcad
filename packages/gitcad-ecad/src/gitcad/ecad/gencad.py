@@ -17,7 +17,7 @@ _IN = 1 / 25.4
 
 
 def _i(v: float) -> str:
-    return f"{v * _IN:.6f}"
+    return f"{float(v * _IN):.6f}"
 
 
 def to_gencad(board: Board) -> str:
@@ -109,7 +109,7 @@ def to_gencad(board: Board) -> str:
         out.append(f'DEVICE "DEV_{comp.footprint.name}"')
         out.append(f"PLACE {_i(comp.x)} {_i(comp.y)}")
         out.append(f"LAYER {'TOP' if comp.side == 'top' else 'BOTTOM'}")
-        out.append(f"ROTATION {comp.rot:g}")
+        out.append(f"ROTATION {float(comp.rot):g}")
         out.append(f'SHAPE "{comp.footprint.name}" 0 0')
     out.append("$ENDCOMPONENTS")
     out.append("")

@@ -302,7 +302,7 @@ def run_drc(board: Board, pack: RulePack | None = None) -> ValidationReport:
                     continue
                 d = _copper_dist(a, b)
                 if d < need:
-                    violations.append(f"clearance:{a.label}<->{b.label}:d={d:.3f}mm<{need}mm")
+                    violations.append(f"clearance:{a.label}<->{b.label}:d={float(d):.3f}mm<{need}mm")
 
     # track width
     for i, t in enumerate(board.tracks):
@@ -320,7 +320,7 @@ def run_drc(board: Board, pack: RulePack | None = None) -> ValidationReport:
         ring = (v.diameter - v.drill) / 2
         lo = limit("annular_ring", v.net, "min")
         if lo is not None and ring < lo:
-            violations.append(f"annular-ring:via[{i}]:ring={ring:.3f}mm<{lo}mm")
+            violations.append(f"annular-ring:via[{i}]:ring={float(ring):.3f}mm<{lo}mm")
     for comp in board.components:
         for pad, bx, by, _ in comp.placed_pads():
             if pad.drill is not None:
@@ -328,7 +328,7 @@ def run_drc(board: Board, pack: RulePack | None = None) -> ValidationReport:
                 ring = (min(pad.w, pad.h) - pad.drill) / 2
                 lo = limit("annular_ring", comp.nets.get(pad.name, ""), "min")
                 if lo is not None and ring < lo:
-                    violations.append(f"annular-ring:{comp.ref}.{pad.name}:ring={ring:.3f}mm<{lo}mm")
+                    violations.append(f"annular-ring:{comp.ref}.{pad.name}:ring={float(ring):.3f}mm<{lo}mm")
     for m in board.mounting_holes:
         holes.append((m.x, m.y, m.drill, m.name))
 
@@ -345,7 +345,7 @@ def run_drc(board: Board, pack: RulePack | None = None) -> ValidationReport:
             for x2, y2, d2, l2 in holes[i + 1:]:
                 gap = math.hypot(x2 - x1, y2 - y1) - (d1 + d2) / 2
                 if gap < hlo:
-                    violations.append(f"hole-to-hole:{l1}<->{l2}:gap={gap:.3f}mm<{hlo}mm")
+                    violations.append(f"hole-to-hole:{l1}<->{l2}:gap={float(gap):.3f}mm<{hlo}mm")
 
     # edge clearance (against outline bbox edges)
     elo = limit("edge_clearance", "", "min")
@@ -364,7 +364,7 @@ def run_drc(board: Board, pack: RulePack | None = None) -> ValidationReport:
                     bx1, by1, bx2, by2 = min(xs), min(ys), max(xs), max(ys)
                 d = min(bx1 - minx, maxx - bx2, by1 - miny, maxy - by2)
             if d < elo:
-                violations.append(f"edge-clearance:{it.label}:d={max(d, 0):.3f}mm<{elo}mm")
+                violations.append(f"edge-clearance:{it.label}:d={float(max(d, 0)):.3f}mm<{elo}mm")
 
     # keepout rule areas (KiCad-map P2): copper intersecting a keepout is a
     # violation — tracks, vias, and copper zones; keepouts never conduct
