@@ -139,6 +139,20 @@ def _far(k, s):
     return (float(hi[0]) + 10, float(lo[1]), float(lo[2]))
 
 
+# Cells that are OUTSIDE ANY EXACT FIELD, permanently. These are not backlog
+# and never will be: under ADR-0019 the refusal IS the finished answer, and
+# counting them as gaps makes the matrix read as 345 achievable cells when it
+# is not. Each entry says why, in terms of the number that would be needed.
+_EXACT_FIELD_BOUNDARY = {
+    ("sphere", "cut box"):
+        "a square prism through a sphere has an arcsin in its volume — not "
+        "algebraic, so no extension of ℚ[π] holds it",
+    ("chamfered box", "chamfer(all)"):
+        "a chamfered box's faces have normals of length √2, so chamfering "
+        "them again offsets a plane by an irrational distance",
+}
+
+
 def probe(k=None) -> dict:
     """Run every operation against every representation; classify each cell."""
     import tempfile
@@ -169,6 +183,10 @@ def probe(k=None) -> dict:
                 row[oname] = {"NotYetImplemented": "refused",
                               "BadInput": "bad-input"}.get(diag, "refused")
                 detail[(sname, oname)] = str(exc)
+                if (sname, oname) in _EXACT_FIELD_BOUNDARY:
+                    # a permanent, correct answer — not a gap to be closed
+                    row[oname] = "exact-field"
+                    detail[(sname, oname)] = _EXACT_FIELD_BOUNDARY[(sname, oname)]
             except NotImplementedError as exc:
                 row[oname] = "refused"
                 detail[(sname, oname)] = str(exc)
@@ -180,7 +198,8 @@ def probe(k=None) -> dict:
             "shapes": list(shapes), "ops": list(ops)}
 
 
-_MARK = {"ok": "✅", "refused": "🚧", "bad-input": "·", "CRASH": "💥", "n/a": "—"}
+_MARK = {"ok": "✅", "refused": "🚧", "bad-input": "·", "CRASH": "💥",
+         "exact-field": "∎", "n/a": "—"}
 
 
 def to_markdown(result: dict) -> str:
@@ -197,11 +216,14 @@ def to_markdown(result: dict) -> str:
     total = sum(tally.values()) or 1
     lines.append("")
     lines.append("Legend: ✅ works · 🚧 honest refusal (capability gap) · "
-                 "· bad-input · 💥 raw crash through the seam (DEFECT) · — n/a")
+                 "· bad-input · 💥 raw crash through the seam (DEFECT) · "
+                 "∎ outside any exact field, permanently · — n/a")
     lines.append("")
     lines.append(f"**Coverage: {tally.get('ok', 0)}/{total} "
                  f"({100 * tally.get('ok', 0) / total:.0f}%) working, "
                  f"{tally.get('refused', 0)} gaps, "
+                 f"{tally.get('exact-field', 0)} at the exact-field "
+                 "boundary (permanent), "
                  f"{tally.get('CRASH', 0)} crashes.**")
     return "\n".join(lines)
 

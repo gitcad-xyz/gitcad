@@ -148,3 +148,27 @@ def test_exact_comparisons_are_not_flagged(tmp_path) -> None:
         "    return lo < x < hi and x != 0 and (x - lo) * (x - hi) <= 0\n",
         encoding="utf-8")
     assert _offenders(src) == []
+
+
+def test_the_exact_field_boundary_is_marked_permanent_not_backlog() -> None:
+    """Two cells are outside ANY exact field and always will be. Under
+    ADR-0019 the refusal IS the finished answer there, so counting them as gaps
+    makes the matrix read as 345 achievable cells when it is 343.
+
+    Naming them costs nothing and stops a future reader — human or agent —
+    spending a day trying to close a hole that is a wall.
+    """
+    from gitcad.bench.capability import _EXACT_FIELD_BOUNDARY, probe
+
+    grid = probe()["grid"]
+    for (shape, op), why in _EXACT_FIELD_BOUNDARY.items():
+        assert grid[shape][op] == "exact-field", (
+            f"{shape}/{op} is no longer classified as a permanent boundary — "
+            "either it was fixed (delete the entry) or the probe regressed")
+        assert why, "a boundary entry must say WHICH number it would need"
+    counts = {}
+    for row in grid.values():
+        for v in row.values():
+            counts[v] = counts.get(v, 0) + 1
+    assert counts.get("CRASH", 0) == 0, "a raw exception through the seam"
+    assert counts["exact-field"] == len(_EXACT_FIELD_BOUNDARY)
