@@ -946,8 +946,9 @@ class RefKernel:
         vol = _exact_volume(shape)
         if isinstance(shape, (Cone, Sphere)):
             shape = AxisStack(shape.cx, shape.cy, [shape])
-        from forgekernel.quadric import FilletedBox, FilletedPrism
-        if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, FilletedBox, FilletedPrism)):
+        from forgekernel.quadric import (FilletedBox, FilletedChamferedBox,
+                                         FilletedPrism)
+        if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, FilletedBox, FilletedPrism, FilletedChamferedBox)):
             cx, cy, cz = shape.centroid_f()
             return _mp(vol, cx, cy, cz)
         c = shape.centroid()
@@ -1078,6 +1079,9 @@ class RefKernel:
         from forgekernel.quadric import FilletedPrism as _FPr
         if isinstance(shape, _FPr):
             return [{"surface": "filleted-prism"}]
+        from forgekernel.quadric import FilletedChamferedBox as _FCB
+        if isinstance(shape, _FCB):
+            return [{"surface": "filleted-chamfered-box"}]
         if isinstance(shape, MiteredSweep):
             return [{"surface": "swept"}]
         if isinstance(shape, DisjointUnion):
@@ -1129,8 +1133,9 @@ class RefKernel:
                         "provenance": shape.provenance},
                 violations=[])
         from forgekernel.quadric import FilletedBox as _FB
+        from forgekernel.quadric import FilletedChamferedBox as _FCB
         from forgekernel.quadric import FilletedPrism as _FP
-        if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, _FB, _FP)):
+        if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, _FB, _FP, _FCB)):
             return ValidationReport(ok=True, checks={"method": "analytic"},
                                     violations=[])
         from forgekernel import body as _B
@@ -1618,6 +1623,8 @@ class RefKernel:
                 out = self._fillet_hollow_box(shape, r)
                 if out is None:
                     out = self._fillet_rect_prism(shape, r)
+                if out is None:
+                    out = self._fillet_chamfered_box(shape, r)
                 if out is not None:
                     return out
             _nope("fillet(non-box)", "K5.2 (general blends)")
@@ -1885,6 +1892,60 @@ class RefKernel:
             return None            # not a shape the exact engine can settle
         try:
             return FilletedPrism(merged, z0, z1 - z0, r)
+        except ValueError as exc:
+            raise KernelError(str(exc), FailureSignature(
+                op="fillet", diagnostic="NotYetImplemented", kernel="ref"))
+
+    def _chamfered_box_spec(self, shape):
+        """``(lo, dims, d)`` when ``shape`` IS ``chamfer(box(dims), d)`` at
+        ``lo``, else None. The setback is INFERRED (top-face inset) and the
+        identification made SOUND the only way that has survived review:
+        rebuild the claimed solid and require the exact symmetric difference
+        to vanish both ways (the ``_is_axis_box`` lesson — a property test can
+        always be satisfied by something that is not the thing)."""
+        from forgekernel import csg
+        from forgekernel.brep import Solid
+        from forgekernel.kernel import chamfer as _fk_chamfer
+
+        lo, hi = shape.bbox()
+        dims = tuple(hi[c] - lo[c] for c in range(3))
+        top = [v for p in shape.polys for v in p.verts if v[2] == hi[2]]
+        if not top:
+            return None
+        d = hi[0] - max(v[0] for v in top)
+        if d <= 0 or any(2 * d >= dims[c] for c in range(3)):
+            return None
+        # cheap exact screen (additive over polys, so NOT sufficient alone)
+        if shape.volume() != (dims[0] * dims[1] * dims[2]
+                              - 2 * d * d * (dims[0] + dims[1] + dims[2])
+                              + 6 * d ** 3):
+            return None
+        try:
+            cand = _fk_chamfer(
+                Solid.box(dims[0], dims[1], dims[2], "cbx").translated(lo), d)
+            if (csg.cut(shape, cand).volume() != 0
+                    or csg.cut(cand, shape).volume() != 0):
+                return None
+        except (ArithmeticError, ValueError, TypeError, IndexError):
+            return None            # not a shape the exact engine can settle
+        return lo, dims, d
+
+    def _fillet_chamfered_box(self, shape, r):
+        """fillet(all) on a chamfered box, or None if ``shape`` is not one —
+        exact in ℚ(√2,√3)[π] (the last #121 cell; biquadratic, one surd wider
+        than the single-d tower). The mathematics, the Steiner/opening
+        decomposition, the per-corner-patch trap and the Monte-Carlo record
+        all live on ``FilletedChamferedBox`` (forge quadric.py), whose guards
+        decide expressibility; a guard failure on a DETECTED chamfered box is
+        an honest named refusal, not a fall-through to "fillet(non-box)"."""
+        from forgekernel.quadric import FilletedChamferedBox
+
+        spec = self._chamfered_box_spec(shape)
+        if spec is None:
+            return None
+        lo, dims, d = spec
+        try:
+            return FilletedChamferedBox(lo, dims, d, r)
         except ValueError as exc:
             raise KernelError(str(exc), FailureSignature(
                 op="fillet", diagnostic="NotYetImplemented", kernel="ref"))

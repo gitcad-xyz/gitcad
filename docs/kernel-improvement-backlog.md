@@ -109,6 +109,16 @@ refuse with "mixed radicals". A general algebraic number field — minimal
 polynomials with resultant-based arithmetic — removes that whole refusal class.
 Assemblies of rotated parts are where this bites in real use.
 
+> **First rung DONE (biquadratic).** `BiSurd` (forge `bisurd.py`) is exact
+> ℚ(√p,√q) for coprime square-free p < q: basis {1, √p, √q, √pq}, the
+> (√p)(√q) = √pq closure, exact structural zero (basis independence), sign by
+> proven isqrt enclosures, division via the conjugate chain. `PiPoly` carries
+> BiSurd coefficients, so ℚ(√2,√3)[π] volumes exist — the field
+> `chamfered box × fillet(all)` needed (see §10). `SurdVal` dunders now defer
+> (`NotImplemented`) instead of silently NESTING a wider exact type in their
+> rational slot — the pre-existing latent bug this work exposed. The general
+> n-radical tower (rotated-assembly booleans) remains open.
+
 ---
 
 ## 3. Geometry capability (the actual roadmap)
@@ -402,10 +412,27 @@ what actually blocks them:
 > refuses downstream). Both new detectors use the same idiom: rebuild the
 > claimed shape, require both exact boolean differences empty.
 >
-> Still open in this family: `chamfered box x fillet(all)` (the blend runs
+> ~~Still open in this family: `chamfered box x fillet(all)` (the blend runs
 > along edges whose faces have √2 normals — needs ℚ[√2][π] carried through
-> a canonical form that can hold it), and `loft x fillet(all)` is a WALL
-> (Gelfond–Schneider, see `_EXACT_FIELD_BOUNDARY`).
+> a canonical form that can hold it)~~ — **CLOSED (340/345, 0 achievable
+> gaps).** The field claim above was measured wrong: the volume is
+> **ℚ(√2,√3)[π]**, biquadratic — √2 rides in on the eroded setback
+> t' = d − (2−√2)r, √3 enters as the chamfer–chamfer edge length (√3/2)t'
+> times its π/3 sweep (cos dihedral = −1/2 exactly, nice by Niven),
+> surfacing as 2√6·π. Landed as `BiSurd` (§2.3) + `FilletedChamferedBox`
+> (forge quadric.py): a FilletedPrism-style REPRESENTATION whose volume is
+> assembled by the Steiner/opening decomposition over the eroded polytope —
+> NEVER per corner patch: the 32 spherical patches individually carry
+> arccos(1/3) / arccos(1/√3), transcendental over every ℚ[√d][π], and cancel
+> only in aggregate to 4π. Probe cell: V = 8040 − 456√2 + (166/3 − 6√2 +
+> 2√6)π = 7557.6867…, MC-verified at three seeds (records in
+> `tests/golden/test_fillet_chamfered_box.py`). Detection in the seam is
+> sound (rebuild + exact symmetric difference); the bridging regime
+> d ≤ (2−√2)r and the thin-face regime X − 2d − (2√2−2)r ≤ 0 refuse by name.
+> Mesh/STEP/entities(edge) refuse honestly through `to_body` (no canonical
+> form yet — it needs sphere-triangle corner patches and two-sweep cylinder
+> bands). `loft x fillet(all)` remains a WALL (Gelfond–Schneider, see
+> `_EXACT_FIELD_BOUNDARY`).
 
 **`sphere x cut cylinder` is the cheapest cell on the board and it has been
 mis-filed.** The probe's tool is `cylinder(1, 100)` translated to the bbox
