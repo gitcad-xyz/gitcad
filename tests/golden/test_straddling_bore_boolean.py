@@ -239,10 +239,38 @@ def test_a_wall_at_half_the_radius_is_exact_in_sqrt3_pi(k) -> None:
     want = PiVal(SurdVal(8980, F(-5, 2), 3), F(-110, 3))
     assert B.volume(B.to_body(out)) == want
     assert B.manifold_violations(B.to_body(out)) == []
-    # the mesh cannot follow an odd twelfth yet; the refusal must say so BY
-    # NAME rather than crash or, worse, quietly mesh the bounding rectangle
-    with pytest.raises(Exception, match="twelfths of a turn"):
-        k.tessellate(out)
+    # #137 CLOSED: this used to pin the K3.7 refusal ("a band spanning 10
+    # twelfths of a turn cannot share a mesh grid with dyadic corner
+    # octants"). The axis now carries a 12·2^d grid whenever a twelfth trim
+    # is present, so the strictly stronger contract replaces the pin: the
+    # mesh must exist, be watertight in DIRECTED edges, carry no degenerate
+    # facet, and enclose a volume that converges on the exact value.
+    exact = float(B.volume(B.to_body(out)))
+    prev_err = None
+    for deflection in (0.5, 0.1, 0.02):
+        m = k.tessellate(out, deflection=deflection)
+        v = m["triangles"] and m["vertices"]
+        use: dict = {}
+        vol6 = 0.0
+        for a, b, c in m["triangles"]:
+            pa, pb, pc = v[a], v[b], v[c]
+            area2 = tuple(
+                (pb[(i + 1) % 3] - pa[(i + 1) % 3]) * (pc[(i + 2) % 3] - pa[(i + 2) % 3])
+                - (pb[(i + 2) % 3] - pa[(i + 2) % 3]) * (pc[(i + 1) % 3] - pa[(i + 1) % 3])
+                for i in range(3))
+            assert sum(x * x for x in area2) > 1e-18, "degenerate facet"
+            vol6 += (pa[0] * (pb[1] * pc[2] - pb[2] * pc[1])
+                     - pa[1] * (pb[0] * pc[2] - pb[2] * pc[0])
+                     + pa[2] * (pb[0] * pc[1] - pb[1] * pc[0]))
+            for e in ((a, b), (b, c), (c, a)):
+                use[e] = use.get(e, 0) + 1
+        unpaired = [e for e, n in use.items() if use.get((e[1], e[0]), 0) != n]
+        assert unpaired == [], f"deflection {deflection}: {len(unpaired)} unpaired"
+        err = abs(vol6 / 6 - exact)
+        assert err < 0.01 * exact
+        if prev_err is not None:
+            assert err <= prev_err * 1.05, "refinement must not diverge"
+        prev_err = err
 
 
 def _vector_area(bd):
