@@ -84,12 +84,23 @@ curved volumes of exactly-rotated bodies, cone chamfers (slant √109), chamfere
 box normals (√2). At least 4 currently-refused cells, and it removes the
 "leaves the field" excuse from a much larger space of user geometry.
 
-### 2.2 Trimmed quadrics at twelfths, not just quarters (~1 day)
+### 2.2 Trimmed quadrics at twelfths, not just quarters
 
-Trimmed bands are exact only where sin/cos ∈ {0, ±1}, i.e. multiples of π/2.
-But sin/cos of π/6 and π/3 live in `ℚ[√3]`, which the kernel **already has**.
-Extending `_quarter_index` / `_arc_quarters` to twelfths widens every trimmed
-surface — bands, octants, tori — for very little work.
+**Corrected: this is not cheap, and it is not independent.** The claim here was
+that because sin/cos of π/6 live in `ℚ[√3]`, which the kernel already has,
+twelfths cost almost nothing. Checking it before building showed otherwise:
+`_band_sweep` (body.py:696) feeds the difference of quarter antiderivatives
+straight into the volume, so an endpoint at a twelfth puts `√3/2` into the
+volume's π **coefficient**. That is `ℚ[√3][π]` — item 2.1 — not `ℚ[π]`.
+
+So 2.1 is a prerequisite, and the order is: field first, then twelfths. With
+2.1 landed the remaining work is real but contained: extend `_quarter_index`,
+`_arc_quarters` and `_quarter_antiderivative` to twelfths, and every trimmed
+surface widens — bands, sphere octants, torus sweeps.
+
+The general lesson, which cost nothing here and would have cost a day of
+rework: a number-field claim is worth checking against the code that consumes
+the value, not just the code that produces it.
 
 ### 2.3 A multi-radical tower (~1 week)
 
