@@ -17,9 +17,21 @@ cross-domain · **[G]** GUI/viewer · **[I]** infra/ecosystem ·
 
 ---
 
-## Where things stand (2026-07-23)
+## Where things stand (2026-07-26)
 
-The from-scratch kernel beats the OCCT wheel on **five measured axes**:
+**Released:** all six packages are live on PyPI at **0.9.6** (`gitcad`,
+`gitcad-core`, `gitcad-mech`, `gitcad-ecad`, `forgekernel`, `forgekernel_rs`).
+A clean `pip install gitcad==0.9.6` scores **327/345 (95%)** on the capability
+matrix (`python -m gitcad.bench.capability --md`) — 16 honest gaps, 2 cells
+permanently outside any exact field, 0 crashes.
+
+**On main, unreleased:** the matrix is **339/345 (98%)** — 2 gaps, 4 cells now
+classified permanent, 0 crashes. gitcad main requires forge main (CI installs
+`forgekernel` from git, not PyPI); the next release must publish forge first.
+
+OCCT is gone entirely (ADR-0020): forge is the sole geometry kernel, and the
+OCCT references below are to its former role as a differential oracle. Before
+the cut, the from-scratch kernel beat the OCCT wheel on **five measured axes**:
 capability (20/20 corpus vs 18/20), aggregate speed (5.5×), curved-
 boolean accuracy, spring accuracy+speed (306×), and SSI branch-
 completeness (finds tangential branches OCCT drops). Stages K1–K6.2
@@ -99,8 +111,9 @@ machinery.
 - Sign-varying rational weights in SSI (rare in practice; low priority).
 
 ### K5.2 / K4.2 — blend & offset edges **[K]**
-- Fillets on arbitrary straight prism edges (not just boxes) — same
-  quarter-cylinder math, general edge frames.
+- ✅ `fillet(all)` on rectilinear right prisms (`FilletedPrism`, exact in
+  ℚ[π]) — landed on main, unreleased. Arbitrary (non-rectilinear) prism
+  edge frames still open.
 - Two-edge corner blends (the genuinely non-spherical patch) — likely
   certified rather than exact.
 - Variable-radius fillet along an edge (linear r(t): exact volume by
@@ -117,11 +130,11 @@ bbox touches. A real BSP change; do it in Rust where the engine lives.
 
 ## Horizon 2 — Near (platform features on top of the kernel)
 
-### Kernel promotion **[K][I]** — **✅ auto-backend done**
-`forge` is now the *default* via the `auto` backend (forge-first, OCCT
-fallback on honest refusal; builds 100% of the corpus with the exact
-kernel in front). Remaining: publish `forgekernel` wheels on PyPI
-(**gated**: PyPI name approval still pending).
+### Kernel promotion **[K][I]** — **✅ done, then superseded**
+The `auto` backend (forge-first, OCCT fallback) shipped, and then
+ADR-0020 removed OCCT outright — `forge` is the *only* kernel; a
+refusal is now surfaced honestly instead of backfilled. `forgekernel`
+and `forgekernel_rs` are published on PyPI (0.9.6).
 
 ### Native STEP **export** from forge **[K]** — **✅ done**
 `stepio.write_step_planar_solid`: AP214 planar-solid export with full
@@ -204,8 +217,8 @@ change, requires human approval before implementation.*
   synthetic reports.
 
 ### Ecosystem **[I]**
-- `pip install gitcad` (**gated: PyPI approval**) and `forgekernel`
-  wheels (win/mac/linux CI builds via maturin).
+- ✅ `pip install gitcad` is live — six packages on PyPI at 0.9.6,
+  including `forgekernel` and the `forgekernel_rs` native build.
 - Docs site: task-oriented guides (import your SW parts, route a board,
   verify a release), kernel whitepaper from the bench data (the
   five-axes story is publishable).
@@ -227,13 +240,14 @@ change, requires human approval before implementation.*
 
 | item | needs |
 |---|---|
-| PyPI publication (`gitcad`, `forgekernel`) | name approval (pending since 2026-07-22) |
+| ~~PyPI publication (`gitcad`, `forgekernel`)~~ | done — all six packages live at 0.9.6 |
+| release tags (`vX.Y.Z` publish trigger) | user call, per release |
 | Cloudflare relay (ADR-0012) | user CF account |
 | Night Shift autonomous runs | explicit opt-in + quota |
 | ngspice live simulation | install approval |
 | IPC-D-356 tester conformance | physical hardware |
 | cross-kernel identity redesign | ADR-0003 human sign-off |
-| 1.0 version cut | user call (policy: hold at 0.7.x) |
+| 1.0 version cut | user call (policy: hold at 0.x patch bumps) |
 
 ---
 

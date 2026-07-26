@@ -58,11 +58,14 @@ configured. Roles are detected by file content.
 
 ```
 pip install gitcad            # core, mechanical, electrical, MCP server, native kernel
-pip install gitcad[occt]      # add the optional alternative kernel backend
 ```
 
-The mechanical kernel uses exact rational arithmetic; its native build is
-installed by default on common platforms. The test suite also runs with no
+The geometry kernel is [forge](https://github.com/gitcad-xyz/forge)
+(`forgekernel`), the project's own exact-arithmetic kernel and the only one
+(ADR-0020); its native build is installed by default on common platforms.
+Geometric and topological decisions use exact rational arithmetic or certified
+intervals, and an operation the kernel cannot do exactly refuses by name
+rather than approximating. The test suite also runs with no
 geometry kernel installed — a null backend covers identity, documents,
 netlists, checks, and merge; tests needing geometry are marked and skipped
 otherwise.
@@ -71,11 +74,12 @@ otherwise.
 
 Mechanical — primitives and booleans; fillet, chamfer, shell; extrude, revolve,
 loft, sweep, mirror; sketch planes and sketch-on-face; an authoring-time
-constraint solver; holes with counterbore/countersink; patterns; sheet metal;
+constraint solver; holes with counterbore (countersink currently refuses,
+pending the cone-cut stage); patterns; sheet metal;
 weldments; stable entity identity; exact mass properties; STEP/STL/DXF;
 dimensioned drawings (third-angle and section views, GD&T, BOM and balloons);
 exploded views; mate checking and solving; exact interference with clash
-budgets; feature recognition from STEP; parametric part import.
+budgets; feature recognition from STEP.
 
 Electrical — schematic capture with typed pins and sheet authoring;
 hierarchical sheets, buses, and multi-sheet systems; ERC, electrical envelopes,
@@ -96,5 +100,4 @@ follow.
 
 ## License
 
-Apache-2.0. The optional geometry backend it can bind is
-LGPL-2.1-with-exception; see `NOTICE`.
+Apache-2.0.

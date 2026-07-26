@@ -31,11 +31,15 @@ regenerable — no more discovering fundamentals by accident.
 
 ## Current state
 
-**290/345 (84.1%) working · 55 honest gaps · 0 crashes.**
-(218/345 when this document was written; 236 after ADR-0021 landed;
-247 after transforms and STEP moved to the canonical form; 290 after the
-Cone and RevolveSolid converters, the native body text format, and
-chamfer/shell on curved solids.)
+**339/345 (98%) working · 2 honest gaps · 4 permanent (outside any exact
+field) · 0 crashes** — main, 2026-07-26, unreleased. The released 0.9.6
+wheels score **327/345 (95%)** — 16 gaps, 2 permanent, 0 crashes.
+
+(Progression: 218/345 when this document was written; 236 after ADR-0021
+landed; 247 after transforms and STEP moved to the canonical form; 290 after
+the Cone and RevolveSolid converters, the native body text format, and
+chamfer/shell on curved solids; 327 at the 0.9.6 release; 339 after
+the trimmed-quadric, torus, and Q[√d] exact-field work on main.)
 
 Rules this establishes:
 
@@ -69,33 +73,40 @@ Transforms, STEP, the native text format, chamfer and closed shell all route
 through the canonical B-rep now, and the `Cone` and `RevolveSolid` converters
 landed. What is left is no longer plumbing.
 
-### What the last 55 cells actually need
+### What the last 55 cells actually needed — and what is left
 
-The remaining gaps are **three missing geometry types**, not fifty-five
-missing features. Nothing here is closable by another fallback.
+The 55 gaps were **three missing geometry types**, not fifty-five missing
+features, and that diagnosis held: trimmed quadric faces, torus surfaces, and
+the shipped conic-section cases all landed (on main, unreleased), taking the
+matrix from 290 to 339. The predictions that paid off:
 
-| # cells | blocked on | why it is real work |
-|---|---|---|
-| 21 | **conic-section curves** (K2.2) | cutting a quadric with a plane produces an ellipse / parabola / hyperbola. The canonical curve set is `Line | Circle`; a general plane–cylinder edge is none of those, and faceting it would be exactly the approximation the charter forbids. |
-| 14 | **torus surfaces** (K5.2) | filleting a lathed rim sweeps a torus. A `RevolveSolid` profile is line segments only, so the fillet arc has nowhere to live. |
-| ~10 | **trimmed quadric faces** (`RoundedBox`, cone/sphere chamfer+shell) | a rounded box is quarter-cylinders and octant-spheres — partial bands, with loops that mix arcs and lines on a CURVED surface. |
+- **Trimmed quadrics at 90° are exact** (sin/cos of a right angle are 0 and
+  ±1) — rounded boxes, blind bores, counterbores, and composite shells now
+  build.
+- **Torus volume is exact in ℚ[π]** (Pappus: V = 2πR·A) — filleted rims,
+  napkin rings, and torus-aware erosion for shells landed, and torus bodies
+  are no longer exempt from the edge-pairing audit.
+- **Widening the exact field beat faceting.** `F()` now admits ℚ[√d] and
+  ℚ[√d][π], which is what unblocked cone shell/chamfer, the mitred sweep, and
+  the straddling-bore cuts.
 
-The good news in each row:
+What remains, per the matrix on main (2 honest gaps, 4 permanent):
 
-- **Conic sections stay exact.** An ellipse from a plane–cylinder cut has
-  rational centre and axes when both operands are rational, so `Ellipse` is a
-  ℚ-parameterised curve like `Circle` — no new number field, and the
-  divergence-theorem volume terms extend the same way the cone's did.
-- **Torus volume is exact in ℚ[π]** (Pappus: V = 2πR·A), so a filleted rim
-  costs a surface type, not a number field.
-- **Trimmed quadrics at 90° are exact**, because sin/cos of a right angle are
-  0 and ±1. A rounded box is the tractable case; arbitrary trims are not, and
-  should keep refusing.
+| cell | status |
+|---|---|
+| cone × cut cylinder | gap (K2.2) — the general plane/quadric–cone intersection curve |
+| chamfered box × fillet(all) | gap — fillet of an already-chamfered edge network |
+| sphere × cut box | permanent — the intersection curve is outside any exact field |
+| cone × fillet(all) | permanent — same |
+| chamfered box × chamfer(all) | permanent — same |
+| loft × fillet(all) | permanent — a wall, not a gap |
 
-The order that pays: **trimmed quadrics → torus → conic sections**, cheapest
-and least risky first. Each one should land with its own oracle (analytic
-volume AND Monte Carlo) before the next starts — every silent wrong-volume bug
-this kernel has had was caught by an oracle, never by the suite.
+"Permanent" is a classification, not a defeat: those cells refuse by name
+rather than approximate, per the charter.
+
+Each landing carried its own oracle (analytic volume AND Monte Carlo) — every
+silent wrong-volume bug this kernel has had was caught by an oracle, never by
+the suite.
 
 ### Deliberately deferred
 - **engrave** — text strokes rotate by arbitrary angles, which leave ℚ[√d]
