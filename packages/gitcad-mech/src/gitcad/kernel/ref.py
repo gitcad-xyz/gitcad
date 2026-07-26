@@ -52,6 +52,33 @@ def _exact_volume(shape) -> float:
         return v.to_float() if hasattr(v, "to_float") else float(v)
 
 
+def _mesh_tears(canon) -> int:
+    """Count unpaired directed edges in a coarse mesh of ``canon``.
+
+    Floats are legal here — this is meshing (ADR-0019). The count decides only
+    whether to refuse; no geometry is derived from it.
+
+    A closed, correctly-wound triangle mesh uses every directed edge (a, b)
+    exactly as often as its reverse (b, a). Anything else is a hole, a doubled
+    face, or a seam that did not close. Returns 0 when the shape cannot be
+    meshed at all — that is a different failure, reported by whoever asks for
+    the mesh, and not something to convert into a bogus tear count here.
+    """
+    from collections import Counter
+
+    from forgekernel import body as B
+
+    try:
+        mesh = B.tessellate(canon, 0.8)
+    except Exception:                           # noqa: BLE001 - see docstring
+        return 0
+    seen: Counter = Counter()
+    for tri in mesh.get("triangles", ()):
+        for a, b in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])):
+            seen[(a, b)] += 1
+    return sum(1 for (a, b), n in seen.items() if seen.get((b, a), 0) != n)
+
+
 def _audited(body, op: str):
     """Check the ANSWER before returning it. The whole burn-down in one rule.
 
@@ -115,6 +142,24 @@ def _audited(body, op: str):
     if defect is not None and any(d != 0 for d in defect):
         bad.append("faces are not consistently oriented — the shell's vector "
                    f"areas sum to {tuple(float(d) for d in defect)}, not zero")
+    # The MESH, coarsely. The three checks above are all exact and all reason
+    # about the b-rep; none of them looks at what gets tessellated, and a body
+    # can satisfy every one of them while producing a torn STL — the #123
+    # prototype does exactly that (exact volume, clean pairing, 87 non-manifold
+    # directed edges) because the trimmed-band mesher meshes the (theta,z)
+    # BOUNDING RECTANGLE rather than the real domain. A right number behind a
+    # wrong artifact is still a wrong answer to whoever prints the part.
+    #
+    # Deliberately COARSE (deflection 0.8): this is a topology question, not an
+    # accuracy one, and a torn mesh is torn at any resolution. Measured across
+    # the corpus: 15/15 clean, 1.9 ms average — cheap enough for every op.
+    #
+    # Floats are legal here — this is meshing (ADR-0019). No exact predicate
+    # depends on the result; it only decides whether to REFUSE.
+    torn = _mesh_tears(subject)
+    if torn:
+        bad.append(f"the mesh is not watertight — {torn} directed edges are "
+                   "unpaired at a coarse deflection")
     if bad:
         raise GeometryInvalidError(
             f"{op} built an invalid body — refusing to return it: "
