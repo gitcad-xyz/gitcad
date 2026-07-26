@@ -904,7 +904,16 @@ class RefKernel:
 
     def _mass_props(self, shape) -> dict[str, float]:
         from forgekernel import body as B
+        from forgekernel.brep import Solid as _Solid
 
+        if isinstance(shape, _Solid) and not shape.polys:
+            # The EMPTY solid — cut(a, a), cut by a superset, a disjoint
+            # intersect — is an ANSWER, not a failure (#136). Volume 0 is the
+            # truth and gets reported; the centroid of the empty set does not
+            # exist, so those fields are NaN rather than a fabricated
+            # location, and `empty` says so in data.
+            nan = float("nan")
+            return _mp(0.0, nan, nan, nan, empty=True)
         if isinstance(shape, B.Body):
             # exact volume, and a real centre of mass from the same per-face
             # cone decomposition. This used to substitute the BBOX CENTRE and
@@ -947,7 +956,13 @@ class RefKernel:
     def measure(self, shape) -> dict[str, float]:
         from forgekernel.quadric import AxisStack, Cone, Sphere
         from forgekernel import body as B
+        from forgekernel.brep import Solid as _Solid
 
+        if isinstance(shape, _Solid) and not shape.polys:
+            # the empty solid (#136): zero volume, zero extent in every axis —
+            # asking self.bbox() would refuse (it has no location), and letting
+            # min() raise over no vertices was a raw crash through the seam
+            return {"volume": 0.0, "dx": 0.0, "dy": 0.0, "dz": 0.0}
         if isinstance(shape, B.Body):                 # ADR-0021 canonical form
             (x0, y0, z0), (x1, y1, z1) = B.bbox(shape)
             return {"volume": float(B.volume(shape)),
@@ -966,7 +981,21 @@ class RefKernel:
 
     def bbox(self, shape):
         from forgekernel import body as B
+        from forgekernel.brep import Solid as _Solid
 
+        if isinstance(shape, _Solid) and not shape.polys:
+            # The empty solid contains no points, so it has no bounding box —
+            # inventing one would be a wrong number wearing coordinates, and
+            # the old behaviour (min() over no vertices) was a raw ValueError
+            # through the seam. Refuse structurally instead (#136).
+            raise KernelError(
+                "the empty solid has no bounding box — it contains no points",
+                FailureSignature(op="bbox", diagnostic="EmptySolid",
+                                 kernel="ref"),
+                stage="bbox", predicate="solid_is_nonempty",
+                measured={"polygons": 0},
+                remedy="check mass_props()['volume'] (or its 'empty' flag) "
+                       "before asking where a solid is")
         if isinstance(shape, B.Body):
             return B.bbox(shape)
         from forgekernel.quadric import AxisStack, Cone, Sphere
@@ -1124,6 +1153,16 @@ class RefKernel:
                 checks={"method": "exact-composite",
                         "bores": len(shape.bores)},
                 violations=list(bad))
+        if not shape.polys:
+            # the EMPTY solid is exactly what an annihilating boolean claims
+            # to produce (#136) — reporting its emptiness as a violation was a
+            # refusal standing in for an answer. The pardon is for the empty
+            # solid ONLY: a degenerate solid still carrying polygons but no
+            # volume falls through and keeps failing below.
+            return ValidationReport(ok=True,
+                                    checks={"method": "exact-line-coverage",
+                                            "polygons": 0, "empty": True},
+                                    violations=[])
         bad = shape.watertight_violations()
         if shape.volume() <= 0:
             bad = list(bad) + ["nonpositive-volume"]
