@@ -14,6 +14,10 @@ from fractions import Fraction
 
 import pytest
 
+# The base suite runs with NO KERNEL INSTALLED (CLAUDE.md). Everything below
+# needs real geometry, so skip the module rather than break collection.
+pytest.importorskip("forgekernel")
+
 from forgekernel.brep import Solid
 from forgekernel.quadric import Cone, Cyl, DrilledSolid, RevolveSolid
 from gitcad.kernel.ref import RefKernel

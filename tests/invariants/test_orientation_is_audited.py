@@ -23,6 +23,10 @@ from __future__ import annotations
 
 import pytest
 
+# The base suite runs with NO KERNEL INSTALLED (CLAUDE.md). Everything below
+# needs real geometry, so skip the module rather than break collection.
+pytest.importorskip("forgekernel")
+
 from forgekernel import body as B
 from forgekernel.brep import Solid
 from forgekernel.quadric import Cyl

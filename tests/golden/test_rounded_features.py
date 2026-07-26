@@ -20,6 +20,10 @@ from collections import defaultdict
 
 import pytest
 
+# The base suite runs with NO KERNEL INSTALLED (CLAUDE.md). Everything below
+# needs real geometry, so skip the module rather than break collection.
+pytest.importorskip("forgekernel")
+
 from forgekernel.quadric import Cyl, RoundedBox
 from gitcad.errors import KernelError
 from gitcad.kernel.ref import RefKernel
