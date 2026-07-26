@@ -420,9 +420,37 @@ irrational height needs surd coordinates in the canonical form:
 
 * a **napkin ring** — bore circles at z = ±√(R²−r²)  (#122's through case)
 * a **blind bore in a sphere** — the probe's actual `sphere x cut cylinder`
-* **cone x shell** and **cone x fillet(all)** — the offset of a slanted profile
-  lands at an irrational height by construction
+* **cone x shell** and **cone x chamfer(all)** — the offset (or the bevel
+  setback) of a slanted profile lands at an irrational height by construction
 * **torus-eroded blind bores** (#120) — same reason
+
+> **CORRECTION.** This list used to name **cone x fillet(all)** where it now
+> names `chamfer(all)`, and the two are not the same problem at all. Widening
+> the number field closes the chamfer and CANNOT close the fillet.
+>
+> * **chamfer** sets a corner back by `d` along each edge, i.e. `d/L` with
+>   `L = √(dr²+dz²)`. A rational over a surd is still in ℚ[√e] — `1/√e = √e/e`
+>   — so ONE slant costs one radical and the answer is exact. Closed; the only
+>   real gate is TWO slants with different square-free parts (biquadratic).
+> * **fillet** revolves an ARC. ∮r²dz over an arc of centre radius `c_r`
+>   carries the arc's TURN ANGLE linearly, coefficient `c_r R²`, and a blend's
+>   centre is `R` inside the material so `c_r ≠ 0` always. The turn is `π − φ`,
+>   so the answer is in ℚ[√d][π] **iff φ is a rational multiple of π**. Rational
+>   profile coordinates make `tan φ` rational, and Niven's theorem then forces
+>   `tan φ ∈ {0, ±1, ∞}`: right angles and 45°/135° corners, and nothing else,
+>   ever. `cone(6, 2, 10)` has `tan φ = 5/2`, needing `arctan(5/2)` —
+>   transcendental by Lindemann. That cell is now an `_EXACT_FIELD_BOUNDARY`
+>   entry, not backlog, and no type-system work will move it.
+>
+> The genuine fillet backlog left over is narrow and worth naming: the
+> **45°/135° lathe corner** and the **right angle between two diagonal edges**
+> both turn through a rational multiple of π and both ARE expressible in
+> ℚ[√d][π]; `_fillet_profile` refuses them by name and does not build them.
+>
+> **Newly exposed by the chamfer close:** `write_step_body` cannot yet emit a
+> `RevolveSolid` with ℚ[√d] coordinates — it refuses honestly (structured
+> `NotYetImplemented`, no crash) with the same `Fraction()` coercion
+> `TypeError` shown above, wrapped at the seam. Same root cause, same fix.
 
 So "add a `to_body` converter for NapkinRing" is not the next increment. The
 next increment is **making `Body` exact-field-generic**: coordinates typed as

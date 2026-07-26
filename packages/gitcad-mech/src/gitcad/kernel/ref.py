@@ -1571,12 +1571,32 @@ class RefKernel:
 
         A 45° cut on a lathed rim sweeps a cone frustum, so the chamfered
         solid is still a solid of revolution — no new surface type, no
-        approximation, and the metrics stay exact in ℚ[π]. Only CONVEX
-        corners are cut (a concave one is an internal step, where a chamfer
-        would add material rather than remove it), and never a corner on the
-        axis, which is not an edge of the solid at all.
+        approximation, and the metrics stay exact. Only CONVEX corners are cut
+        (a concave one is an internal step, where a chamfer would add material
+        rather than remove it), and never a corner on the axis, which is not an
+        edge of the solid at all.
+
+        WHICH FIELD THE ANSWER LIVES IN. The corner is set back by ``d`` ALONG
+        each adjacent edge, so the new vertex is ``p ± d·(dr, dz)/L`` with
+        ``L = √(dr²+dz²)``. This used to demand a RATIONAL ``L``
+        (``_rational_sqrt``), which refused every slanted profile — a cone's
+        (−4, 10) slant has ``L = 2√29``. That was one step too strong. The
+        setback ``d/L`` is a rational over a surd, and ℚ[√e] is a FIELD:
+        ``1/√e = √e/e`` is always back inside it. ONE slant therefore costs
+        exactly one radical and the whole chamfered profile stays in ℚ[√e],
+        which ``F()`` carries through the B-rep untouched (ADR-0019 — these are
+        exact values, not floats).
+
+        What is genuinely out of reach is TWO slants whose lengths have
+        different square-free parts: the profile then needs the biquadratic
+        ℚ[√d₁, √d₂], which ``SurdVal`` does not hold, and it refuses by name
+        rather than letting ``SurdVal`` raise a bare ``ValueError`` through the
+        seam. This is the same gate ``_gate_slanted_profile`` applies to the
+        shell path, for the same reason.
         """
+        from forgekernel.body import _as_fraction
         from forgekernel.quadric import RevolveSolid
+        from forgekernel.surd import exact_sqrt
 
         prof, cx, cy = self._lathe_profile(shape)
         if prof is None:
@@ -1585,27 +1605,59 @@ class RefKernel:
         area2 = sum(prof[i][0] * prof[(i + 1) % n][1]
                     - prof[(i + 1) % n][0] * prof[i][1] for i in range(n))
         turn = 1 if area2 > 0 else -1
-        out = []
+
+        # PASS ONE: which corners are cut, and what radicals they cost. The
+        # field has to be settled for the WHOLE profile before any vertex is
+        # emitted — deciding it corner by corner would build half a profile in
+        # ℚ[√29] and then discover the next corner wants ℚ[√5].
+        cuts: dict[int, tuple] = {}
+        radicals: set[int] = set()
         for i in range(n):
             p0, p1, p2 = prof[i - 1], prof[i], prof[(i + 1) % n]
             a = (p1[0] - p0[0], p1[1] - p0[1])
             b = (p2[0] - p1[0], p2[1] - p1[1])
             cross = a[0] * b[1] - a[1] * b[0]
-            la2, lb2 = a[0] ** 2 + a[1] ** 2, b[0] ** 2 + b[1] ** 2
+            # multiplication, never `** 2`: SurdVal has no `__pow__`, and an
+            # already-surd profile (a chamfered cone re-chamfered) would die
+            # with a bare TypeError out of the seam
+            la2 = a[0] * a[0] + a[1] * a[1]
+            lb2 = b[0] * b[0] + b[1] * b[1]
             if p1[0] == 0 or cross * turn <= 0 or not la2 or not lb2:
-                out.append(p1)
                 continue
             if d * d * 4 > la2 or d * d * 4 > lb2:
                 _nope("chamfer(distance exceeds half the profile edge)", "K5.2")
-            from forgekernel.body import _rational_sqrt
+            qa, qb = _as_fraction(la2), _as_fraction(lb2)
+            if qa is None or qb is None:
+                # the profile is ALREADY in ℚ[√e] and this edge's squared
+                # length did not come back rational, so its length is a root
+                # of a quartic — outside SurdVal either way
+                _nope("chamfer(profile edge whose squared length has left ℚ)",
+                      "K3.1 (a bigger number field)")
+            ka, kb = exact_sqrt(qa), exact_sqrt(qb)
+            radicals.update(r for r in (getattr(ka, "d", 1),
+                                        getattr(kb, "d", 1)) if r != 1)
+            cuts[i] = (a, b, ka, kb)
+        if len(radicals) > 1:
+            names = ", ".join(f"√{r}" for r in sorted(radicals))
+            _nope(f"chamfer(two different slant radicals in one lathe "
+                  f"profile: {names})", "K3.1 (a bigger number field)",
+                  predicate="one_radical_per_profile",
+                  measured={"radicals": sorted(radicals)},
+                  remedy=("the chamfered profile would live in ℚ[√d₁, √d₂], "
+                          "which is biquadratic; make the slants share a "
+                          "taper, or give one a Pythagorean (rational-length) "
+                          "slope"))
 
-            ka = _rational_sqrt(la2)
-            kb = _rational_sqrt(lb2)
-            if ka is None or kb is None:
-                _nope("chamfer(profile edge with irrational length)", _K2)
+        out = []
+        for i in range(n):
+            if i not in cuts:
+                out.append(prof[i])
+                continue
+            p1 = prof[i]
+            a, b, ka, kb = cuts[i]
             out.append((p1[0] - a[0] * d / ka, p1[1] - a[1] * d / ka))
             out.append((p1[0] + b[0] * d / kb, p1[1] + b[1] * d / kb))
-        return RevolveSolid(out, cx, cy)
+        return _audited(RevolveSolid(out, cx, cy), "chamfer(lathe profile)")
 
     def chamfer(self, shape, edges, distance):
         from forgekernel.kernel import chamfer as fk_chamfer
@@ -2449,7 +2501,32 @@ def _fillet_profile(prof, r):
     Only right angles between axis-aligned edges — the tangent points and the
     arc centre are then rational, and revolving the arc sweeps exactly a
     QUARTER of a torus tube, which is what keeps the volume in ℚ[π].
+
+    WHY THE RIGHT ANGLE IS NOT A CONVENIENCE. Revolving an arc of radius R
+    about the axis contributes, to ∮r²dz,
+
+        ∫(c_r + R cos t)² · R cos t dt
+          = R c_r² sin t + c_r R² (t + sin t cos t) + R³(sin t − sin³t/3)
+
+    and that lone ``t`` is the whole story: the volume carries the arc's TURN
+    ANGLE linearly, with coefficient ``c_r R²``. A fillet's arc centre sits a
+    distance ``R`` inside the material, so ``c_r ≠ 0`` always (the one family
+    where it vanishes is an arc centred ON the axis — a sphere's meridian,
+    which is why ``contour_r2_dz`` takes those and only those). The turn angle
+    is ``π − φ`` for an interior angle ``φ``, so the answer is in ℚ[√d][π] iff
+    ``φ`` is a rational multiple of π.
+
+    With rational profile coordinates every edge has rational slope, so
+    ``tan φ`` is rational — and by Niven's theorem a rational tangent at a
+    rational multiple of π forces ``tan φ ∈ {0, ±1, ∞}``. Right angles and
+    45°/135° corners, and nothing else, ever. Every other lathe corner needs
+    ``arctan(p/q)``, which is transcendental by Lindemann and which no
+    extension of ℚ[√d][π] holds; those refusals are the exact-field boundary,
+    not backlog. (ADR-0019: the floats below appear only inside refusal text,
+    never in a decision.)
     """
+    from forgekernel.body import _as_fraction as _as_fraction_rz
+
     prof = _drop_collinear_2d(prof)
     n = len(prof)
     area2 = _signed_area2(prof)
@@ -2462,8 +2539,46 @@ def _fillet_profile(prof, r):
         cross = a[0] * b[1] - a[1] * b[0]
         if p1[0] == 0 or cross * turn <= 0:
             continue                       # on the axis, or concave
-        if (a[0] and a[1]) or (b[0] and b[1]) or a[0] * b[0] + a[1] * b[1] != 0:
-            _nope("fillet(non-right-angle lathe corner)", "K5.2")
+        # cos φ and sin φ share the denominator |a||b|, so their NUMERATORS
+        # alone decide tan φ — exactly, over ℚ, with no root taken.
+        cosnum = -(a[0] * b[0] + a[1] * b[1])
+        sinnum = abs(cross)
+        diagonal = bool(a[0] and a[1]) or bool(b[0] and b[1])
+        # `tan φ ∈ ℚ` is what Niven's theorem needs and what the message
+        # quotes. A profile ALREADY in ℚ[√d] — a chamfered cone handed back
+        # to fillet — has an algebraic tangent instead, so there is no ratio
+        # to name and the ℚ-only argument does not apply. Refuse there too,
+        # by a different name: formatting a Fraction from a SurdVal threw a
+        # bare TypeError straight through the seam.
+        qcos, qsin = _as_fraction_rz(cosnum), _as_fraction_rz(sinnum)
+        if qcos is None or qsin is None:
+            _nope("fillet(lathe corner whose tangent has left ℚ: the profile "
+                  "already carries a radical, so Niven's rational-tangent "
+                  "argument does not settle the turn angle)", "K5.2")
+        cosnum, sinnum = qcos, qsin
+        if cosnum != 0 and sinnum != abs(cosnum):
+            import math as _math
+
+            tan_phi = Fraction(sinnum, cosnum)
+            _nope(f"fillet(lathe corner with tan φ = {tan_phi}: its arc turns "
+                  f"through π−arctan({tan_phi}), and the revolved volume "
+                  f"carries that angle linearly, so the answer needs "
+                  f"arctan({tan_phi}) — transcendental, outside every "
+                  f"ℚ[√d][π])", "K5.2",
+                  predicate="lathe_corner_angle_is_a_rational_multiple_of_pi",
+                  measured={"corner_rz": [float(p1[0]), float(p1[1])],
+                            "tan_phi": [tan_phi.numerator,
+                                        tan_phi.denominator],
+                            "phi_deg": float(_math.degrees(
+                                _math.atan2(float(sinnum), float(cosnum))))},
+                  remedy=("only 90° and 45°/135° lathe corners have a turn "
+                          "angle in ℚ·π (Niven); chamfer this rim instead — "
+                          "a bevel is exact in ℚ[√d] for any slant"))
+        if cosnum != 0 or diagonal:
+            _nope("fillet(45°/135° lathe corner, or a right angle between two "
+                  "diagonal edges: the turn IS a rational multiple of π and "
+                  "the blend IS expressible in ℚ[√d][π] — the sweep is simply "
+                  "not built yet)", "K5.2")
         la = abs(a[0]) if a[0] else abs(a[1])
         lb = abs(b[0]) if b[0] else abs(b[1])
         if 2 * r > la or 2 * r > lb:

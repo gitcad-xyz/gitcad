@@ -150,6 +150,11 @@ _EXACT_FIELD_BOUNDARY = {
     ("chamfered box", "chamfer(all)"):
         "a chamfered box's faces have normals of length √2, so chamfering "
         "them again offsets a plane by an irrational distance",
+    ("cone", "fillet(all)"):
+        "a fillet arc off the axis contributes its TURN ANGLE linearly to "
+        "∮r²dz; this cone's rim turns through π−arctan(5/2), and arctan(5/2) "
+        "is transcendental (Lindemann) — by Niven only 90° and 45°/135° lathe "
+        "corners have a turn angle in ℚ·π at all",
 }
 
 
