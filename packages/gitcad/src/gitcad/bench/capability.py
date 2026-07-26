@@ -155,6 +155,14 @@ _EXACT_FIELD_BOUNDARY = {
         "∮r²dz; this cone's rim turns through π−arctan(5/2), and arctan(5/2) "
         "is transcendental (Lindemann) — by Niven only 90° and 45°/135° lathe "
         "corners have a turn angle in ℚ·π at all",
+    ("cone", "cut box"):
+        "the tool wall's crossing angle arccos(2/r(z)) varies with z on the "
+        "slant and is INTEGRATED, emitting the constant ln(1+√2) = arcsinh(1): "
+        "removed V = 40 − (20/3)√2 − (5/3)π − (20/3)·ln(1+√2), and by Baker "
+        "1, iπ, ln(1+√2) are independent over the algebraic numbers, so V lies "
+        "outside every ℚ[√d][π] taken linearly in π (and outside every "
+        "algebraic extension of ℚ[π] under Schanuel) — a logarithm is not a "
+        "surd times π",
     ("loft", "fillet(all)"):
         "a fillet's toroidal patch contributes its SWEEP ANGLE linearly to "
         "the volume; this loft's slanted faces meet the caps at dihedrals "

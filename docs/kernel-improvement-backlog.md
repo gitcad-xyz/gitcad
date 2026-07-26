@@ -354,6 +354,12 @@ what actually blocks them:
 
     bored boss / counterbore  x cut box   #123 (analysis in section 9)
     cone                      x cut box   #123, same family
+                                          ^ WRONG, and now CLOSED as a wall, not a gap: the
+                                            crossing angle arccos(2/r(z)) varies with z and is
+                                            integrated, emitting ln(1+√2) — removed V =
+                                            40 − (20/3)√2 − (5/3)π − (20/3)·ln(1+√2), outside
+                                            every ℚ[√d][π] by Baker. In _EXACT_FIELD_BOUNDARY
+                                            (capability.py); matrix denominator −1.
     bored boss / counterbore / drilled(blind) / shelled box  x shell   #120
     cone                      x shell     K4.2 slanted lathe profile
     chamfered box / loft / planar prism / shelled box  x fillet(all)   #121
