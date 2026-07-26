@@ -27,9 +27,15 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# Set from the measured 468 with headroom. If a legitimate change drops the
-# count below this, that is a conversation, not a number to quietly lower.
-FLOOR = 400
+# Set from a FAITHFUL null run (339 passing, 574 deselected). An earlier draft
+# read 468 and I nearly enshrined it — that number came from a simulation that
+# only flipped a flag while the kernel stayed importable, so tests which should
+# have failed quietly passed. The floor is only as honest as the run it is
+# measured from; lowering it to match reality is the correction, not a retreat.
+#
+# If a legitimate change drops the count below this, that is a conversation,
+# not a number to quietly lower again.
+FLOOR = 300
 
 
 @pytest.mark.invariant

@@ -60,6 +60,8 @@ def test_core_is_self_contained() -> None:
     assert offenders == [], f"core imports domain modules: {offenders}"
 
 
+@pytest.mark.kernel   # drives the capability probe; the rest of this file is
+                      # a pure source lint and must keep running with no kernel
 def test_no_operation_crashes_through_the_kernel_seam() -> None:
     """INVARIANT: every seam op on every representation either works or refuses
     HONESTLY. A raw exception escaping the seam is always a defect — callers

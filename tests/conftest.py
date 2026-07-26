@@ -15,6 +15,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import pathlib
+import sys
 
 import pytest
 
@@ -53,6 +54,13 @@ def _have_kernel() -> bool:
     A check you cannot reproduce is a check you will not fix.
     """
     if os.environ.get("GITCAD_FORCE_NULL_KERNEL") == "1":
+        # Make the import genuinely FAIL, not merely flip a flag. Flipping the
+        # flag alone was an unfaithful reproduction: it skipped the marked
+        # tests, while unmarked ones still imported the installed kernel and
+        # passed locally, then errored on CI where it really is absent. A
+        # simulation that is easier to satisfy than reality is worse than none.
+        for _m in ("forgekernel", "forgekernel_rs"):
+            sys.modules[_m] = None                    # type: ignore[assignment]
         return False
     try:
         return importlib.util.find_spec("forgekernel") is not None
@@ -60,15 +68,45 @@ def _have_kernel() -> bool:
         return False
 
 
-# The derived rule scans source for `forgekernel` / `get_kernel`. It CANNOT see
-# these: they reach geometry through `Document`, which resolves a kernel
-# internally, so the module never names one. Listed explicitly rather than
-# widening the rule to `Document` — that word appears in most of the suite, and
-# a rule that marks everything tests nothing.
+# The derived rule scans source for `forgekernel` / `get_kernel`. It cannot see
+# these: they reach geometry TRANSITIVELY — via Document, the viewer, release
+# tooling — so the module itself never names a kernel.
+#
+# MEASURED, not guessed: exactly the set that fails under a faithful null run
+# (GITCAD_FORCE_NULL_KERNEL=1, which genuinely removes the module rather than
+# flipping a flag). Regenerate the same way if it drifts. This beats widening
+# the rule to `Document`, which appears in most of the suite — a rule that
+# marks everything tests nothing, which is what the floor test guards.
 _ALSO_NEEDS_KERNEL = {
-    "test_entity_references.py", "test_importers.py", "test_interference.py",
-    "test_recognize.py", "test_sketch_extrude.py", "test_model_bom.py",
-    "test_p4_ops.py", "test_p8_details_engrave.py", "test_sw_fr1_ops.py",
+    "test_assembly_viewer.py",
+    "test_associative_dims.py",
+    "test_bbox_is_a_sound_bound.py",
+    "test_bodies_render.py",
+    "test_box_fillet.py",
+    "test_chamfer_is_local_to_its_edges.py",
+    "test_derived_interfaces.py",
+    "test_drawing_and_step.py",
+    "test_entity_references.py",
+    "test_ergonomics.py",
+    "test_exploded_views.py",
+    "test_importers.py",
+    "test_interference.py",
+    "test_mcp_visualize.py",
+    "test_mech_features.py",
+    "test_null_kernel_suite_is_real.py",
+    "test_p4_ops.py",
+    "test_p5_helix.py",
+    "test_p8_details_engrave.py",
+    "test_recognize.py",
+    "test_release.py",
+    "test_requirements.py",
+    "test_sheetmetal.py",
+    "test_sketch_extrude.py",
+    "test_sw_fr1_ops.py",
+    "test_sw_fr2_sketch_planes.py",
+    "test_sw_fr3_drawings.py",
+    "test_tolerances.py",
+    "test_viewer.py",
 }
 
 _HAVE_KERNEL = _have_kernel()
@@ -109,7 +147,12 @@ def pytest_collection_modifyitems(config: pytest.Config,
     for item in items:
         if item.get_closest_marker("forge_gap"):
             item.add_marker(gap)
-        if _module_needs_kernel(str(item.fspath)):
+        # The file rule is coarse: a module can mix pure source lints with one
+        # test that actually drives geometry (test_seam_enforcement.py does).
+        # An explicit @pytest.mark.kernel on that single test is honoured too,
+        # so the rest of the module keeps running without a kernel — which is
+        # the whole point of the base suite.
+        if _module_needs_kernel(str(item.fspath))                 or item.get_closest_marker("kernel"):
             item.add_marker(pytest.mark.kernel)
             if not _HAVE_KERNEL:
                 item.add_marker(needs_kernel)
