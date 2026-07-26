@@ -44,6 +44,90 @@ def test_stl_export_writes_mesh(part, tmp_path) -> None:
     assert (tmp_path / "part.stl").stat().st_size > 1000
 
 
+# --- the export path IS the seam mesher (round-9 docket W5 + W10) -------------
+#
+# `export_stl` used to try forge's `io.to_stl(shape)` first, which calls
+# `shape.tessellate()` with NO argument. Every representation carrying a
+# `.tessellate` attribute therefore took a deflection-blind path: a cylinder
+# shipped 48 facets whether the caller asked for 0.2 or 0.001 (0.17 mm of wall
+# sag against a requested 0.001), and an AxisStack shipped a chorded mesh 21.6%
+# light that the seam's own `tessellate` honestly refuses. The invariant: the
+# STL a manufacturer consumes is the SAME mesh `tessellate` answers with, at
+# the SAME deflection — and where `tessellate` refuses, `export_stl` refuses
+# too, rather than shipping the one artifact nobody downstream can check.
+
+def _stl_facets(path):
+    """Parse an ASCII STL into a list of 3-vertex tuples."""
+    tris, cur = [], []
+    for line in open(path).read().splitlines():
+        line = line.strip()
+        if line.startswith("vertex"):
+            cur.append(tuple(float(x) for x in line.split()[1:]))
+            if len(cur) == 3:
+                tris.append(tuple(cur))
+                cur = []
+    return tris
+
+
+def _stl_volume(tris):
+    """Enclosed volume by the divergence theorem — independent of the kernel."""
+    return abs(sum(
+        (a[0] * (b[1] * c[2] - b[2] * c[1])
+         - a[1] * (b[0] * c[2] - b[2] * c[0])
+         + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6.0
+        for a, b, c in tris))
+
+
+def test_stl_export_honours_deflection(tmp_path) -> None:
+    """W5: finer deflection must yield a finer mesh, and the facet count must
+    match what the seam's own `tessellate` produces at that deflection."""
+    from gitcad.kernel.ref import RefKernel
+
+    k = RefKernel()
+    counts = {}
+    for defl in (0.2, 0.001):
+        path = str(tmp_path / f"cyl_{defl}.stl")
+        k.export_stl(k.cylinder(5, 12), path, deflection=defl)
+        counts[defl] = len(_stl_facets(path))
+        assert counts[defl] == len(
+            k.tessellate(k.cylinder(5, 12), deflection=defl)["triangles"])
+    assert counts[0.001] > counts[0.2], (
+        "deflection is discarded: the same mesh ships at every tolerance")
+
+
+def test_stl_export_volume_converges_to_truth(tmp_path) -> None:
+    """W5, the number that matters: at deflection 0.001 the shipped cylinder
+    must enclose 300π to well under the 4.5% the 48-facet mesh was off by.
+    300π is a closed form, not a kernel output."""
+    from gitcad.kernel.ref import RefKernel
+
+    k = RefKernel()
+    path = str(tmp_path / "cyl_fine.stl")
+    k.export_stl(k.cylinder(5, 12), path, deflection=0.001)
+    true = 300 * math.pi
+    assert _stl_volume(_stl_facets(path)) == pytest.approx(true, rel=5e-3)
+
+
+def test_stl_export_refuses_what_tessellate_refuses(tmp_path) -> None:
+    """W10: a cylinder-sphere AxisStack has no honest mesh yet — `tessellate`
+    refuses it (K3.7). `export_stl` must refuse the SAME shape, not silently
+    write a chorded lathe enclosing 644 where the exact volume is 784π/3 =
+    821.003. A structured refusal is the finished answer; a wrong watertight
+    file is the defect."""
+    from gitcad.errors import KernelError
+    from gitcad.kernel.ref import RefKernel
+
+    k = RefKernel()
+    ax = k.boolean("union", k.cylinder(4, 10),
+                   k.transform(k.sphere(5), translate=(0, 0, 10)))
+    with pytest.raises(KernelError):
+        k.tessellate(ax, deflection=0.01)     # the seam already refuses this
+    path = tmp_path / "axstack.stl"
+    with pytest.raises(KernelError):
+        k.export_stl(ax, str(path))
+    assert not path.exists(), "refusal must not leave a partial file behind"
+
+
 def test_hlr_projections_are_dimensionally_correct(part) -> None:
     from gitcad.drawing.hlr import bounds, project
 

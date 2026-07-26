@@ -2983,23 +2983,30 @@ class RefKernel:
             f.write(text)
 
     def export_stl(self, shape, path, *, deflection=0.1):
-        from forgekernel import io
-
-        try:
-            text = io.to_stl(shape)
-        except AttributeError:
-            # io.to_stl expects a planar Solid; everything else meshes through
-            # the canonical form, which is the same mesh tessellate() returns
-            mesh = self.tessellate(shape, deflection=deflection)
-            v = mesh["vertices"]
-            out = ["solid forge"]
-            for a, b, c in mesh["triangles"]:
-                out += ["facet normal 0 0 0", "outer loop"]
-                out += [f"vertex {v[i][0]:.9g} {v[i][1]:.9g} {v[i][2]:.9g}"
-                        for i in (a, b, c)]
-                out += ["endloop", "endfacet"]
-            out.append("endsolid forge")
-            text = chr(10).join(out) + chr(10)
+        # Round-9 docket W5 + W10: this used to try forge's `io.to_stl(shape)`
+        # first, which calls `shape.tessellate()` with NO argument — so every
+        # representation carrying a `.tessellate` attribute took a
+        # deflection-blind shortcut and the caller's tolerance was silently
+        # DISCARDED (a cylinder shipped the same 48 facets at 0.2 and at
+        # 0.001: 0.17 mm of wall sag, 170x the request). Worse, the shortcut
+        # bypassed the seam's own refusals: an AxisStack whose `tessellate`
+        # honestly refuses (K3.7) shipped a chorded lathe enclosing 644.0
+        # where the exact volume is 784π/3 = 821.003 — a wrong watertight
+        # file on the one path a manufacturer consumes.
+        #
+        # ADR-0021, ONE mesher: the export path IS `self.tessellate`, at the
+        # caller's deflection. Where the mesh would be wrong, this now refuses
+        # structurally instead of shipping — the refusal is the answer.
+        mesh = self.tessellate(shape, deflection=deflection)
+        v = mesh["vertices"]
+        out = ["solid forge"]
+        for a, b, c in mesh["triangles"]:
+            out += ["facet normal 0 0 0", "outer loop"]
+            out += [f"vertex {v[i][0]:.9g} {v[i][1]:.9g} {v[i][2]:.9g}"
+                    for i in (a, b, c)]
+            out += ["endloop", "endfacet"]
+        out.append("endsolid forge")
+        text = chr(10).join(out) + chr(10)
         with open(path, "w", newline=chr(10)) as f:
             f.write(text)
 
