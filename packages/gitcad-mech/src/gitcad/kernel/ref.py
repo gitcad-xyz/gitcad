@@ -113,9 +113,9 @@ def _audited(body, op: str, *, require_body: bool = False):
 
     The coarse check is the MESH (see `_mesh_tears` below): the exact checks
     all reason about the b-rep, and none of them looks at what gets
-    tessellated. Torus faces carry no boundary loops yet (#130), so a body with
-    one is exempted from pairing rather than failing on a known gap — the
-    volume check still applies.
+    tessellated. (#130 landed: torus faces carry their rims as loops now, so
+    the pairing check runs on every body — the old blanket exemption for
+    torus-carrying bodies is gone.)
     """
     from forgekernel import body as B
     from gitcad.errors import GeometryInvalidError
@@ -152,8 +152,7 @@ def _audited(body, op: str, *, require_body: bool = False):
         except Exception:                       # noqa: BLE001 - see above
             return body
     bad = []
-    if not any(isinstance(f.surface, B.Torus) for f in subject.faces):
-        bad += B.manifold_violations(subject)
+    bad += B.manifold_violations(subject)
     # Ask the value for its SIGN; do not order it against a bare 0. Every exact
     # type here decides its own sign exactly (ADR-0019), but their rich
     # comparisons route through helpers that SWALLOW TypeError and ValueError

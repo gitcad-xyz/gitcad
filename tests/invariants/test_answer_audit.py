@@ -93,16 +93,26 @@ def test_the_positivity_check_survives_a_volume_outside_Q_pi() -> None:
         _audited(flipped, "test")
 
 
-def test_a_torus_body_is_exempt_from_pairing_but_not_from_volume(k) -> None:
-    """Torus faces carry no boundary loops yet (#130), so their rims read as
-    unpaired. Failing on a known gap would turn a working op into a refusal —
-    the volume check still applies, and the exemption disappears when #130
-    lands."""
+def test_a_torus_body_is_no_longer_exempt_from_pairing(k) -> None:
+    """#130 landed: a lathe's torus faces carry their rims as loops, so the
+    pairing audit sees filleted lathes whole — and the blanket exemption for
+    any body containing a torus (a pardon for exactly the bodies most likely
+    to be hand-assembled wrong) is gone with the gap that excused it."""
     filleted = k.fillet(k.cylinder(5, 12), [], 1)
     body = filleted if isinstance(filleted, B.Body) else B.to_body(filleted)
     assert any(isinstance(f.surface, B.Torus) for f in body.faces)
-    assert B.manifold_violations(body), "the known gap is still present"
-    _audited(body, "test")                    # …and yet it must pass
+    assert B.manifold_violations(body) == [], "#130: rims must pair"
+    _audited(body, "test")
+
+    # …and a torus body that IS open must now refuse. Stripping the torus's
+    # loops changes nothing the mesh check can see (the torus meshes from its
+    # surface k0/span, not its loops) and nothing the volume check can see —
+    # ONLY edge pairing catches it, so this pins that pairing actually runs.
+    stripped = B.Body(tuple(
+        B.Face(f.surface, (), f.sense) if isinstance(f.surface, B.Torus)
+        else f for f in body.faces))
+    with pytest.raises(GeometryInvalidError, match="invalid body"):
+        _audited(stripped, "test")
 
 
 AUDITED_OPS = [
