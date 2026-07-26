@@ -1279,6 +1279,14 @@ class RefKernel:
             cur = boundary.get(cur)
             if cur is None or len(bottom) > len(boundary) + 1:
                 raise ValueError("shell: cap boundary is not a single loop")
+        if len(bottom) != len(boundary):
+            # The walk CLOSED without CONSUMING every boundary edge: the cap
+            # has more than one loop (a disconnected solid, or a cap with a
+            # hole). Chaining one loop successfully proved nothing — hollowing
+            # just that component returned 1488 for a pair of 10³ boxes whose
+            # true member-wise shell is 976, a silent wrong number.
+            raise ValueError("shell: cap boundary is not a single loop — "
+                             "K4.2 for multi-loop caps")
         # drop collinear midpoints so each remaining edge is a true side
         cleaned = []
         m = len(bottom)
@@ -2378,6 +2386,151 @@ class RefKernel:
                       + tuple(B.Face(f.surface, f.loops, not f.sense)
                               for f in faces)), "shell(drilled solid)")
 
+    def _shell_bossed_plate(self, shape, t):
+        """Shell a plate with ONE boss standing on it (bored or not), or None.
+
+        A DisjointUnion whose members TOUCH is one connected solid, and
+        shelling the members separately is NOT the shell of the composite:
+        the void connects through the plate under the boss, and the exposed
+        plate-top rim around the boss base erodes to a quarter torus swept
+        INSIDE the plate (centre circle (R, plate_top), k0=2 span=1). Before
+        #120 the boss probe returned the pile answer — 60.9 mm³ heavy.
+
+        The void, bottom to top: the inset plate slab, its top punched with
+        the circle (R, plate_top − t); the boss-base rim arc; the boss
+        column's wall at R−t; and if the boss carries a coaxial blind bore
+        open at its top, the bore collar at r+t, the bore-floor quarter torus
+        (k0=3 span=1) and the floor disk of radius r — THE TRAP again: r,
+        not r+t.
+
+        Closed forms pinned in tests/golden/test_shell_bossed_plate.py, both
+        verified against an independent Monte-Carlo membership test before
+        this was built.
+        """
+        from forgekernel import body as B
+        from forgekernel.brep import Solid
+        from forgekernel.quadric import Cyl, RevolveSolid
+
+        if len(shape.members) != 2:
+            return None
+        plate = boss = None
+        for a, b in ((shape.members[0], shape.members[1]),
+                     (shape.members[1], shape.members[0])):
+            if isinstance(a, Solid) and isinstance(b, (Cyl, RevolveSolid)):
+                plate, boss = a, b
+                break
+        if plate is None:
+            return None
+        box = self._box_check(plate)
+        if box is None:
+            return None
+        (px0, py0, pz0), (px1, py1, pz1) = box
+        bore = None
+        if isinstance(boss, Cyl):
+            cx, cy, R = Fraction(boss.cx), Fraction(boss.cy), Fraction(boss.r)
+            zb, bt = Fraction(boss.z0), Fraction(boss.z1)
+        else:
+            loop = [(Fraction(r), Fraction(z)) for r, z in boss.loop]
+            cx, cy = Fraction(boss.cx), Fraction(boss.cy)
+            if (len(loop) == 4 and loop[0][0] == 0 and loop[3][0] == 0
+                    and loop[1][0] == loop[2][0] > 0
+                    and loop[0][1] == loop[1][1] < loop[2][1] == loop[3][1]):
+                R, zb, bt = loop[1][0], loop[0][1], loop[2][1]
+            elif (len(loop) == 6 and loop[0][0] == 0 and loop[5][0] == 0
+                    and loop[1][0] == loop[2][0] > 0
+                    and loop[3][0] == loop[4][0] > 0
+                    and loop[3][0] < loop[1][0]
+                    and loop[0][1] == loop[1][1] < loop[2][1] == loop[3][1]
+                    and loop[0][1] < loop[4][1] == loop[5][1] < loop[2][1]):
+                R, zb, bt = loop[1][0], loop[0][1], loop[2][1]
+                bore = (loop[3][0], loop[4][1])       # (r, floor z)
+            else:
+                return None
+        if zb != pz1:
+            return None                # the boss does not stand on the plate
+        margin = min(cx - px0, px1 - cx, cy - py0, py1 - cy)
+        if margin - t <= R:
+            _nope("shell(bossed plate: the boss-base fillet needs the void's "
+                  "slab to clear the boss by more than t laterally)",
+                  "K4.2 (offset surfaces)",
+                  predicate="boss_clears_inset_walls",
+                  measured={"margin": float(margin), "R": float(R),
+                            "t": float(t)})
+        if pz1 - pz0 <= 2 * t:
+            _nope("shell(bossed plate: a plate no thicker than 2t clips the "
+                  "boss-base fillet against the slab floor — arcsin, outside "
+                  "every exact field)", "K4.2 (offset surfaces)",
+                  predicate="plate_thicker_than_two_t",
+                  measured={"plate": float(pz1 - pz0), "t": float(t)})
+        if R <= t or bt - pz1 <= t:
+            _nope("shell(bossed plate: the boss is too small to hollow at "
+                  "this t)", "K4.2 (offset surfaces)",
+                  predicate="boss_exceeds_t",
+                  measured={"R": float(R), "boss_height": float(bt - pz1),
+                            "t": float(t)})
+        if bore is not None:
+            rb, zf = bore
+            if rb + t >= R - t:
+                _nope("shell(bossed plate: the bore collar meets the boss "
+                      "void's wall — the clipped fillet carries an arcsin, "
+                      "outside every exact field)", "K4.2 (offset surfaces)",
+                      predicate="collar_clears_boss_wall",
+                      measured={"r": float(rb), "R": float(R), "t": float(t)})
+            if zf - t < pz1 or zf >= bt - t:
+                _nope("shell(bossed plate: the bore floor must clear the "
+                      "boss base by t and the boss top by more than t)",
+                      "K4.2 (offset surfaces)",
+                      predicate="floor_within_boss",
+                      measured={"floor_z": float(zf),
+                                "boss_z": [float(pz1), float(bt)],
+                                "t": float(t)})
+
+        one, zero = Fraction(1), Fraction(0)
+        naxis = (zero, zero, one)
+        slab = Solid.box(px1 - px0 - 2 * t, py1 - py0 - 2 * t,
+                         pz1 - pz0 - 2 * t, "sbp.slab").translated(
+                             (px0 + t, py0 + t, pz0 + t))
+        vfaces = []
+        for f in B.from_solid(slab).faces:
+            # the slab's planes are UNNORMALIZED (n=(0,0,784), d=1568), so
+            # match the top cap by direction sign and vertex height, the way
+            # from_drilled matches caps
+            if (isinstance(f.surface, B.Plane)
+                    and f.surface.n[0] == 0 and f.surface.n[1] == 0
+                    and f.surface.n[2] > 0
+                    and Fraction(f.loops[0].edges[0].v0[2]) == pz1 - t):
+                f = B.Face(f.surface,
+                           f.loops + (B.Loop((_rim_edge(cx, cy, pz1 - t, R),)),),
+                           f.sense)
+            vfaces.append(f)
+        vfaces.append(B.Face(B.Torus((cx, cy, pz1), naxis, R, t, 2, 1),
+                             (B.Loop((_rim_edge(cx, cy, pz1 - t, R),
+                                      _rim_edge(cx, cy, pz1, R - t))),),
+                             False))
+        vfaces.append(B.Face(B.Cylinder((cx, cy, pz1), naxis, R - t),
+                             (B.Loop((_rim_edge(cx, cy, pz1, R - t),
+                                      _rim_edge(cx, cy, bt - t, R - t))),),
+                             True))
+        top_loops = [B.Loop((_rim_edge(cx, cy, bt - t, R - t),))]
+        if bore is not None:
+            rb, zf = bore
+            top_loops.append(B.Loop((_rim_edge(cx, cy, bt - t, rb + t),)))
+            vfaces.append(B.Face(B.Cylinder((cx, cy, zf), naxis, rb + t),
+                                 (B.Loop((_rim_edge(cx, cy, zf, rb + t),
+                                          _rim_edge(cx, cy, bt - t, rb + t))),),
+                                 False))
+            vfaces.append(B.Face(B.Torus((cx, cy, zf), naxis, rb, t, 3, 1),
+                                 (B.Loop((_rim_edge(cx, cy, zf - t, rb),
+                                          _rim_edge(cx, cy, zf, rb + t))),),
+                                 False))
+            vfaces.append(B.Face(B.Plane(naxis, zf - t),
+                                 (B.Loop((_rim_edge(cx, cy, zf - t, rb),)),),
+                                 True))
+        vfaces.append(B.Face(B.Plane(naxis, bt - t), tuple(top_loops), True))
+        return _audited(B.Body(B.to_body(shape).faces
+                      + tuple(B.Face(f.surface, f.loops, not f.sense)
+                              for f in vfaces)), "shell(bossed plate)")
+
     def _shell_lathe(self, shape, t):
         """Hollow a solid of revolution: the void is the profile inset by t,
         lathed and turned inside out. Its faces are the inner solid's with
@@ -2421,7 +2574,28 @@ class RefKernel:
                 return DrilledSolid(self.shell(shape.base, (), thickness), [])
             if isinstance(shape, DisjointUnion):
                 from forgekernel import body as B
+                from forgekernel.quadric import _exact_bbox
 
+                bossy = self._shell_bossed_plate(shape, t)
+                if bossy is not None:
+                    return bossy
+                # Erosion distributes over STRICTLY SEPARATED components and
+                # over nothing else: members that touch are one connected
+                # solid whose void runs through the contact, and the pile
+                # answer is a silent wrong number (the boss probe was 60.9 mm³
+                # heavy before the composite path above). Closed bboxes are a
+                # conservative witness for separation.
+                boxes = [_exact_bbox(m) for m in shape.members]
+                for i in range(len(boxes)):
+                    for j in range(i + 1, len(boxes)):
+                        (alo, ahi), (blo, bhi) = boxes[i], boxes[j]
+                        if all(alo[c] <= bhi[c] and blo[c] <= ahi[c]
+                               for c in range(3)):
+                            _nope("shell(disjoint union: members touch — "
+                                  "the composite's erosion connects through "
+                                  "the contact, so shelling the parts "
+                                  "separately is a different solid)",
+                                  "K4.2 (offset surfaces)")
                 parts = [self.shell(m, (), thickness) for m in shape.members]
                 if any(isinstance(q, B.Body) for q in parts):
                     # a DisjointUnion's members must be quadric types: putting
@@ -3065,6 +3239,18 @@ def _fillet_profile(prof, r):
             or (sg[1][0], sg[1][1]) != (sg[2][0], sg[2][1])]
 
 
+def _rim_edge(cx, cy, z, r):
+    """A full-circle edge at (cx, cy, z) radius r, built exactly the way
+    forge's ``_circle_at`` builds rims, so edge keys pair across faces."""
+    from forgekernel import body as B
+
+    one, zero = Fraction(1), Fraction(0)
+    c = B.Circle((Fraction(cx), Fraction(cy), Fraction(z)),
+                 (zero, zero, one), (one, zero, zero), Fraction(r))
+    v = (Fraction(cx) + Fraction(r), Fraction(cy), Fraction(z))
+    return B.Edge(c, v, v)
+
+
 def _frame_face(face, ilo, ihi):
     """Punch the dilated cavity's core rectangle into an inset-box face.
 
@@ -3135,9 +3321,7 @@ def _erode_rim_to_torus(faces, cx, cy, Z, rho, t):
     one, zero = Fraction(1), Fraction(0)
 
     def rim_edge(z, r):
-        c = B.Circle((cx, cy, z), (zero, zero, one), (one, zero, zero), r)
-        v = (cx + r, cy, z)
-        return B.Edge(c, v, v)
+        return _rim_edge(cx, cy, z, r)
 
     wall_i = ann_i = None
     for i, f in enumerate(faces):
