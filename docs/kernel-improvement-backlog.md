@@ -294,15 +294,31 @@ verified against the direct computation to full float agreement. That is
 rational x sqrt(35) x pi — squarely inside **ℚ[√35][π], the field #117 already
 built**. No new number field, no new curve type, no conic.
 
-The topology is two spherical zones plus one cylindrical wall, all of which the
-kernel already emits elsewhere. The work is assembling them and letting
-`bore_cyl` recognise the centred-sphere case the way it already recognises the
-centred-cylinder one.
+**CORRECTION, made by checking rather than assuming.** The paragraph above
+originally said "the work is assembling them", implying a small construction.
+That was wrong, and the correction is the more useful result.
 
-**Do this one first.** It is the only remaining cell where the mathematics is
-finished and only the construction is missing, and it will exercise the
-ℚ[√d][π] path end-to-end on a shape whose answer is known in closed form —
-which is exactly the shape you want for the first real user of a new field.
+A napkin ring IS a solid of revolution, so `RevolveSolid` looks like the right
+home — but read its constructor: `loop_rz` is a list of `(r, z)` POINTS joined
+by STRAIGHT SEGMENTS, and its Green integral sums a per-segment polynomial
+term. The napkin ring's profile is a lens bounded by the bore wall `r = r0`
+(straight) and the sphere's meridian `r = sqrt(R^2 - z^2)` (an ARC). The arc is
+not expressible in that type at all.
+
+So this cell needs `RevolveSolid` to gain arc edges: a second edge kind in the
+profile, the Green term for `contour integral of r^2 dz` along a circular arc
+(which is precisely where the `sqrt(35)*pi` comes from), and then the mesher,
+STEP writer, bbox and section paths all following it. That is a new capability
+in a core type, not an assembly job.
+
+**What stands and what does not.** The mathematics is genuinely finished — the
+closed form is derived and verified, and it needs no field beyond the ℚ[√d][π]
+of #117. The CONSTRUCTION is a real piece of work, comparable to the others on
+this list. Those are separate claims and it was sloppy to run them together.
+
+It is still probably the best first target, because arc-profile revolutions
+unlock `cone x shell` and `cone x fillet(all)` by the same mechanism — but go
+in expecting to extend a core type, not to wire up existing parts.
 
 Caveat worth stating: this closed form holds because the cut is CENTRED. Move
 the cylinder off-axis and the volume acquires elliptic integrals and leaves
