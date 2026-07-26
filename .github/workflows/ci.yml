@@ -22,8 +22,14 @@ jobs:
           pip install pytest
       - run: pytest -q
 
-  occt:
-    name: full (OCCT kernel)
+  # Renamed from `occt`/"full (OCCT kernel)". OCCT was removed entirely in
+  # ADR-0020 and forge became the sole geometry kernel, but this job kept
+  # installing cadquery-ocp and never installed forgekernel -- so the job that
+  # is supposed to be the REAL-GEOMETRY half of CI has been running with no
+  # kernel at all ever since, failing on every geometry test. Between this and
+  # the null-kernel job, BOTH halves of CI were red and neither was read.
+  forge:
+    name: full (forge kernel)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +38,7 @@ jobs:
           python-version: "3.12"
       - run: |
           pip install --no-deps -e packages/gitcad-core -e packages/gitcad-mech             -e packages/gitcad-ecad -e packages/gitcad
-          pip install pytest cadquery-ocp
+          pip install pytest forgekernel
       - run: pytest -q
       - name: end-to-end demos
         run: |
