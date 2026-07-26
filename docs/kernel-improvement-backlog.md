@@ -265,3 +265,46 @@ day's careful work rather than an afternoon's.
 volume on every hand-built body, so the four-sided mistake above fails loudly
 instead of shipping a plausible number. That guard did not exist when the
 earlier intricate constructions were written, which is why they shipped wrong.
+
+---
+
+## 10. The 16 remaining gaps, triaged — and one that needs no new mathematics
+
+Verified against the probe rather than recalled. All 16 refusals, grouped by
+what actually blocks them:
+
+    bored boss / counterbore  x cut box   #123 (analysis in section 9)
+    cone                      x cut box   #123, same family
+    bored boss / counterbore / drilled(blind) / shelled box  x shell   #120
+    cone                      x shell     K4.2 slanted lathe profile
+    chamfered box / loft / planar prism / shelled box  x fillet(all)   #121
+    cone                      x fillet(all) / chamfer(all)   K5.2 / irrational slant
+    sphere                    x cut cylinder   <-- see below
+
+**`sphere x cut cylinder` is the cheapest cell on the board and it has been
+mis-filed.** The probe's tool is `cylinder(1, 100)` translated to the bbox
+midpoint of `sphere(6)` — which is the ORIGIN. So the cut is coaxial and
+centred, and the result is not a general sphere-cylinder intersection at all.
+It is a **napkin ring**:
+
+    h = 2*sqrt(R^2 - r^2) = 2*sqrt(35)
+    V = (pi/6) * h^3 = (140/3) * sqrt(35) * pi = 867.342597…
+
+verified against the direct computation to full float agreement. That is
+rational x sqrt(35) x pi — squarely inside **ℚ[√35][π], the field #117 already
+built**. No new number field, no new curve type, no conic.
+
+The topology is two spherical zones plus one cylindrical wall, all of which the
+kernel already emits elsewhere. The work is assembling them and letting
+`bore_cyl` recognise the centred-sphere case the way it already recognises the
+centred-cylinder one.
+
+**Do this one first.** It is the only remaining cell where the mathematics is
+finished and only the construction is missing, and it will exercise the
+ℚ[√d][π] path end-to-end on a shape whose answer is known in closed form —
+which is exactly the shape you want for the first real user of a new field.
+
+Caveat worth stating: this closed form holds because the cut is CENTRED. Move
+the cylinder off-axis and the volume acquires elliptic integrals and leaves
+every algebraic extension. So the honest deliverable is the centred case exact
+and an explicit refusal off-axis — not a general sphere-cylinder boolean.
