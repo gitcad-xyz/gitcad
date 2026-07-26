@@ -543,6 +543,23 @@ class RefKernel:
 
         from forgekernel.quadric import DisjointUnion, SphereOverlap
 
+        # a sphere with a COAXIAL bore drilled clean through it: a napkin ring.
+        # Exact in ℚ[√d][π] — the arc term lives in forgekernel.surdrev and is
+        # proven there against the closed form V = (4/3)π(R²−r²)^(3/2).
+        #
+        # Only the CENTRED, THROUGH case. Off-axis, the volume acquires
+        # elliptic integrals and leaves every algebraic extension, so there is
+        # nothing to be exact about; a blind bore leaves a spherical cap floor
+        # that this two-face solid cannot hold. Both keep refusing, and that is
+        # the honest answer rather than a near-miss.
+        if op == "cut" and isinstance(a, Sphere) and isinstance(b, Cyl):
+            from forgekernel.surdrev import NapkinRing
+
+            ax, ay, az = a.c if hasattr(a, "c") else (a.cx, a.cy, a.cz)
+            if b.cx == ax and b.cy == ay and 0 <= b.r < a.r \
+                    and b.z0 <= az - a.r and b.z1 >= az + a.r:
+                return _audited(NapkinRing(a.r, b.r, ax, ay, az), "boolean.cut")
+
         # two overlapping spheres: exact ℚ[π] cap/lens booleans (K2.2)
         if isinstance(a, Sphere) and isinstance(b, Sphere) and op in ("union", "cut", "intersect"):
             try:
