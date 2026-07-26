@@ -34,27 +34,32 @@ class StructuralProfile:
 
     @staticmethod
     def rect_tube(w, h, t) -> "StructuralProfile":
+        # float() before :g is REQUIRED, not cosmetic. Fraction.__format__ only
+        # accepts a format spec from Python 3.12; on 3.10 (our declared floor)
+        # f"{fraction:g}" raises TypeError. This is a NAME, so a float is right
+        # here — the exact value stays in `area` below. ADR-0019 is unaffected:
+        # no float decides anything.
         w, h, t = F(w), F(h), F(t)
         if 2 * t >= min(w, h):
             raise GitcadError("rect_tube wall too thick")
-        return StructuralProfile(f"RT{w:g}x{h:g}x{t:g}",
+        return StructuralProfile(f"RT{float(w):g}x{float(h):g}x{float(t):g}",
                                  w * h - (w - 2 * t) * (h - 2 * t), "rect_tube")
 
     @staticmethod
     def l_angle(a, b, t) -> "StructuralProfile":
         a, b, t = F(a), F(b), F(t)
-        return StructuralProfile(f"L{a:g}x{b:g}x{t:g}",
+        return StructuralProfile(f"L{float(a):g}x{float(b):g}x{float(t):g}",
                                  a * t + (b - t) * t, "l_angle")
 
     @staticmethod
     def c_channel(w, h, t) -> "StructuralProfile":
         w, h, t = F(w), F(h), F(t)
-        return StructuralProfile(f"C{w:g}x{h:g}x{t:g}",
+        return StructuralProfile(f"C{float(w):g}x{float(h):g}x{float(t):g}",
                                  w * h - (w - t) * (h - 2 * t), "c_channel")
 
     @staticmethod
     def flat_bar(w, t) -> "StructuralProfile":
-        return StructuralProfile(f"FB{F(w):g}x{F(t):g}", F(w) * F(t), "flat_bar")
+        return StructuralProfile(f"FB{float(w):g}x{float(t):g}", F(w) * F(t), "flat_bar")
 
 
 @dataclass
