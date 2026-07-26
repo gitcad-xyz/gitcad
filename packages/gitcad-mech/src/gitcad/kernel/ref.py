@@ -1302,7 +1302,11 @@ class RefKernel:
             area += _Fr(x1) * _Fr(y2) - _Fr(x2) * _Fr(y1)
         area = abs(area) / 2
         try:
-            return fk_sweep(area, path)
+            # pass the polygon itself, not just its area: bbox/centroid are
+            # exact closed forms over the profile's vertices and moments, and
+            # forge refuses metrics on an area-only sweep (W8/W11 — the old
+            # sqrt-area pad and wire centroid were silent wrong numbers)
+            return fk_sweep(area, path, profile=loop)
         except ValueError as exc:
             raise KernelError(str(exc), FailureSignature(
                 op="sweep", diagnostic="NotYetImplemented", kernel="ref"))
