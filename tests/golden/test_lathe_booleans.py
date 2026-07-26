@@ -325,18 +325,32 @@ def test_a_tool_outside_the_bore_still_cuts(k) -> None:
         == pytest.approx(2 * 2 * 5)
 
 
-def test_a_tool_straddling_a_counterbore_step_refuses(k) -> None:
-    """Only the wider bore contains the tool's footprint, and only above its
-    floor. Below that the tool is outside the narrow bore, so the removed area
-    is a square minus a circular segment — an arcsin, outside Q[pi]."""
+def test_a_tool_straddling_a_counterbore_step(k) -> None:
+    """This used to refuse, on a premise that turned out to be false.
+
+    The claim was that the removed area is "a square minus a circular SEGMENT —
+    an arcsin, outside ℚ[π]". It is not. The tool's corner sits exactly ON the
+    bore axis, so the two crossings are at 0° and 90° and the removed section is
+    a square minus a QUARTER DISC: 4 − π, squarely inside ℚ[π]. #123 builds it.
+
+    A refusal is still the right answer when the premise actually holds — move
+    the wall to 3/4 of the radius and the crossing is at an angle whose sine is
+    not algebraic in ℚ[√3] (Niven), which is the arcsin the docstring was
+    reaching for. Both halves are asserted here so the boundary stays honest.
+    """
     from forgekernel.brep import Solid
     from forgekernel.quadric import DrilledSolid
 
     cb = (DrilledSolid(Solid.box(30, 30, 10), [])
           .cut(Cyl(15, 15, 2, 0, 10)).cut(Cyl(15, 15, 4, 7, 10)))
     tool = k.transform(k.box(2, 2, 100), translate=(15, 15, 5))
+    out = k.boolean("cut", cb, tool)
+    removed = k.mass_props(cb)["volume"] - k.mass_props(out)["volume"]
+    assert removed == pytest.approx(2 * (4 - math.pi), rel=0, abs=1e-9)
+
+    off = k.transform(k.box(1.5, 1, 100), translate=(16.5, 15, 5))
     with pytest.raises(Exception):
-        k.boolean("cut", cb, tool)
+        k.boolean("cut", cb, off)
 
 
 def test_a_union_falls_through_to_the_seams_own_distribution(k) -> None:

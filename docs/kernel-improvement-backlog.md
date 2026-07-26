@@ -266,6 +266,85 @@ volume on every hand-built body, so the four-sided mistake above fails loudly
 instead of shipping a plausible number. That guard did not exist when the
 earlier intricate constructions were written, which is why they shipped wrong.
 
+### 9.1 DONE — and three things the analysis above got wrong
+
+Both cells are green: `333/345`, 8 gaps (the two `cut box` rows in section
+10's triage table are closed; the table predates this). `forgekernel.notch`
+builds the result against the canonical `Body`, so one implementation serves
+the counterbore (a `DrilledSolid`) and the bored boss (a `DisjointUnion`
+around a lathe). Volumes are exactly `8992 − 74π` and `2682 + 737π/8`, each
+re-derived by hand at revival and matched to the letter; both bodies mesh with
+0 unpaired directed edges at deflections 0.8 through 0.05.
+
+> **Revival note (this landed via `wip/123-straddling-bore-unreviewed`).** The
+> parked commit's message warned of a KNOWN DEFECT — 87 non-manifold directed
+> edges from meshing the (θ,z) bounding rectangle. That described the FIRST
+> prototype; the parked content already carried the mesher fix (split bands +
+> rim arcs on the shared axis grid), and measuring, not re-reading, settled
+> it: 0 unpaired at four deflections. The branch was also a stale snapshot of
+> everything else (its parents are the 0.9.6-era commits), so it was revived
+> by cherry-pick onto main, keeping main's newer napkin-ring / cone-shell /
+> fillet work intact.
+>
+> New at revival, beyond the parked branch: the **odd-twelfth family
+> executes**. A wall at r/2 (60° crossing) used to be un-buildable —
+> `Fraction()` rejected the √3 coordinates, and after `F()` was widened the
+> path still died on `SurdVal ** 2` (backlog 1.4's exact defect class, now
+> `x*x`). It returns `8980 − (5/2)√3 − (110/3)π` against the through-bore
+> probe, verified against a hand integral; the mesh and STEP paths refuse it
+> BY NAME (30° trims are exact but not yet meshable, K3.7), and its walls
+> with irrational-length normals report vector-area NOT CHECKED rather than
+> passed.
+>
+> **Two guard holes found by attacking the unreviewed classification, both
+> the same shape:** the mouth-face containment was a BBOX test, so (1) an
+> L-plate whose reentrant corner the tool pokes past, and (2) a through-
+> pocket that appears only as a kept inner loop of the mouth face, both
+> classified IN and built a notch through material that does not exist. The
+> mesh audit happened to catch both torn artifacts — a lucky net, not a
+> contract. The guards now require the polygon mouth to BE an axis-aligned
+> rectangle strictly containing the tool, and every kept mouth loop to clear
+> the tool footprint (conservative bbox, refuses more, never admits an
+> overlap). Both cases are pinned in
+> `tests/golden/test_straddling_bore_boolean.py` as guard refusals, not
+> audit reports.
+
+Three corrections worth keeping, because each cost real time:
+
+1. **The L-shaped face is not needed and should not be built.** Split the bore
+   wall at the notch floor into a full 360° band below and an ordinary trimmed
+   band across, and the stock band term measures both correctly. Building the
+   L-face instead needs a new quadric measure that 500+ existing faces also go
+   through — the one change in this area with a blast radius.
+2. **The audit was blind to exactly this family.** `_edge_key` carried no arc
+   SPAN, so a 90° arc and the 270° arc on the same circle with the same
+   endpoints keyed identically. A quarter cylinder (5π) and the 3/4 wedge glued
+   to its flat walls (35π/3) are the same five faces and both passed
+   `manifold_violations` clean. Fixing that had to land BEFORE the mixed
+   arc/line area measure, or the measure would have turned a refusal into a
+   silent wrong number.
+3. **Edge pairing cannot see an orientation error at all**, because it audits
+   counts. `body.vector_area` — Σ Areaᵢ·n̂ᵢ, exactly zero for any closed shell —
+   is the third oracle and now runs in `_audited`, as the arc-capable surface
+   form behind the boundary-integral `vector_area_defect` (which skips any body
+   carrying an arc). It catches a face whose sense is flipped even when the
+   volume stays positive and every edge pairs.
+
+Also found on the way, unrelated to #123 but shipped by it: the trimmed-band
+MESHER read its two rim heights off the arcs only, so a band whose far rim is a
+whole circle and whose near rim is split into quarters came out zero-tall and
+emitted no triangles. And `circle_pts` used a free-form segment count while
+bands and corner octants subdivide dyadically, so a whole rim and a trimmed
+band on one axis never shared vertices. Both are fixed; every corpus mesh got
+strictly finer and stayed watertight.
+
+**Still refused, permanently.** A tool wall at any offset a/r outside
+{0, ±1/2, ±√3/2, ±1} — Niven's theorem says those are the only ones whose
+crossing angle keeps the removed area in ℚ[√3][π]. The refusal names the field
+and the three admissible offsets. Also refused, as gaps rather than boundaries:
+a blind straddling pocket (needs a ceiling face), a tool straddling two bores
+at once, and a tool that reaches the part's outer wall.
+
 ---
 
 ## 10. The 16 remaining gaps, triaged — and one that needs no new mathematics
@@ -509,3 +588,4 @@ sits underneath several others, which is an argument for doing it rather than
 against. Doing #120 or the rest of #122 first would mean building each on a
 representation that cannot enter the canonical form — exactly the
 representation/canonical split ADR-0022 exists to end.
+

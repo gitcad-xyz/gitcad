@@ -79,7 +79,7 @@ def _mesh_tears(canon) -> int:
     return sum(1 for (a, b), n in seen.items() if seen.get((b, a), 0) != n)
 
 
-def _audited(body, op: str):
+def _audited(body, op: str, *, require_body: bool = False):
     """Check the ANSWER before returning it. The whole burn-down in one rule.
 
     Every silent wrong number this kernel has produced came from validating the
@@ -89,16 +89,31 @@ def _audited(body, op: str):
     A property test can always be satisfied by something that is not the thing;
     the constructed body cannot lie about what it is.
 
-    Two exact checks, both cheap enough to run on every construction:
+    Three exact checks and one coarse one, all cheap enough to run on every
+    construction:
 
       * every edge shared by exactly two faces — the closed-shell oracle, which
         catches a rim minted twice, a T-junction left unsplit, a face dropped;
       * positive volume, by the EXACT sign, so an inside-out body cannot pass
-        by rounding to zero.
+        by rounding to zero;
+      * the closed-shell vector area, Σ Areaᵢ·n̂ᵢ = 0. This one sees a class the
+        other two structurally cannot. Edge pairing audits COUNTS, so a face
+        whose loop runs backwards still pairs; the volume is one number, so a
+        sign error that leaves it positive still passes. Both are live risks in
+        #123, where the same arc bounds the notch floor and the shoulder with
+        opposite senses: the correct body sums to (0,0,0), emitting the tool's
+        fourth wall gives (4, 4, π), and flipping one segment term gives
+        (0, 0, 2π).
 
-    Mesh watertightness is deliberately NOT here: it needs a tessellation per
-    call, and it belongs in the differential harness that already samples
-    deflections. Torus faces carry no boundary loops yet (#130), so a body with
+    ``require_body`` closes the last way out. A z-slab ``DisjointUnion`` can
+    report exactly the right volume while being a pile of solids rather than
+    one, and a non-``Body`` result is handed back here untouched — so a caller
+    that has genuinely built a solid says so, and a pile then refuses instead
+    of sailing past the net wearing a correct number.
+
+    The coarse check is the MESH (see `_mesh_tears` below): the exact checks
+    all reason about the b-rep, and none of them looks at what gets
+    tessellated. Torus faces carry no boundary loops yet (#130), so a body with
     one is exempted from pairing rather than failing on a known gap — the
     volume check still applies.
     """
@@ -123,6 +138,15 @@ def _audited(body, op: str):
     # op into a refusal on the strength of a missing converter.
     subject = body
     if not isinstance(body, B.Body):
+        if require_body:
+            raise GeometryInvalidError(
+                f"{op} was asked for one solid and produced a "
+                f"{type(body).__name__} — a pile of pieces can report the right "
+                "volume while not being the shape at all",
+                FailureSignature(op=op, diagnostic="AnswerAudit", kernel="ref"),
+                stage="audit", predicate="answer_is_a_closed_solid",
+                measured={"kind": type(body).__name__},
+                remedy="this is a kernel defect, not a bad request — please report it")
         try:
             subject = B.to_body(body)
         except Exception:                       # noqa: BLE001 - see above
@@ -151,13 +175,32 @@ def _audited(body, op: str):
     if defect is not None and any(d != 0 for d in defect):
         bad.append("faces are not consistently oriented — the shell's vector "
                    f"areas sum to {tuple(float(d) for d in defect)}, not zero")
+    elif defect is None:
+        # The boundary-integral form skips any body carrying an arc. The
+        # SURFACE form (Σ Areaᵢ·n̂ᵢ over faces, exact in ℚ[√3][π] via the
+        # twelfth span) covers plane-and-cylinder bodies with arcs — every
+        # quarter-crossing #123 result, where the same 90° arc bounds the
+        # notch floor and the mouth with opposite senses and a flipped sense
+        # moves the sum by 2π while leaving pairing and volume untouched.
+        # None still means NOT CHECKED, never passed: a sphere or torus in
+        # the shell, or an odd-twelfth #123 wall whose normal has irrational
+        # length (2−√3 for a crossing at 60°).
+        va = B.vector_area(subject)
+        if va is not None and any(c.sign() != 0 for c in va):
+            bad.append("the shell is not closed: sum of Area*n is "
+                       f"({', '.join(f'{float(c):.6g}' for c in va)}), "
+                       "not zero")
     # The MESH, coarsely. The three checks above are all exact and all reason
     # about the b-rep; none of them looks at what gets tessellated, and a body
-    # can satisfy every one of them while producing a torn STL — the #123
-    # prototype does exactly that (exact volume, clean pairing, 87 non-manifold
-    # directed edges) because the trimmed-band mesher meshes the (theta,z)
-    # BOUNDING RECTANGLE rather than the real domain. A right number behind a
-    # wrong artifact is still a wrong answer to whoever prints the part.
+    # can satisfy every one of them while producing a torn STL — the first #123
+    # prototype did exactly that (exact volume, clean pairing, 87 non-manifold
+    # directed edges) because the trimmed-band mesher meshed the (theta,z)
+    # BOUNDING RECTANGLE rather than the real domain. The landed #123 splits
+    # the bore wall into plain bands and meshes rim arcs on the shared axis
+    # grid, so its bodies now measure 0 unpaired directed edges at deflections
+    # 0.8 through 0.05 — but the failure SHAPE is permanent: a right number
+    # behind a wrong artifact is still a wrong answer to whoever prints the
+    # part, which is why this check stays.
     #
     # Deliberately COARSE (deflection 0.8): this is a topology question, not an
     # accuracy one, and a torn mesh is torn at any resolution. Measured across
@@ -628,6 +671,17 @@ class RefKernel:
                 raise KernelError(str(exc), FailureSignature(
                     op="boolean.union", diagnostic="NotYetImplemented",
                     kernel="ref"))
+        if op == "cut":
+            # #123 — a box tool whose FOOTPRINT STRADDLES a bore. It has to be
+            # tried before the representation-specific paths below, because
+            # every one of them is right to refuse it: a DrilledSolid cannot
+            # hold a bore that meets a lateral wall, and its guard saying so is
+            # correct and must never be loosened. This dispatches AHEAD of that
+            # guard rather than around it, and only for the family it can
+            # actually build — anything else falls through untouched.
+            straddled = self._straddle_cut(a, b)
+            if straddled is not None:
+                return straddled
         if isinstance(b, Cyl) and op == "cut" and isinstance(a, DisjointUnion):
             # (A ∪ B) ∖ C distributes over disjoint members (K2.3): the boss
             # standing on a plate keeps its pilot bore exact. DisjointUnion.cut
@@ -1589,6 +1643,53 @@ class RefKernel:
             return [p for i, p in enumerate(pts) if p not in pts[:i]], \
                 shape.cx, shape.cy
         return None, None, None
+
+    def _straddle_cut(self, a, tool):
+        """#123 — an axis-aligned box tool whose footprint STRADDLES a bore.
+
+        Returns the result, or ``None`` when this is not that family, in which
+        case ``boolean`` carries on to the paths that are right for whatever it
+        actually is. Written against the canonical ``Body`` (ADR-0021), so it
+        serves the counterbore (a ``DrilledSolid``) and the bored boss (a
+        ``DisjointUnion`` around a lathe) out of one implementation rather than
+        one per representation.
+
+        Two refusals, deliberately different. ``NotchOutsideField`` means the
+        tool genuinely straddles a bore and the answer is not in any exact
+        field this kernel has — a permanent boundary, reported by name with the
+        offsets that DO work. Plain ``NotchRefused`` means "not this family",
+        and is silent, because the guards downstream are correct for the shapes
+        it does not cover and must keep their say.
+        """
+        from forgekernel import body as B
+        from forgekernel.brep import Solid
+        from forgekernel.notch import NotchOutsideField, NotchRefused, notch_cut
+        from forgekernel.quadric import _exact_bbox
+
+        if not isinstance(tool, Solid):
+            return None
+        tb = _exact_bbox(tool)
+        if tb is None:
+            return None
+        (x0, y0, z0), (x1, y1, z1) = tb
+        # the tool must BE its bounding box: a prism that only fills part of it
+        # would remove less than the notch this builds
+        if tool.volume() != (x1 - x0) * (y1 - y0) * (z1 - z0):
+            return None
+        try:
+            src = B.to_body(a)
+        except (ValueError, AttributeError, TypeError):
+            return None
+        try:
+            out = notch_cut(src, (x0, x1, y0, y1), z0, z1)
+        except NotchOutsideField as exc:
+            _nope("boolean.cut(prism straddling a bore)", "K3.7",
+                  predicate="crossing_is_at_a_twelfth",
+                  measured={"faces": len(src.faces)},
+                  remedy=str(exc))
+        except NotchRefused:
+            return None
+        return _audited(out, "boolean.cut", require_body=True)
 
     def _pocket_rounded(self, a, tool):
         """Cut an axis-aligned tool into a rounded box, whose flats are
