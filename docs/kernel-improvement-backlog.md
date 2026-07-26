@@ -220,3 +220,48 @@ Everything above follows from this one.
 4. **1.2 the differential oracle in CI** — makes every later change safe.
 5. **3 K4.2, then K5.2** — the real geometry work, in that order, because
    certified insets are a prerequisite for a lot of blend work anyway.
+
+---
+
+## 9. #123 straddling booleans — the analysis, so it is not re-derived
+
+A prism whose corner sits ON a bore axis is the last boolean family the matrix
+refuses (2 cells). Before writing any topology, the two questions that decide
+whether it is buildable at all were answered — both YES, and the second answer
+is not the obvious one.
+
+**Is the volume in an exact field?** Yes, and only ℚ[π] — no surd. Take the
+probe's own case: counterbore (bore r=2 over z 0..10, r=4 over z 7..10) cut by
+`box(2,2,100)` at the bbox midpoint, so the tool spans x,y ∈ [15,17] with its
+corner exactly on the axis.
+
+    z 5..7   bore r=2   removed = square − quarter disc = 4 − π   (per unit z)
+    z 7..10  bore r=4   the whole square is inside the bore       = 0
+
+    total removed = 2(4 − π)
+
+**What is the topology?** This is where a hand-built version would go wrong.
+The removed face is *not* the square. Its four corners classify:
+
+    (15,15) r²=0  INSIDE      (17,15) r²=4  ON
+    (15,17) r²=4  ON          (17,17) r²=8  OUTSIDE
+
+Two corners lie exactly ON the bore, so the region is bounded by the quarter
+arc (17,15)→(15,17) plus the two segments meeting at (17,17) — three edges, not
+four. **The tool's sides x=15 and y=15 lie entirely inside the bore and
+contribute no face whatsoever.** Emitting all four sides — the natural thing to
+write — produces a self-intersecting shell.
+
+Trim curves are lines and arcs only; the plane x=15 meets the cylinder in two
+straight lines, not a conic, because it passes through the axis. So #123 needs
+no new curve type and does not depend on #122.
+
+The real work is that the bore wall stops being a rectangle in (θ,z): it loses
+a 90°×2mm patch, so its loop is L-shaped in parameter space. That is the first
+non-rectangular quadric face in the kernel, and it is the reason this is a
+day's careful work rather than an afternoon's.
+
+**Do it with the audit on.** `_audited` now checks edge pairing and positive
+volume on every hand-built body, so the four-sided mistake above fails loudly
+instead of shipping a plausible number. That guard did not exist when the
+earlier intricate constructions were written, which is why they shipped wrong.
