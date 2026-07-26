@@ -146,6 +146,41 @@ def test_every_hand_built_construction_survives_its_own_audit(k, label, build):
     assert k.validate(out).ok
 
 
+def test_a_drilled_cut_whose_canonical_form_is_torn_refuses(k, monkeypatch):
+    """W6's escape route, closed. The drilled-cut path returned
+    ``base.cut(b)`` UNAUDITED, so when ``from_drilled`` grew a phantom
+    shoulder between two gapped coaxial bores, the wrong body reached
+    ``mass_props`` (off by an exact pi multiple) with ``validate().ok`` —
+    the worst class this kernel has: a silent wrong number wearing a green
+    check. The geometry defect is fixed in forge (the shoulder loop now
+    skips non-touching bands); this pins the NET, by reinstating the defect
+    at the converter and requiring the cut to refuse rather than return."""
+    from forgekernel import body as fb
+
+    real = fb.from_drilled
+
+    def phantom(d):
+        body = real(d)
+        # hang one face's worth of extra annulus in the material: the exact
+        # signature of the W6 defect (rims used 3x and 1x, volume off by 5*pi)
+        cx, cy, z, rin, rout = fb.F(10), fb.F(10), fb.F(3), fb.F(2), fb.F(3)
+        outer = fb._circle_at(cx, cy, z, rout)
+        inner = fb._circle_at(cx, cy, z, rin)
+        vo, vi = (cx + rout, cy, z), (cx + rin, cy, z)
+        shoulder = fb.Face(fb.Plane((fb.F(0), fb.F(0), fb.F(1)), z),
+                           (fb.Loop((fb.Edge(outer, vo, vo),)),
+                            fb.Loop((fb.Edge(inner, vi, vi),))), True)
+        return fb.Body(body.faces + (shoulder,))
+
+    plate = k.box(20, 20, 12)
+    d1 = k.boolean("cut", plate,
+                   k.transform(k.cylinder(2, 3), translate=(10, 10, 0)))
+    monkeypatch.setattr(fb, "from_drilled", phantom)
+    with pytest.raises(GeometryInvalidError, match="invalid body"):
+        k.boolean("cut", d1,
+                  k.transform(k.cylinder(3, 3), translate=(10, 10, 9)))
+
+
 # --- round 9, tier 1: two wrong numbers through the public seam --------------
 
 COMPOUNDS = [

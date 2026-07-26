@@ -785,7 +785,13 @@ class RefKernel:
                     else a if isinstance(a, DrilledSolid) else None)
             if base is not None:
                 try:
-                    return base.cut(b)
+                    # audited like every other constructive path: W6's phantom
+                    # shoulder (a gapped counterbore stack whose canonical form
+                    # grew an annulus hanging in solid material) reached
+                    # mass_props off by an exact pi multiple BECAUSE this
+                    # return skipped the answer audit — validate said ok while
+                    # manifold_violations could see the tear all along.
+                    return _audited(base.cut(b), "boolean.cut(drill)")
                 except ValueError as exc:
                     raise KernelError(str(exc), FailureSignature(
                         op="boolean.cut", diagnostic="NotYetImplemented",
