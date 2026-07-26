@@ -294,6 +294,48 @@ verified against the direct computation to full float agreement. That is
 rational x sqrt(35) x pi — squarely inside **ℚ[√35][π], the field #117 already
 built**. No new number field, no new curve type, no conic.
 
+> **SECOND CORRECTION (#122 follow-up), by running the probe rather than
+> reading it.** The paragraph above is wrong on a load-bearing detail, and
+> believing it would hand the next agent a green cell that is not green.
+> `cylinder(r, h)` spans **z = 0 to h**, so translating it to the bbox midpoint
+> `(0, 0, 0)` leaves it spanning **z = 0..100** against a sphere at z = −6..6.
+> The cut is coaxial but it is **BLIND, not through** — it enters the top and
+> stops nowhere, having removed only the upper half's bore. Measured:
+>
+> ```
+> >>> _mid(k, k.sphere(6))            → (0.0, 0.0, 0.0)
+> >>> tool.z0, tool.z1                → 0, 100
+> ```
+>
+> A napkin ring is therefore **not** what this cell asks for. The through case
+> is now built, exact and meshing (`NapkinRing` + `from_napkin_ring`), and the
+> cell is still 🚧 — correctly, because the seam refuses the blind bore rather
+> than answering the wrong solid. The matrix stays 327/345.
+>
+> **What the blind case actually is**, since the derivation is cheap and should
+> not be re-done: sphere minus a coaxial cylinder entering from above and
+> stopping at z = 0. Three faces, not two —
+>
+> * the sphere minus ONE polar cap (a single rim at z = +√(R²−r²), so a
+>   `_sphere_zone` with one degenerate rim; the current predicate rejects it,
+>   deliberately);
+> * the bore wall, z = 0 to √(R²−r²);
+> * a **flat disk floor** of radius r at z = 0 — the tool's own bottom cap.
+>   Note this is a PLANE, not the spherical-cap floor an earlier note guessed.
+>
+> Removed volume = the bore cylinder (πr²·√(R²−r²)) plus the sphere's cap above
+> z = √(R²−r²), which for R=6, r=1 gives
+>
+>     V = 288π − π(144 − 70√35/3) = π(144 + 70√35/3) = 886.0606404…
+>
+> checked against an independent Monte Carlo membership test (4M samples):
+> `885.969 ± 1.296` at 3σ. Use that as the oracle when the cell is attempted;
+> do not take it from whatever the implementation first prints.
+>
+> — still inside ℚ[√35][π]. So the field is not the blocker; the third face and
+> the one-rim zone predicate are. Do NOT widen `_sphere_zone` to admit one rim
+> without also deciding band-versus-caps explicitly (see its docstring).
+
 **CORRECTION, made by checking rather than assuming.** The paragraph above
 originally said "the work is assembling them", implying a small construction.
 That was wrong, and the correction is the more useful result.
@@ -328,6 +370,33 @@ and an explicit refusal off-axis — not a general sphere-cylinder boolean.
 ---
 
 ## 11. The real blocker under #120 and #122: `Body` is rational-only
+
+> **RESOLVED for the napkin ring, and the diagnosis below was right.** `F()`
+> was widened (#122) and `from_napkin_ring` now builds the canonical two-face
+> `Body`: a spherical zone plus the bore wall, exact volume `(140/3)√35·π`,
+> watertight mesh, clean audit. Keep reading — the section's central claim,
+> that the TYPE SYSTEM of the canonical form is the blocker rather than the
+> mathematics, is what turned out to be correct, and it still gates `cone x
+> shell`, `cone x fillet(all)` and #120.
+>
+> Two further coercions of exactly this shape were found downstream when the
+> converter was finished, both of them SILENT until an irrational coordinate
+> reached them:
+>
+> * `PiPoly.from_pival` forced both coefficients through the stdlib `Fraction`,
+>   so a `PiVal` carrying a `SurdVal` on π could not report its own sign — and
+>   `PiVal._cmp` swallowed the `TypeError` into `NotImplemented`, surfacing it
+>   as "'<=' not supported between instances of 'PiVal' and 'int'" in the
+>   ANSWER AUDIT, three modules from the cause. Fixed by routing through
+>   `_coef`, which admits ℚ and ℚ[√d] and still refuses a non-integral float.
+> * `_audited` ordered an exact volume against a bare `0` instead of asking
+>   `.sign()`, which is what let a swallowed exception disarm the audit's one
+>   mandatory check. Now asks for the sign.
+>
+> **The lesson to carry forward:** widening the field is not one edit. Grep for
+> `F(` / `Fraction(` on any path an exact coordinate reaches — sign tests,
+> comparisons, hashing, bbox, meshing — because each one fails only on the
+> irrational case and several of them fail QUIETLY.
 
 Found by testing, after two wrong guesses in the same area on the same day.
 

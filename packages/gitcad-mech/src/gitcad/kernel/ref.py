@@ -130,8 +130,17 @@ def _audited(body, op: str):
     bad = []
     if not any(isinstance(f.surface, B.Torus) for f in subject.faces):
         bad += B.manifold_violations(subject)
-    if B.volume(subject) <= 0:
-        bad.append(f"volume is not positive ({float(B.volume(subject)):.6g})")
+    # Ask the value for its SIGN; do not order it against a bare 0. Every exact
+    # type here decides its own sign exactly (ADR-0019), but their rich
+    # comparisons route through helpers that SWALLOW TypeError and ValueError
+    # and hand back NotImplemented — so a coercion failure inside the number
+    # field surfaced as "'<=' not supported between instances of 'PiVal' and
+    # 'int'", a message about Python's operator protocol rather than about the
+    # arithmetic, three modules from the cause. A safety net must not be
+    # disarmable by a swallowed exception; `.sign()` lets the real failure out.
+    vol = B.volume(subject)
+    if (vol.sign() if hasattr(vol, "sign") else (vol > 0) - (vol < 0)) <= 0:
+        bad.append(f"volume is not positive ({float(vol):.6g})")
     # Orientation, which edge pairing cannot see: it counts how many faces use
     # each edge, never which DIRECTION. Reversing one face of a box leaves
     # every edge used exactly twice and passes the pairing check outright.

@@ -89,19 +89,90 @@ def test_the_bbox_stops_at_the_band_not_the_sphere(k) -> None:
     assert float(hi[0]) - float(lo[0]) == pytest.approx(12.0, rel=1e-12)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "NapkinRing has no canonical-B-rep converter yet, and the seam correctly "
-    "refuses rather than falling back to the representation's own mesher — "
-    "that fallback was removed in #124 because it silently discarded the "
-    "caller's deflection. The converter needs a TRIMMED SPHERICAL ZONE face "
-    "(the sphere between the two bore circles) plus the bore wall; the solid "
-    "itself already meshes correctly via NapkinRing.tessellate, so this is "
-    "plumbing, not geometry. strict=True so it fails loudly once wired up."))
 def test_it_meshes_through_the_seam_and_refines(k) -> None:
+    """Was xfail(strict) until the canonical-B-rep converter landed.
+
+    The seam meshes the CANONICAL form, never the representation's own mesher —
+    that fallback was removed in #124 because it silently discarded the
+    caller's deflection, which is exactly what the second assertion here pins.
+    `from_napkin_ring` supplies the two faces (a spherical zone and the bore
+    wall) and `tessellate` grew a zone branch to draw the first of them.
+    """
     ring = k.boolean("cut", k.sphere(6), _through(k))
     coarse = len(k.tessellate(ring, deflection=0.5)["triangles"])
     fine = len(k.tessellate(ring, deflection=0.01)["triangles"])
     assert fine > coarse > 0
+
+
+def _mesh_volume(mesh) -> float:
+    """Divergence-theorem volume of a triangle soup. Floats are legal here —
+    this measures a MESH, which is a display artifact (ADR-0019)."""
+    verts, total = mesh["vertices"], 0.0
+    for a, b, c in mesh["triangles"]:
+        p, q, r = verts[a], verts[b], verts[c]
+        total += (p[0] * (q[1] * r[2] - q[2] * r[1])
+                  - p[1] * (q[0] * r[2] - q[2] * r[0])
+                  + p[2] * (q[0] * r[1] - q[1] * r[0])) / 6.0
+    return abs(total)
+
+
+def test_the_seams_mesh_is_watertight(k) -> None:
+    """Every directed edge used as often as its reverse. The zone and the bore
+    wall share both rims, so this is the check that they actually landed on the
+    same vertices rather than two rings a rounding apart."""
+    from collections import Counter
+
+    mesh = k.tessellate(k.boolean("cut", k.sphere(6), _through(k)),
+                        deflection=0.01)
+    seen: Counter = Counter()
+    for tri in mesh["triangles"]:
+        for a, b in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])):
+            seen[(a, b)] += 1
+    assert [e for e, n in seen.items() if seen.get((e[1], e[0]), 0) != n] == []
+
+
+def test_the_seams_mesh_converges_on_the_exact_volume(k) -> None:
+    """The mesh must describe the SAME solid the exact volume describes.
+
+    A zone meshed over the wrong latitude band, or one silently sampled at a
+    fixed resolution, is watertight and refines on request while sitting at a
+    constant offset from the truth — so a single tolerance proves nothing.
+    CONVERGENCE does: refining by 5x must cut the error by roughly 5x, because
+    an inscribed mesh's volume deficit is first-order in the deflection.
+
+    Compared against the closed form, never against the mesher's own output.
+    """
+    exact = (4 / 3) * math.pi * 35 ** 1.5
+    ring = k.boolean("cut", k.sphere(6), _through(k))
+    coarse = abs(_mesh_volume(k.tessellate(ring, deflection=0.05)) - exact)
+    fine = abs(_mesh_volume(k.tessellate(ring, deflection=0.01)) - exact)
+    finer = abs(_mesh_volume(k.tessellate(ring, deflection=0.002)) - exact)
+    assert coarse / fine > 3, f"5x refinement barely helped: {coarse} -> {fine}"
+    assert fine / finer > 3, f"5x refinement barely helped: {fine} -> {finer}"
+    assert finer / exact < 1e-3
+
+
+def test_the_mesh_honours_the_deflection_it_was_asked_for(k) -> None:
+    """#124's whole point. Every triangle's centroid must sit within the
+    requested deflection of the true surface — the sphere of radius 6 or the
+    bore of radius 1. A zone is curved in BOTH latitude and longitude and the
+    two chord errors add, so spending the full budget on each overshoots: this
+    caught the zone mesher running 1.7x over tolerance.
+
+    Floats are legal here — this is meshing (ADR-0019).
+    """
+    ring = k.boolean("cut", k.sphere(6), _through(k))
+    for deflection in (0.5, 0.05, 0.01):
+        mesh = k.tessellate(ring, deflection=deflection)
+        verts = mesh["vertices"]
+        for a, b, c in mesh["triangles"]:
+            p, q, r = verts[a], verts[b], verts[c]
+            cen = [(p[i] + q[i] + r[i]) / 3 for i in range(3)]
+            off = min(abs(math.sqrt(sum(x * x for x in cen)) - 6.0),
+                      abs(math.hypot(cen[0], cen[1]) - 1.0))
+            assert off <= deflection + 1e-12, (
+                f"a facet sits {off} off the surface at deflection "
+                f"{deflection}")
 
 
 def test_the_representation_itself_meshes_inside_its_own_bbox(k) -> None:

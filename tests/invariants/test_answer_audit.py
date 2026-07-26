@@ -65,6 +65,34 @@ def test_a_sound_body_passes_through_untouched() -> None:
     assert _audited(body, "test") is body
 
 
+def test_the_positivity_check_survives_a_volume_outside_Q_pi() -> None:
+    """The audit must decide the SIGN of a volume in any exact field it meets,
+    not just ℚ[π].
+
+    A napkin ring's volume is (140/3)√35·π — a ``PiVal`` whose π coefficient is
+    a ``SurdVal``. Ordering that against a bare 0 used to raise "'<=' not
+    supported between instances of 'PiVal' and 'int'", because
+    ``PiPoly.from_pival`` forced both coefficients through the stdlib
+    ``Fraction`` and ``PiVal._cmp`` swallowed the resulting ``TypeError`` into
+    ``NotImplemented``. The audit could not check the one thing it exists to
+    check, and it announced that as an operator-protocol message three modules
+    from the cause.
+
+    Both directions are pinned: the sound ring passes, and the same ring turned
+    inside out is still caught — a widened field must not widen the hole.
+    """
+    from forgekernel.surdrev import NapkinRing
+
+    body = B.to_body(NapkinRing(6, 1))
+    assert B.volume(body).sign() == 1
+    assert _audited(body, "test") is body
+
+    flipped = B.Body(tuple(B.Face(f.surface, f.loops, not f.sense)
+                           for f in body.faces))
+    with pytest.raises(GeometryInvalidError, match="volume is not positive"):
+        _audited(flipped, "test")
+
+
 def test_a_torus_body_is_exempt_from_pairing_but_not_from_volume(k) -> None:
     """Torus faces carry no boundary loops yet (#130), so their rims read as
     unpaired. Failing on a known gap would turn a working op into a refusal —
