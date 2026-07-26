@@ -43,3 +43,7 @@ Thumbs.db
 
 # workflow worktrees are scratch, never source (ADR-0004)
 .claude/worktrees/
+
+# throwaway clean-room venvs for release verification — never source (ADR-0004)
+cleanroom/
+*.venv/
