@@ -101,16 +101,20 @@ def test_too_thick_a_shell_says_the_thickness_that_would_work(
     assert f"{limit:.4g}" in err.remedy, err.remedy
 
 
-def test_a_blind_bore_lists_which_bores_are_blind(k) -> None:
-    """"A blind bore" is not actionable when the part has nine holes."""
+def test_a_clipped_blind_floor_names_its_own_stack(k) -> None:
+    """"A bore refused" is not actionable when the part has nine holes.
+
+    Since #120 a blind bore's floor is shelled EXACTLY when it clears 2t (the
+    erosion torus fits) — this plate's t=2 puts the z=4 floor exactly AT 2t,
+    the clipped regime whose volume carries an arcsin — and the refusal must
+    say which stack tripped it and by how much."""
     plate = DrilledSolid(Solid.box(30, 30, 10), [])
     plate = plate.cut(Cyl(8, 8, 2, 0, 10)).cut(Cyl(22, 22, 3, 4, 10))
     err = _refusal(lambda: k.shell(plate, [], 2))
-    assert err.predicate == "every_bore_is_through"
-    blind = err.measured["blind_bores"]
-    assert len(blind) == 1, "only the z=4..10 bore is blind"
-    assert blind[0]["xy"] == [22.0, 22.0]
-    assert err.measured["solid_z"] == [0.0, 10.0]
+    assert err.predicate == "floor_clears_two_t"
+    assert err.measured["stack_xy"] == [22.0, 22.0]
+    assert err.measured["floor_height"] == 4.0
+    assert err.measured["t"] == 2.0
 
 
 def test_the_refusal_serialises_for_an_agent_and_the_live_rail(k) -> None:

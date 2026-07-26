@@ -1506,6 +1506,112 @@ class RefKernel:
             raise KernelError(str(exc), FailureSignature(
                 op="fillet", diagnostic="NotYetImplemented", kernel="ref"))
 
+    def _hollow_box_spec(self, shape):
+        """(lo, hi, ilo, ihi) of a closed hollow box — a box with one fully
+        enclosed box cavity, what ``shell(box)`` builds — or None.
+
+        Detection is SOUND, not structural: the candidate outer-minus-inner
+        is rebuilt from the two vertex boxes and compared by exact symmetric
+        difference (both boolean cuts must have volume exactly zero) — the
+        lesson of the box predicate that was satisfiable by non-boxes.
+        """
+        from forgekernel import csg
+        from forgekernel.brep import Solid
+
+        lo, hi = shape.bbox()
+        inner = [v for p in shape.polys for v in p.verts
+                 if all(lo[c] < v[c] < hi[c] for c in range(3))]
+        if not inner:
+            return None
+        ilo = tuple(min(v[c] for v in inner) for c in range(3))
+        ihi = tuple(max(v[c] for v in inner) for c in range(3))
+        if any(ihi[c] <= ilo[c] for c in range(3)):
+            return None
+        try:
+            outer_box = Solid.box(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2],
+                                  "fhb.outer").translated(lo)
+            inner_box = Solid.box(ihi[0] - ilo[0], ihi[1] - ilo[1],
+                                  ihi[2] - ilo[2], "fhb.inner").translated(ilo)
+            candidate = csg.cut(outer_box, inner_box)
+            if (csg.cut(shape, candidate).volume() != 0
+                    or csg.cut(candidate, shape).volume() != 0):
+                return None
+        except (ArithmeticError, ValueError, TypeError, IndexError):
+            return None            # not a shape the exact engine can settle
+        return lo, hi, ilo, ihi
+
+    def _shell_hollow_box(self, shape, t):
+        """Shell a CLOSED HOLLOW BOX, or return None (#120).
+
+        Erosion of the wall by t: the complement of the material is (outside
+        the outer box) ∪ (the cavity), so the void is the inset outer box
+        minus the cavity DILATED by a ball of t — and a box dilated by a ball
+        is exactly a ROUNDED BOX (Minkowski sum), which the kernel already
+        has. No torus appears: the cavity's edges are convex from the
+        complement's side, so the dilation rounds them with quarter cylinders
+        and corner octants.
+
+        Regimes, decided exactly per face gap g = wall − 2t:
+
+        * every g > 0: the rounded box sits strictly inside the inset box —
+          the void is the six full inset flats plus the rounded box flipped.
+        * every g == 0 (the bench probe: wall 2, t 1): the flat void regions
+          vanish. The void degenerates to the corner-and-edge LATTICE: its
+          outer faces are square FRAMES (inset flats with the rounded box's
+          core rectangle as an inner ring — the tangency lines), and the
+          rounded box contributes only its 12 quarter cylinders and 8
+          octants, flipped. The frame's inner-ring segments are exactly the
+          cylinders' straight tangency edges, so pairing closes.
+        * any g < 0: the rounded box is clipped by an inset plane — the
+          clipped quarter cylinder's cross-section is a circular segment
+          whose area carries an arcsin, outside every exact field. Refusing
+          is the finished answer. Mixed 0/positive gaps are a buildable but
+          unbuilt hybrid (frame on some faces only) — an honest gap.
+        """
+        from forgekernel import body as B
+        from forgekernel.brep import Solid
+        from forgekernel.quadric import RoundedBox
+
+        spec = self._hollow_box_spec(shape)
+        if spec is None:
+            return None
+        lo, hi, ilo, ihi = spec
+        gaps = [(ilo[c] - t) - (lo[c] + t) for c in range(3)] \
+            + [(hi[c] - t) - (ihi[c] + t) for c in range(3)]
+        if any(g < 0 for g in gaps):
+            _nope("shell(hollow box: a wall thinner than 2t clips the "
+                  "dilated cavity against the inset wall — the clipped "
+                  "quarter cylinder's volume carries an arcsin, outside "
+                  "every exact field)", "K4.2 (offset surfaces)",
+                  predicate="wall_at_least_two_t",
+                  measured={"min_wall": float(2 * t + min(gaps)),
+                            "t": float(t)},
+                  remedy=f"use t at most {float((2 * t + min(gaps)) / 2):.4g}")
+        if any(g == 0 for g in gaps) and any(g > 0 for g in gaps):
+            _nope("shell(hollow box: walls of exactly 2t mixed with thicker "
+                  "ones need frame faces on some sides only — not built yet)",
+                  "K4.2 (offset surfaces)")
+        rb = RoundedBox(ihi[0] - ilo[0] + 2 * t, ihi[1] - ilo[1] + 2 * t,
+                        ihi[2] - ilo[2] + 2 * t, t,
+                        (ilo[0] - t, ilo[1] - t, ilo[2] - t))
+        rb_faces = B.from_rounded_box(rb).faces
+        inset = Solid.box(hi[0] - lo[0] - 2 * t, hi[1] - lo[1] - 2 * t,
+                          hi[2] - lo[2] - 2 * t, "shb.inset").translated(
+                              (lo[0] + t, lo[1] + t, lo[2] + t))
+        box_faces = B.from_solid(inset).faces
+        if all(g > 0 for g in gaps):
+            void_faces = box_faces + tuple(
+                B.Face(f.surface, f.loops, not f.sense) for f in rb_faces)
+        else:
+            # the lattice: frames outside, tangent quadrics inside
+            void_faces = tuple(
+                _frame_face(f, ilo, ihi) for f in box_faces) + tuple(
+                B.Face(f.surface, f.loops, not f.sense) for f in rb_faces
+                if not isinstance(f.surface, B.Plane))
+        return _audited(B.Body(B.to_body(shape).faces
+                      + tuple(B.Face(f.surface, f.loops, not f.sense)
+                              for f in void_faces)), "shell(hollow box)")
+
     def _fillet_hollow_box(self, shape, r):
         """fillet(all) on a CLOSED HOLLOW BOX — a box with a fully-enclosed
         box cavity (what ``shell(box)`` builds) — or None if ``shape`` is not
@@ -1528,30 +1634,12 @@ class RefKernel:
         lesson of the box predicate that was satisfiable by non-boxes.
         """
         from forgekernel import body as B
-        from forgekernel import csg
-        from forgekernel.brep import Solid
         from forgekernel.quadric import RoundedBox
 
-        lo, hi = shape.bbox()
-        inner = [v for p in shape.polys for v in p.verts
-                 if all(lo[c] < v[c] < hi[c] for c in range(3))]
-        if not inner:
+        spec = self._hollow_box_spec(shape)
+        if spec is None:
             return None
-        ilo = tuple(min(v[c] for v in inner) for c in range(3))
-        ihi = tuple(max(v[c] for v in inner) for c in range(3))
-        if any(ihi[c] <= ilo[c] for c in range(3)):
-            return None
-        try:
-            outer_box = Solid.box(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2],
-                                  "fhb.outer").translated(lo)
-            inner_box = Solid.box(ihi[0] - ilo[0], ihi[1] - ilo[1],
-                                  ihi[2] - ilo[2], "fhb.inner").translated(ilo)
-            candidate = csg.cut(outer_box, inner_box)
-            if (csg.cut(shape, candidate).volume() != 0
-                    or csg.cut(candidate, shape).volume() != 0):
-                return None
-        except (ArithmeticError, ValueError, TypeError, IndexError):
-            return None            # not a shape the exact engine can settle
+        lo, hi, ilo, ihi = spec
         if 2 * r > min(ihi[c] - ilo[c] for c in range(3)):
             _nope("fillet(shelled box: 2r exceeds the cavity's smallest "
                   "dimension, so the cavity blends would collide)", "K5.2")
@@ -2143,12 +2231,21 @@ class RefKernel:
         from "shell the base then re-drill", which built no tube and was
         silently 170 mm³ light on a plate with one blind bore.
 
-        Exactly expressible while every bore goes STRAIGHT THROUGH: the void is
-        then the inset base minus the enlarged cylinders — an intersection of
-        two eroded sets, so its corners stay sharp and no new surface type
-        appears. A BLIND bore is different in kind: eroding around its floor's
-        reentrant rim sweeps a torus, which is a K4.2 offset and not this.
+        A bore going STRAIGHT THROUGH keeps every void corner sharp. A BLIND
+        floor or a counterbore SHOULDER adds a reentrant rim, and the erosion
+        around that rim is the quarter TORUS of points within t of the rim
+        circle (#120): tube radius t, k0=3 span=1, carried (ρ, Z−t)→(ρ+t, Z).
+        The construction: scaffold the void as a stepped DrilledSolid whose
+        flat parts are already correct, then replace each scaffold step with
+        the fillet (``_erode_rim_to_torus``). The regimes that CLIP the torus
+        (a floor within (t, 2t] of the base, a shoulder narrower than t) have
+        an arcsin in their volume — transcendental, so those refusals are
+        final answers, not gaps. A floor within t of the base needs no torus
+        at all: the void sits entirely above it and the through-bore collar
+        formula is exact.
         """
+        from collections import defaultdict
+
         from forgekernel import body as B
         from forgekernel.brep import Solid
         from forgekernel.kernel import translate
@@ -2158,20 +2255,6 @@ class RefKernel:
         if box is None:
             return None                 # a general prism base: K4.1's inset
         (bx0, by0, bz0), (bx1, by1, bz1) = box
-        blind = [c for c in shape.bores
-                 if Fraction(c.z0) > bz0 or Fraction(c.z1) < bz1]
-        if blind:
-            _nope("shell(drilled solid: a BLIND bore's floor erodes to a "
-                  "torus, not a cylinder)", "K4.2 (offset surfaces)",
-                  predicate="every_bore_is_through",
-                  measured={"solid_z": [float(bz0), float(bz1)],
-                            "blind_bores": [{"xy": [float(c.cx), float(c.cy)],
-                                             "r": float(c.r),
-                                             "z": [float(c.z0), float(c.z1)]}
-                                            for c in blind]},
-                  remedy=(f"{len(blind)} bore(s) stop inside the material; take "
-                          f"them through z {float(bz0):.4g}..{float(bz1):.4g} "
-                          "and the collar is exact, or shell before drilling"))
         smallest = min(bx1 - bx0, by1 - by0, bz1 - bz0)
         if smallest <= 2 * t:
             _nope("shell(thickness leaves no cavity)", "K4.2",
@@ -2180,24 +2263,120 @@ class RefKernel:
                             "thickness": float(t)},
                   remedy=(f"t must be under {float(smallest) / 2:.4g} mm — half "
                           "the smallest dimension"))
+
+        # -- coaxial stacks → z-bands with the outermost radius per band ------
+        groups = defaultdict(list)
+        for c in shape.bores:
+            z0, z1 = max(Fraction(c.z0), bz0), min(Fraction(c.z1), bz1)
+            if z1 > z0:
+                groups[(Fraction(c.cx), Fraction(c.cy))].append(
+                    (z0, z1, Fraction(c.r)))
+        scaffold: list = []        # cylinders to cut into the inset box
+        sites: list = []           # (cx, cy, Z, ρ): reentrant rims → tori
+        for (cx, cy), cyls in groups.items():
+            zs = sorted({z for c in cyls for z in (c[0], c[1])})
+            bands = []
+            for za, zb in zip(zs, zs[1:]):
+                mid = (za + zb) / 2
+                rs = [r for (z0, z1, r) in cyls if z0 <= mid <= z1]
+                if rs:
+                    bands.append((za, zb, max(rs)))
+            if not bands:
+                continue
+            if any(bands[i][1] != bands[i + 1][0]
+                   for i in range(len(bands) - 1)):
+                _nope("shell(drilled solid: a coaxial stack with a z-gap is "
+                      "two voids, not one)", "K4.2 (offset surfaces)")
+            open_bot = bands[0][0] == bz0
+            open_top = bands[-1][1] == bz1
+            if not open_top and not open_bot:
+                _nope("shell(drilled solid: a bore sealed inside the material "
+                      "erodes to a floating internal void)",
+                      "K4.2 (offset surfaces)")
+            if not open_top:
+                _nope("shell(drilled solid: a bore entering from the BOTTOM "
+                      "is the mirrored construction, not built yet)",
+                      "K4.2 (offset surfaces)",
+                      predicate="stack_opens_upward",
+                      measured={"stack_z": [float(bands[0][0]),
+                                            float(bands[-1][1])],
+                                "solid_z": [float(bz0), float(bz1)]})
+            for (_a, zb0, r0), (_a2, _b2, r1) in zip(bands, bands[1:]):
+                if r1 <= r0:
+                    _nope("shell(drilled solid: a stack that narrows upward "
+                          "is the mirrored construction, not built yet)",
+                          "K4.2 (offset surfaces)")
+                if r1 - r0 <= t:
+                    _nope("shell(drilled solid: a shoulder narrower than t "
+                          "clips the fillet torus against the inner collar — "
+                          "the clipped sector's volume carries an arcsin, "
+                          "outside every exact field)",
+                          "K4.2 (offset surfaces)",
+                          predicate="shoulder_wider_than_t",
+                          measured={"stack_xy": [float(cx), float(cy)],
+                                    "step": float(r1 - r0), "t": float(t)},
+                          remedy=f"widen the counterbore step past {float(t):.4g}")
+            start0 = bz0
+            if not open_bot:
+                zf, rf = bands[0][0], bands[0][2]
+                h = zf - bz0
+                if h <= t:
+                    # the void's floor (bz0+t) is at or above the bore's: the
+                    # erosion never sees the floor rim and the THROUGH collar
+                    # is exact. Refusing this regime was simply a wrong answer.
+                    start0 = bz0
+                elif h <= 2 * t:
+                    _nope("shell(drilled solid: a floor between t and 2t "
+                          "above the base clips the fillet torus against the "
+                          "void's floor — the clipped sector's volume carries "
+                          "an arcsin, outside every exact field)",
+                          "K4.2 (offset surfaces)",
+                          predicate="floor_clears_two_t",
+                          measured={"stack_xy": [float(cx), float(cy)],
+                                    "floor_height": float(h), "t": float(t)},
+                          remedy=(f"make the floor sit below {float(bz0 + t):.4g} "
+                                  f"or above {float(bz0 + 2 * t):.4g} in z"))
+                else:
+                    scaffold.append(Cyl(cx, cy, rf, zf - t, zf))
+                    sites.append((cx, cy, zf, rf))
+                    start0 = zf
+            for j, (za, zb, r) in enumerate(bands):
+                start = start0 if j == 0 else bands[j - 1][1]
+                end = zb - t if j < len(bands) - 1 else bz1
+                # the void clamps a cap-reaching band by t at that cap
+                eff_s = start + t if start == bz0 else start
+                eff_e = end - t if end == bz1 else end
+                if eff_e <= eff_s:
+                    _nope("shell(drilled solid: features closer than t along "
+                          "the bore axis clip each other's fillets)",
+                          "K4.2 (offset surfaces)")
+                scaffold.append(Cyl(cx, cy, r + t, start, end))
+                if j < len(bands) - 1:
+                    Z, rho = zb, bands[j + 1][2]
+                    scaffold.append(Cyl(cx, cy, rho, Z - t, Z))
+                    sites.append((cx, cy, Z, rho))
+
         inner = translate(Solid.box(bx1 - bx0 - 2 * t, by1 - by0 - 2 * t,
                                     bz1 - bz0 - 2 * t),
                           bx0 + t, by0 + t, bz0 + t)
         void = DrilledSolid(inner, [])
         try:
-            for c in shape.bores:
-                # the collar: the void keeps t clear of the bore's wall.
-                # DrilledSolid.cut is what checks the enlarged cylinder still
-                # fits inside the cavity and clears its neighbours, so a collar
-                # that would break out refuses there rather than here.
-                void = void.cut(Cyl(c.cx, c.cy, Fraction(c.r) + t,
-                                    bz0 + t, bz1 - t))
+            for c in scaffold:
+                # DrilledSolid.cut is what checks each collar still fits
+                # inside the cavity and clears its neighbours, so a collar
+                # that would break out refuses there rather than here. The
+                # scaffold's widest cylinder per stack (r_max + t) bounds
+                # every fillet bulge, so its clearance covers the tori too.
+                void = void.cut(c)
         except ValueError as exc:
             _nope(f"shell(drilled solid: the collar does not fit — {exc})",
                   "K4.2")
+        faces = list(B.from_drilled(void).faces)
+        for (cx, cy, Z, rho) in sites:
+            faces = _erode_rim_to_torus(faces, cx, cy, Z, rho, t)
         return _audited(B.Body(B.to_body(shape).faces
                       + tuple(B.Face(f.surface, f.loops, not f.sense)
-                              for f in B.to_body(void).faces)), "shell(rounded box)")
+                              for f in faces)), "shell(drilled solid)")
 
     def _shell_lathe(self, shape, t):
         """Hollow a solid of revolution: the void is the profile inset by t,
@@ -2231,20 +2410,14 @@ class RefKernel:
                     coll = self._shell_drilled(shape, t)
                     if coll is not None:
                         return coll
-                    # SHELLING A DRILLED SOLID NEEDS A COLLAR. Shell offsets
-                    # every boundary face inward by t, and the bore's own
-                    # cylindrical wall is a boundary face: the void must stop
-                    # r+t from the axis, leaving a tube of metal around the
-                    # hole. "Shell the base, then re-drill" builds no such
-                    # tube, and it was not refusing — a 30x30x10 plate with a
-                    # blind Ø4 bore in its top wall, shelled t=2, reported
-                    # 4918.867 where the truth is 5088.81 +- 6.69 (4M-sample
-                    # Monte Carlo): 170 mm3 of collar that is simply absent.
-                    # The old guard only caught bores that reached the cavity,
-                    # and even those it blamed on the barrel arithmetic.
-                    _nope("shell(drilled solid: the bore's own wall must be "
-                          "offset too, which needs a collar this kernel does "
-                          "not build yet)", "K4.2 (offset surfaces)")
+                    # SHELLING A DRILLED SOLID NEEDS A COLLAR (the void must
+                    # stop r+t from the bore's wall — "shell the base, then
+                    # re-drill" was silently 170 mm³ light), and the collar
+                    # construction needs a box base to erode exactly. A
+                    # general prism base is K4.1's certified inset.
+                    _nope("shell(drilled solid: only a box base can be "
+                          "eroded around its bores yet)",
+                          "K4.2 (offset surfaces)")
                 return DrilledSolid(self.shell(shape.base, (), thickness), [])
             if isinstance(shape, DisjointUnion):
                 from forgekernel import body as B
@@ -2285,6 +2458,11 @@ class RefKernel:
                 return fk_shell(shape, thickness)
             except ValueError:
                 pass                       # not a box → try the prism path
+            hollow = self._shell_hollow_box(
+                shape, thickness if isinstance(thickness, Fraction)
+                else Fraction(str(thickness)))
+            if hollow is not None:
+                return hollow
             # K4.1: closed shell of a right PRISM — the void is the prism
             # of the exact inward polygon inset (half-plane intersection),
             # from z0+t to z1−t, cut with the exact boolean engine.
@@ -2885,6 +3063,105 @@ def _fillet_profile(prof, r):
         out.append(("line", pts[(j - 1) % len(pts)], nxt))
     return [sg for sg in out if sg[0] == "arc"
             or (sg[1][0], sg[1][1]) != (sg[2][0], sg[2][1])]
+
+
+def _frame_face(face, ilo, ihi):
+    """Punch the dilated cavity's core rectangle into an inset-box face.
+
+    The lattice void's outer faces are square FRAMES: the inset flat with the
+    rounded box's tangency rectangle as an inner ring. The ring's segments
+    are exactly the quarter-cylinders' straight tangency edges (same
+    endpoints, same lines), so each is used once here and once there — the
+    shell closes with no face of zero width anywhere.
+
+    The hole must be wound OPPOSITE to the outer ring about the face's
+    outward normal, or the plane term would ADD its area instead of
+    subtracting it; the winding is checked by exact signed area, not assumed.
+    """
+    from forgekernel import body as B
+
+    s = face.surface
+    axis = max(range(3), key=lambda c: abs(s.n[c]))
+    level = Fraction(face.loops[0].edges[0].v0[axis])
+    u, v = (c for c in range(3) if c != axis)
+
+    def to3(a, b):
+        p = [None, None, None]
+        p[axis], p[u], p[v] = level, Fraction(a), Fraction(b)
+        return tuple(p)
+
+    ring = [to3(ilo[u], ilo[v]), to3(ihi[u], ilo[v]),
+            to3(ihi[u], ihi[v]), to3(ilo[u], ihi[v])]
+    out_n = tuple(Fraction(x) if face.sense else -Fraction(x) for x in s.n)
+    twice_area = [Fraction(0)] * 3
+    for i in range(4):
+        a, b = ring[i], ring[(i + 1) % 4]
+        twice_area[0] += a[1] * b[2] - a[2] * b[1]
+        twice_area[1] += a[2] * b[0] - a[0] * b[2]
+        twice_area[2] += a[0] * b[1] - a[1] * b[0]
+    if sum(twice_area[c] * out_n[c] for c in range(3)) > 0:
+        ring.reverse()
+    hole = B.Loop(tuple(
+        B.Edge(B.Line(ring[i], tuple(ring[(i + 1) % 4][c] - ring[i][c]
+                                     for c in range(3))),
+               ring[i], ring[(i + 1) % 4]) for i in range(4)))
+    return B.Face(s, face.loops + (hole,), face.sense)
+
+
+def _erode_rim_to_torus(faces, cx, cy, Z, rho, t):
+    """Replace a void scaffold's step at a reentrant rim with the true fillet.
+
+    ``from_drilled`` gave the void a helper band of radius ρ over [Z−t, Z]
+    and a step annulus (ρ → ρ+t) at Z. The erosion's real boundary there is
+    the quarter TORUS swept by the rim circle (ρ, Z): tube radius t, k0=3
+    span=1, carried (ρ, Z−t) → (ρ+t, Z) — the winding ``lathe_body`` would
+    demand. The helper band's outer rims are exactly the torus's rims, so
+    removing the two scaffold faces and adding the torus leaves every edge
+    paired (#130 gave torus faces their loops, so the audit can now see it).
+
+    THE TRAP, pinned by the golden closed forms: the face BELOW the site
+    (a blind bore's floor disk, a counterbore's kept shoulder annulus) has
+    outer radius ρ, NOT ρ+t. The naive ρ+t body passes all four audit checks
+    while 3.744 mm³ heavy on the banked oracle — which is why the scaffold
+    is built so those flat faces are already correct and only the step is
+    replaced here.
+
+    Sense: the void's material lies OUTSIDE the tube (points ≥ t from the
+    rim), so the void's outward normal points toward the tube's centre
+    circle — the opposite of a convex lathe fillet — hence ``sense=False``.
+    """
+    from forgekernel import body as B
+
+    one, zero = Fraction(1), Fraction(0)
+
+    def rim_edge(z, r):
+        c = B.Circle((cx, cy, z), (zero, zero, one), (one, zero, zero), r)
+        v = (cx + r, cy, z)
+        return B.Edge(c, v, v)
+
+    wall_i = ann_i = None
+    for i, f in enumerate(faces):
+        s = f.surface
+        if (isinstance(s, B.Cylinder) and s.r == rho
+                and s.p == (cx, cy, Z - t)):
+            wall_i = i
+        elif (isinstance(s, B.Plane) and s.n == (zero, zero, one)
+                and s.d == Z and len(f.loops) == 2):
+            edges = [e for lp in f.loops for e in lp.edges]
+            if (sorted(e.curve.r for e in edges) == [rho, rho + t]
+                    and all(e.curve.c[:2] == (cx, cy) for e in edges)):
+                ann_i = i
+    if wall_i is None or ann_i is None:
+        raise KernelError(
+            "shell(drilled solid): the scaffold surgery lost its step faces "
+            "— a kernel defect, please report it",
+            FailureSignature(op="shell", diagnostic="AnswerAudit",
+                             kernel="ref"))
+    kept = [f for i, f in enumerate(faces) if i not in (wall_i, ann_i)]
+    tor = B.Face(B.Torus((cx, cy, Z), (zero, zero, one), rho, t, 3, 1),
+                 (B.Loop((rim_edge(Z - t, rho), rim_edge(Z, rho + t))),),
+                 False)
+    return kept + [tor]
 
 
 def _lathe_body(segs, cx, cy):
