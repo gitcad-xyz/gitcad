@@ -1237,6 +1237,93 @@ class RefKernel:
             raise KernelError(str(exc), FailureSignature(
                 op="sweep", diagnostic="NotYetImplemented", kernel="ref"))
 
+    def _shell_chamfered_box(self, shape, t):
+        """Shell a box chamfered on all 12 edges, or return None (#120).
+
+        A chamfered box is CONVEX, so its erosion is the intersection of its
+        own half-spaces offset inward by t. The six face planes move t
+        (rational); the twelve chamfer planes have normals of length √2, so
+        each constant moves t·√2 — relative to the inset box the void is
+        exactly the chamfered box of that inset with depth
+
+            d' = d − (2 − √2)·t
+
+        irrational but inside ℚ[√2], which F() already carries end to end
+        (the napkin-ring widening). d' ≤ 0 means the offset chamfer plane
+        never reaches the inset box and the void is the plain inset box —
+        exact, not a refusal.
+
+        Detection is SOUND, not structural: d is read off one chamfer plane,
+        then the candidate is rebuilt with fk_chamfer and compared by exact
+        symmetric difference — the box-predicate lesson.
+        """
+        from forgekernel import body as B
+        from forgekernel import csg
+        from forgekernel.brep import Solid
+        from forgekernel.kernel import chamfer as fk_chamfer
+        from forgekernel.kernel import translate
+        from forgekernel.surd import SurdVal
+
+        lo, hi = shape.bbox()
+        d = None
+        for p in shape.polys:
+            n = tuple(Fraction(x) for x in p.plane.n)
+            nz = [c for c in range(3) if n[c] != 0]
+            if len(nz) == 2 and abs(n[nz[0]]) == abs(n[nz[1]]):
+                scale = abs(n[nz[0]])
+                corner = sum((Fraction(hi[c]) if n[c] > 0 else
+                              -Fraction(lo[c])) * abs(n[c]) / scale
+                             for c in nz)
+                d = corner - Fraction(p.plane.d) / scale
+                break
+        if d is None or d <= 0:
+            return None
+        try:
+            candidate = fk_chamfer(
+                translate(Solid.box(hi[0] - lo[0], hi[1] - lo[1],
+                                    hi[2] - lo[2]), lo[0], lo[1], lo[2]), d)
+            if (csg.cut(shape, candidate).volume() != 0
+                    or csg.cut(candidate, shape).volume() != 0):
+                return None
+        except (ArithmeticError, ValueError, TypeError, IndexError):
+            return None
+        dims = [Fraction(hi[c]) - Fraction(lo[c]) - 2 * t for c in range(3)]
+        if min(dims) <= 0:
+            _nope("shell(thickness leaves no cavity)", "K4.2",
+                  predicate="cavity_is_positive",
+                  measured={"smallest_dimension": float(min(dims) + 2 * t),
+                            "thickness": float(t)})
+        inset = translate(Solid.box(dims[0], dims[1], dims[2]),
+                          lo[0] + t, lo[1] + t, lo[2] + t)
+        dp = SurdVal(d - 2 * t, t, 2)             # d − 2t + t√2
+        # SurdVal's rich comparisons are EXACT (sign of a ± b√d, no floats)
+        if dp <= 0:
+            void = inset
+        else:
+            # the void's flats shrink FASTER than the solid's (per unit t a
+            # flat loses 2(√2 − 1) beyond its own inset): a flat that
+            # vanishes changes the combinatorics, and the wedge construction
+            # then no longer equals the half-space intersection — refuse
+            # rather than guess. Exact: width = dim − 2d' as a SurdVal sign.
+            for dim in dims:
+                if SurdVal(dim - 2 * (d - 2 * t), -2 * t, 2) <= 0:
+                    _nope("shell(chamfered box: the void's flat face "
+                          "vanishes at this thickness — the offset chamfer "
+                          "planes cross and the wedge construction stops "
+                          "being the erosion)", "K4.2 (offset surfaces)",
+                          predicate="void_flats_survive",
+                          measured={"dim": float(dim), "d": float(d),
+                                    "t": float(t)})
+            try:
+                void = fk_chamfer(inset, dp)
+            except (ArithmeticError, ValueError) as exc:
+                _nope(f"shell(chamfered box: {exc})",
+                      "K4.2 (offset surfaces)")
+        return _audited(B.Body(B.to_body(shape).faces
+                      + tuple(B.Face(f.surface, f.loops, not f.sense)
+                              for f in B.to_body(void).faces)),
+                      "shell(chamfered box)")
+
     def _prism_shell(self, shape, t: Fraction):
         """K4.1: closed hollow of a convex right prism. The inner void's
         profile is the exact inward inset: each edge line moved ``t``
@@ -2632,11 +2719,14 @@ class RefKernel:
                 return fk_shell(shape, thickness)
             except ValueError:
                 pass                       # not a box → try the prism path
-            hollow = self._shell_hollow_box(
-                shape, thickness if isinstance(thickness, Fraction)
-                else Fraction(str(thickness)))
+            t_exact = (thickness if isinstance(thickness, Fraction)
+                       else Fraction(str(thickness)))
+            hollow = self._shell_hollow_box(shape, t_exact)
             if hollow is not None:
                 return hollow
+            chamf = self._shell_chamfered_box(shape, t_exact)
+            if chamf is not None:
+                return chamf
             # K4.1: closed shell of a right PRISM — the void is the prism
             # of the exact inward polygon inset (half-plane intersection),
             # from z0+t to z1−t, cut with the exact boolean engine.
