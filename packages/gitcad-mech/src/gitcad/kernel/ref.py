@@ -635,6 +635,40 @@ class RefKernel:
             # need a bigger field — refuse honestly rather than leak (K3.1).
             _nope(f"boolean.{op} across mixed radicals ({exc})", "K3.1")
 
+    def can(self, op: str, *args, **kwargs) -> dict:
+        """Would this operation succeed? Answers WITHOUT raising.
+
+        An agent planning a feature tree otherwise has to commit to each step
+        and unwind when the kernel refuses three features later. This lets it
+        ask first, and — because a refusal now carries its measurements and a
+        remedy (#114) — the answer says what to change, not merely no:
+
+            k.can("boolean", "cut", plate, bore)
+            {'ok': False, 'predicate': 'mouth_inside_cap',
+             'measured': {'clearance': -3.0, ...},
+             'remedy': 'move the feature 3 mm further from the flat's edge…'}
+
+        It really RUNS the op and throws the result away, rather than
+        predicting from a table. That costs the work twice, and it is the only
+        honest implementation: a table of what the kernel can do is a second
+        source of truth that will drift from the kernel itself, and this whole
+        burn-down is a catalogue of what happens when two things that should
+        agree are allowed not to.
+        """
+        fn = getattr(self, op, None)
+        if not callable(fn):
+            return {"ok": False, "op": op, "remedy": f"no seam operation {op!r}"}
+        try:
+            fn(*args, **kwargs)
+        except KernelError as exc:
+            return {"ok": False, **exc.as_dict()}
+        except Exception as exc:              # noqa: BLE001 - a crash is a defect
+            return {"ok": False, "op": op,
+                    "message": f"{type(exc).__name__}: {exc}",
+                    "remedy": "this is a kernel defect, not a bad request — "
+                              "please report it"}
+        return {"ok": True, "op": op}
+
     def compound(self, shapes: list):
         """Several bodies as one. FUSED where they meet, never merely piled up.
 
@@ -2416,9 +2450,14 @@ def _cap_index_at(src, zo, probe):
                         "outside_probes": [[float(a), float(b)]
                                            for a, b in outside],
                         "clearance": float(gap)},
-              remedy=(f"move the feature {float(-gap):.4g} mm further from the "
-                      "flat's edge, or make it smaller by twice that — past "
-                      "the flat there is a rounded band, not a plane"))
+              # MORE than the clearance, not exactly it: the guard is strict,
+              # so moving by precisely this much lands tangent and refuses
+              # again. A remedy whose own number does not work is worse than
+              # none — it costs the caller a second attempt to discover.
+              remedy=(f"move the feature MORE than {float(-gap):.4g} mm further "
+                      "from the flat's edge (tangent still refuses), or make "
+                      "it smaller by more than twice that — past the flat "
+                      "there is a rounded band, not a plane"))
     return hits[0]
 
 

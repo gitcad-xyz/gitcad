@@ -14,6 +14,7 @@ off the FailureSignature, which is the part designed to leave the machine
 from __future__ import annotations
 
 import math
+from fractions import Fraction
 
 import pytest
 
@@ -144,3 +145,47 @@ def test_a_refusal_lands_on_the_live_rail(k, tmp_path) -> None:
     problems = [e for e in act.state()["events"] if e["kind"] == "problem"]
     assert problems and problems[-1]["predicate"] == "cavity_is_positive"
     assert problems[-1]["remedy"]
+
+
+# --- k.can(): plan without committing ----------------------------------------
+
+def test_can_answers_without_raising(k) -> None:
+    """An agent planning a feature tree otherwise commits to each step and
+    unwinds when the kernel refuses three features later."""
+    good = k.can("boolean", "cut", RoundedBox(20, 20, 10, 2), Cyl(10, 10, 2, 6, 15))
+    assert good == {"ok": True, "op": "boolean"}
+
+    bad = k.can("boolean", "cut", RoundedBox(20, 20, 10, 2), Cyl(10, 1, 2, -5, 15))
+    assert bad["ok"] is False
+    assert bad["predicate"] == "mouth_inside_cap"
+    assert bad["measured"]["clearance"] == pytest.approx(-3.0)
+    assert "3" in bad["remedy"]
+
+
+def test_can_lets_an_agent_repair_its_own_design(k) -> None:
+    """The point of the whole structured-refusal chain: the verdict says what
+    to change, so the next attempt is derived rather than guessed."""
+    base = RoundedBox(20, 20, 10, 2)
+    verdict = k.can("boolean", "cut", base, Cyl(10, 1, 2, -5, 15))
+    assert not verdict["ok"]
+    fix = -verdict["measured"]["clearance"]
+    # The guard is STRICT, so the reported clearance is a bound, not a recipe:
+    # moving by exactly that much lands tangent and refuses again. The remedy
+    # says "MORE than", because a remedy whose own number does not work costs
+    # the caller a second attempt to find that out.
+    assert "MORE than" in verdict["remedy"]
+    assert not k.can("boolean", "cut", base, Cyl(10, 1 + fix, 2, -5, 15))["ok"]
+    assert k.can("boolean", "cut", base,
+                 Cyl(10, 1 + fix + Fraction(1, 100), 2, -5, 15))["ok"]
+
+
+def test_can_does_not_mutate_or_leak(k) -> None:
+    box = RoundedBox(20, 20, 10, 2)
+    before = float(k.mass_props(box)["volume"])
+    k.can("boolean", "cut", box, Cyl(10, 10, 2, 6, 15))
+    assert float(k.mass_props(box)["volume"]) == before
+
+
+def test_an_unknown_operation_is_answered_not_raised(k) -> None:
+    v = k.can("teleport", 1, 2)
+    assert v["ok"] is False and "teleport" in v["remedy"]
