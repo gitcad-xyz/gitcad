@@ -324,3 +324,50 @@ Caveat worth stating: this closed form holds because the cut is CENTRED. Move
 the cylinder off-axis and the volume acquires elliptic integrals and leaves
 every algebraic extension. So the honest deliverable is the centred case exact
 and an explicit refusal off-axis — not a general sphere-cylinder boolean.
+
+---
+
+## 11. The real blocker under #120 and #122: `Body` is rational-only
+
+Found by testing, after two wrong guesses in the same area on the same day.
+
+`NapkinRing` is exact and works — volume, centroid, bbox, and its own mesh. It
+cannot be given a canonical `Body`, and the reason is structural rather than
+incidental:
+
+```python
+>>> B._circle_at(F(0), F(0), SurdVal(0, 1, 35), F(1))
+TypeError: argument should be a string or a Rational instance
+```
+
+Every coordinate in `body.py` is coerced through `Fraction()`. That coercion is
+deliberate and load-bearing — `from_sphere`'s own comment explains that without
+it a directly-constructed `Sphere(0,0,0,6)` holds ints and `4r³/3` silently
+becomes a FLOAT, "the one thing the charter forbids". So it is not a bug to
+delete; it is a guard whose domain is too narrow.
+
+**Why this gates more than one item.** Any solid whose faces meet at an
+irrational height needs surd coordinates in the canonical form:
+
+* a **napkin ring** — bore circles at z = ±√(R²−r²)  (#122's through case)
+* a **blind bore in a sphere** — the probe's actual `sphere x cut cylinder`
+* **cone x shell** and **cone x fillet(all)** — the offset of a slanted profile
+  lands at an irrational height by construction
+* **torus-eroded blind bores** (#120) — same reason
+
+So "add a `to_body` converter for NapkinRing" is not the next increment. The
+next increment is **making `Body` exact-field-generic**: coordinates typed as
+"an exact scalar" (ℚ, ℚ[√d], ℚ[√d][π]) rather than as `Fraction`, with the
+existing float-rejection guard preserved but widened. Every consumer follows —
+`manifold_violations`, `volume`, `bbox`, `tessellate`, `write_step_body`.
+
+**What is already true and should not be re-derived:** the arithmetic is done.
+`surdrev.contour_r2_dz` gives the exact volume for line-and-arc profiles over
+any of those fields, proven against a closed form. The mathematics is not the
+hard part and never was — the TYPE SYSTEM of the canonical form is.
+
+**Estimating honestly:** this is the largest single item on the list, and it
+sits underneath several others, which is an argument for doing it rather than
+against. Doing #120 or the rest of #122 first would mean building each on a
+representation that cannot enter the canonical form — exactly the
+representation/canonical split ADR-0022 exists to end.
