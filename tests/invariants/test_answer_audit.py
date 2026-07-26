@@ -103,6 +103,10 @@ def test_a_torus_body_is_no_longer_exempt_from_pairing(k) -> None:
     assert any(isinstance(f.surface, B.Torus) for f in body.faces)
     assert B.manifold_violations(body) == [], "#130: rims must pair"
     _audited(body, "test")
+    # …and the PUBLIC validate agrees. Before #130 it reported this sound body
+    # ok=False with four "edge arc used by 1 face(s), not 2" violations — a
+    # false negative that contradicted the internal audit on the same body.
+    assert k.validate(filleted).ok
 
     # …and a torus body that IS open must now refuse. Stripping the torus's
     # loops changes nothing the mesh check can see (the torus meshes from its

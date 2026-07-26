@@ -964,9 +964,15 @@ class RefKernel:
             # min() raise over no vertices was a raw crash through the seam
             return {"volume": 0.0, "dx": 0.0, "dy": 0.0, "dz": 0.0}
         if isinstance(shape, B.Body):                 # ADR-0021 canonical form
-            (x0, y0, z0), (x1, y1, z1) = B.bbox(shape)
-            return {"volume": float(B.volume(shape)),
-                    "dx": x1 - x0, "dy": y1 - y0, "dz": z1 - z0}
+            try:
+                (x0, y0, z0), (x1, y1, z1) = B.bbox(shape)
+                return {"volume": float(B.volume(shape)),
+                        "dx": x1 - x0, "dy": y1 - y0, "dz": z1 - z0}
+            except ValueError as exc:
+                # forge refuses honestly when the value leaves the exact field
+                # (a ring rotated off-axis, say). A raw ValueError through the
+                # seam is a CRASH-class defect — wrap it like mass_props does.
+                _nope(f"measure({exc})", _K2)
 
         (x0, y0, z0), (x1, y1, z1) = self.bbox(shape)
         vshape = (AxisStack(shape.cx, shape.cy, [shape])
@@ -1135,12 +1141,19 @@ class RefKernel:
             # reads far too much like fine. The canonical B-rep's own oracle is
             # edge pairing: in a closed shell every edge is shared by exactly
             # two faces.
-            bad = _B.manifold_violations(shape)
-            # the exact sign, not float(...) <= 0: a solid whose true volume is
-            # a hair above zero must not validate as inside-out because the
-            # double rounded to 0.0
-            if _B.volume(shape) <= 0:
-                bad = list(bad) + ["nonpositive-volume"]
+            try:
+                bad = _B.manifold_violations(shape)
+                # the exact sign, not float(...) <= 0: a solid whose true
+                # volume is a hair above zero must not validate as inside-out
+                # because the double rounded to 0.0
+                if _B.volume(shape) <= 0:
+                    bad = list(bad) + ["nonpositive-volume"]
+            except ValueError as exc:
+                # the kernel cannot DECIDE — the volume leaves the exact field
+                # (a ring rotated off-axis). Neither ok nor a violation is an
+                # honest answer, so refuse structurally rather than leak the
+                # raw ValueError through the seam (a CRASH-class defect).
+                _nope(f"validate({exc})", _K2)
             return ValidationReport(
                 ok=not bad,
                 checks={"method": "exact-edge-pairing",
@@ -1175,7 +1188,14 @@ class RefKernel:
         from forgekernel import body as B
 
         if isinstance(shape, B.Body):
-            return B.tessellate(shape, deflection)
+            try:
+                return B.tessellate(shape, deflection)
+            except ValueError as exc:
+                # an honest mesher refusal (30° trims are exact but not yet
+                # meshable, a rotated spherical patch outside ℚ[π], …) must
+                # cross the seam structured, not as a raw ValueError a caller
+                # cannot tell from a bug (#137's side finding).
+                _nope(f"tessellate({exc})", "K3.7 (canonical B-rep)")
         # ADR-0021: ONE mesher, against the canonical form. Preferring each
         # representation's own `tessellate` was a second implementation of the
         # same question, and measuring the two showed the canonical one is

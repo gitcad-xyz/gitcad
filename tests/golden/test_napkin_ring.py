@@ -217,3 +217,21 @@ def test_a_fractional_band_height_is_exact_through_the_seam(k) -> None:
                      k.transform(k.cylinder(1, 400), translate=(0, 0, -200)))
     assert float(k.mass_props(ring)["volume"]) == pytest.approx(
         (4 / 3) * math.pi * 1.25 ** 1.5, rel=1e-12)
+
+
+def test_a_rotated_ring_refuses_structurally_never_a_raw_valueerror(k) -> None:
+    """A ring rotated 90° about x is a legitimate Body whose zone rims are no
+    longer z-perpendicular, so measuring it honestly refuses (the spherical
+    patch leaves ℚ[π], K3.7). That refusal must cross the seam as a structured
+    KernelError: measure(), validate() and tessellate() all let the raw
+    ValueError escape, which the charter classes as a CRASH — a caller cannot
+    tell it from a bug, and an agent cannot act on it. mass_props() had the
+    wrap all along; the other Body branches get the same one."""
+    ring = k.boolean("cut", k.sphere(6),
+                     k.transform(k.cylinder(1, 400), translate=(0, 0, -200)))
+    out = k.transform(ring, rotate_axis=(1, 0, 0), rotate_deg=90)
+    for op in (lambda: k.measure(out),
+               lambda: k.validate(out),
+               lambda: k.tessellate(out)):
+        with pytest.raises(KernelError):
+            op()
