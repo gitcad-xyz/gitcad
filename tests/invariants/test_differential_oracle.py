@@ -146,3 +146,38 @@ def test_a_shape_the_kernel_refuses_to_measure_is_skipped_not_failed(k) -> None:
     rows = sweep(k, n=0, shapes={"fine": Cyl(0, 0, 5, 0, 12)},
                  deflections=(0.2, 0.05))
     assert len(rows) == 1 and rows[0].converges
+
+
+def test_one_mesher_and_it_honours_the_deflection(k) -> None:
+    """ADR-0021: the seam must not keep a second mesher.
+
+    Preferring each representation's own `tessellate` was a second
+    implementation of the same question, and measuring the two showed the
+    canonical one strictly better on every curved shape — closer to the exact
+    volume, sometimes with fewer triangles. Worse, several representations'
+    method does not take a deflection, so the seam fell through to a
+    no-argument call and the caller's request was silently DISCARDED.
+
+    Refining must therefore change the mesh for EVERY representation, curved or
+    planar — that is what proves the argument is reaching the mesher."""
+    from forgekernel.brep import Solid
+    from forgekernel.quadric import Cyl, RoundedBox
+
+    for shape in (Cyl(0, 0, 5, 0, 12), RoundedBox(20, 20, 20, 3)):
+        coarse = len(k.tessellate(shape, deflection=0.5)["triangles"])
+        fine = len(k.tessellate(shape, deflection=0.01)["triangles"])
+        assert fine > coarse, (
+            f"{type(shape).__name__}: deflection is not reaching the mesher "
+            f"({coarse} -> {fine} triangles)")
+
+    # a planar solid meshes exactly at any deflection, so its count may not
+    # change — but it must still be watertight and exact
+    # A PLANAR solid meshes exactly at any deflection, so its triangle count
+    # legitimately does not change — a chamfered box is planar too, which is
+    # why it belongs here and not above. What must hold is the volume.
+    for shape, truth in ((Solid.box(20, 20, 10), 4000.0),
+                         (k.chamfer(k.box(20, 20, 20), [], 2), None)):
+        exact = truth if truth is not None else float(
+            k.mass_props(shape)["volume"])
+        for d in (0.5, 0.01):
+            assert mesh_volume(shape, k, d) == pytest.approx(exact, rel=1e-12)

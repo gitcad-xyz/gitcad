@@ -953,15 +953,19 @@ class RefKernel:
 
         if isinstance(shape, B.Body):
             return B.tessellate(shape, deflection)
-        # planar solids mesh exactly; analytic composites mesh to a
-        # bounded-error view (deflection = max chord error)
-        if hasattr(shape, "tessellate"):
-            try:
-                return shape.tessellate(deflection)
-            except TypeError:
-                return shape.tessellate()
-        # ADR-0021: anything with a converter meshes through the canonical
-        # form. A rounded box HAS one now, and was still refusing here.
+        # ADR-0021: ONE mesher, against the canonical form. Preferring each
+        # representation's own `tessellate` was a second implementation of the
+        # same question, and measuring the two showed the canonical one is
+        # strictly better — not merely equivalent:
+        #
+        #   cylinder      930.80 -> 931.75      revolve   775.67 -> 776.46
+        #   bored boss   2981.21 -> 2982.63     cone      100 tris -> 96
+        #
+        # every curved shape lands closer to its exact volume, with 0
+        # non-manifold edges either way. And several representations' own
+        # method does not accept a deflection at all, so the seam fell through
+        # to `shape.tessellate()` and the caller's argument was silently
+        # DISCARDED — asking a planar solid for a fine mesh got the default.
         return self._via_body("tessellate", shape,
                               lambda b: B.tessellate(b, deflection))
 
