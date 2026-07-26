@@ -10,7 +10,7 @@ contact (mated parts touching) intersects with zero volume and passes.
 
 from __future__ import annotations
 
-from gitcad.errors import ValidationReport
+from gitcad.errors import KernelError, ValidationReport
 from gitcad.seams import Kernel, Shape
 
 _VOL_TOL = 1e-6  # mm^3 — below this, "intersection" is contact/noise
@@ -46,6 +46,7 @@ def check_interference(
 
     violations: list[str] = []
     overlaps: dict[str, float] = {}
+    undetermined: dict[str, str] = {}
     names = sorted(placed)
     checked = 0
     for i, na in enumerate(names):
@@ -55,7 +56,23 @@ def check_interference(
             if not aabb_overlaps(boxes[na], boxes[nb]):
                 continue   # envelope pre-filter: cannot collide
             checked += 1
-            common = kernel.boolean("intersect", placed[na], placed[nb])
+            try:
+                common = kernel.boolean("intersect", placed[na], placed[nb])
+            except KernelError as exc:
+                # A pair the kernel cannot evaluate is UNDETERMINED, never
+                # clear. Reporting ok for it would repeat, one layer up, the
+                # exact defect that motivated this branch: an unsound AABB
+                # let `check_interference` certify a peg sitting entirely
+                # inside a cone, because the boolean was skipped rather than
+                # run. A clearance check that cannot compute an answer has not
+                # found clearance — so it fails closed and says which pair and
+                # why.
+                undetermined[f"{na}<->{nb}"] = getattr(exc, "stage", "") or str(exc)
+                violations.append(
+                    f"interference:{na}<->{nb}:UNDETERMINED — the kernel could "
+                    f"not intersect these shapes ({undetermined[f'{na}<->{nb}']}); "
+                    "clearance is unproven, not established")
+                continue
             vol = kernel.measure(common).get("volume", 0.0)
             if vol > _VOL_TOL:
                 overlaps[f"{na}<->{nb}"] = round(vol, 4)
@@ -65,7 +82,8 @@ def check_interference(
     return ValidationReport(
         ok=not violations,
         checks={"instances": len(instances), "pairs_intersected": checked,
-                "overlaps_mm3": overlaps, "tol_mm3": tol,
+                "overlaps_mm3": overlaps, "undetermined": undetermined,
+                "tol_mm3": tol,
                 "method": "exact-boolean-common", "kernel": kernel.name},
         violations=violations,
     )
