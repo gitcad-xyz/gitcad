@@ -1708,37 +1708,41 @@ class RefKernel:
         return out
 
     def _inset_profile(self, prof, t):
-        """Inset a RECTILINEAR (r, z) profile inward by t, exactly.
+        """Inset an (r, z) lathe profile inward by t, exactly.
 
-        Only axis-aligned edges: a slanted edge's inward normal carries
-        1/sqrt(dr^2+dz^2), which leaves ℚ, and a shell wall must be exactly
-        t thick or the part is not the part. Edges lying ON the axis are not
-        faces of the solid at all and are never offset — insetting them would
-        put a solid core inside the void.
+        Edges lying ON the axis are not faces of the solid at all and are never
+        offset — insetting them would put a solid core inside the void. Every
+        other edge moves t along its own inward normal, and the offset VERTEX
+        is where the two moved lines meet (``_inset_profile_exact``).
+
+        Axis-aligned edges keep this in ℚ. A SLANTED edge does not: its inward
+        normal carries 1/√(dr²+dz²), so the offset vertices land at irrational
+        radii and the void lives in ℚ[√d]. That is now expressible — F() was
+        widened to carry an exact ℚ[√d] value through the B-rep untouched — but
+        only under two gates, both applied here:
+
+        * ONE radical. Two slants with different dr²+dz² put the profile in
+          ℚ[√d₁, √d₂], a biquadratic field ``SurdVal`` does not hold.
+        * CONVEX. The mitre is the CAD shell everywhere, and it is also the
+          true erosion (offset-by-a-ball) only where the profile is convex; at
+          a reflex corner the erosion carries an arc of radius t about the
+          vertex, which is a genuine K4.2 offset surface. The rectilinear path
+          has always shipped the mitre for reflex corners and keeps doing so —
+          this gate applies only where a slant makes it NEW capability, so that
+          the answers this closes are ones two independent derivations agree on.
         """
         # A REDUNDANT collinear vertex has two identical edge normals, so
         # summing per-edge moved it 2t instead of t — and a cosmetic extra
         # point in the profile silently changed the reported volume of
         # identical geometry by 20%. Drop them before offsetting.
         prof = _drop_collinear_2d(prof)
-        n = len(prof)
-        out = []
-        for i in range(n):
-            p0, p1, p2 = prof[i - 1], prof[i], prof[(i + 1) % n]
-            shift = [Fraction(0), Fraction(0)]
-            for (qa, qb) in ((p0, p1), (p1, p2)):
-                dr, dz = qb[0] - qa[0], qb[1] - qa[1]
-                if qa[0] == 0 and qb[0] == 0:
-                    continue                       # the axis is not a face
-                if dr != 0 and dz != 0:
-                    _nope("shell(slanted lathe profile edge)",
-                          "K4.2 (offset surfaces)")
-                if dr == 0 and dz == 0:
-                    continue
-                ln = abs(dr) if dr else abs(dz)
-                shift[0] += -dz / ln * t
-                shift[1] += dr / ln * t
-            out.append((p1[0] + shift[0], p1[1] + shift[1]))
+        _gate_slanted_profile(prof)
+        try:
+            out = _inset_profile_exact(prof, t)
+        except ValueError as exc:
+            # SurdVal raises on mixed radicals; the mitre solve raises on a
+            # degenerate (parallel) corner. Both are honest gaps, not crashes.
+            _nope(f"shell(lathe profile: {exc})", "K4.2 (offset surfaces)")
         if any(r < 0 for r, _ in out):
             _nope("shell(thickness exceeds the lathe's radius)", "K4.2")
         # An offset polygon INVERTS where a step is shorter than 2t: the void
@@ -2157,6 +2161,133 @@ def _drop_collinear_2d(poly):
         else:
             i += 1
     return out
+
+
+def _profile_edge_normal(qa, qb):
+    """One (r, z) profile edge as (inward normal DIRECTION, its exact length),
+    or ``None`` where the edge is not a face of the solid at all.
+
+    For a counter-clockwise profile the interior lies to the left, so an edge
+    travelling ``(dr, dz)`` has inward normal ``(-dz, dr)/√(dr²+dz²)``. The
+    direction is handed back UNNORMALISED with the length beside it, because
+    the mitre solve wants them apart: dividing here would put the root into
+    every coefficient of the 2×2 system instead of only its right-hand side,
+    and the determinant would leave ℚ for no reason.
+
+    An edge with both ends on r = 0 IS the axis — a symmetry line, not a
+    boundary face. Offsetting it would push a solid core into the void.
+    """
+    from forgekernel.surd import exact_sqrt
+
+    dr, dz = qb[0] - qa[0], qb[1] - qa[1]
+    if (qa[0] == 0 and qb[0] == 0) or (dr == 0 and dz == 0):
+        return None
+    return (-dz, dr), exact_sqrt(dr * dr + dz * dz)
+
+
+def _inset_profile_exact(prof, t):
+    """Move every face of an (r, z) profile t along its own inward normal, and
+    put each vertex where its two moved lines cross. Exact throughout.
+
+    The condition at a vertex is ``s·n₁ = s·n₂ = t`` for the two adjacent
+    inward UNIT normals. Writing ``nᵢ = uᵢ/Lᵢ`` clears the roots out of the
+    matrix and leaves them only on the right:
+
+        u₁·s = t·L₁ ,   u₂·s = t·L₂
+
+    which Cramer solves with a rational determinant. Adding the two unit
+    normals — what the rectilinear inset did — satisfies this only when
+    ``n₁·n₂ = 0``, since ``(t(n₁+n₂))·n₁ = t(1 + n₁·n₂)``: on a right-angled
+    corner the two rules agree exactly, so no rectilinear answer moves, and on
+    the slant of cone(6,2,10) the old rule would have left a 0.6285 mm wall
+    where 1 mm was asked for.
+
+    A vertex ON the axis has one real neighbour and one axis edge. The axis is
+    not a face, so there is no second offset line — the vertex slides ALONG the
+    axis instead, which is the constraint ``s·(1,0) = 0``. For a rectilinear
+    profile that reproduces ``(0, z ± t)``; for a cone's apex it keeps the
+    eroded apex on the axis, where summing the one available normal would have
+    thrown it off to the side.
+    """
+    n = len(prof)
+    edges = [_profile_edge_normal(prof[i], prof[(i + 1) % n]) for i in range(n)]
+    out = []
+    for i in range(n):
+        rows = [(e[0], t * e[1]) for e in (edges[i - 1], edges[i])
+                if e is not None]
+        if not rows:                     # two axis edges meeting: nothing moves
+            out.append(prof[i])
+            continue
+        if len(rows) == 1:
+            rows.append(((Fraction(1), Fraction(0)), Fraction(0)))
+        (a1, b1), (a2, b2) = rows
+        det = a1[0] * a2[1] - a1[1] * a2[0]
+        if det == 0:
+            raise ValueError(
+                "a corner whose two faces are parallel has no mitre point")
+        out.append((prof[i][0] + (b1 * a2[1] - b2 * a1[1]) / det,
+                    prof[i][1] + (a1[0] * b2 - a2[0] * b1) / det))
+    return out
+
+
+def _gate_slanted_profile(prof) -> None:
+    """Refuse, by name, the SLANTED-edge offsets that are not expressible or
+    not provably the same solid as the true shell. A rectilinear profile has
+    neither problem and returns immediately, so this changes nothing shipped.
+
+    Two gates:
+
+    * ONE RADICAL. A slant of length √d puts the offset profile in ℚ[√d].
+      Two slants with different square-free parts need ℚ[√d₁, √d₂] — a
+      biquadratic field ``SurdVal`` does not hold, and floating one of the two
+      roots to get past it is exactly the trade ADR-0019 forbids. A Pythagorean
+      slant (3-4-5) has a RATIONAL length and costs no radical at all.
+    * CONVEX. The mitre is what a CAD shell means — offset the faces, extend
+      them to meet — and where the profile is convex it is also the erosion
+      (offset by a ball) and so agrees with the Monte-Carlo oracle the exact
+      answer is checked against. At a REFLEX corner the two part company: the
+      erosion carries an arc of radius t about the vertex. The rectilinear path
+      has always shipped the mitre there and keeps doing so; a slant makes the
+      corner new capability, and new capability only lands where two
+      independent derivations agree.
+    """
+    n = len(prof)
+    radicals = set()
+    slanted = False
+    for i in range(n):
+        e = _profile_edge_normal(prof[i], prof[(i + 1) % n])
+        if e is None:
+            continue
+        (ur, uz), ln = e
+        if ur != 0 and uz != 0:
+            slanted = True
+            radicals.add(getattr(ln, "d", 1))
+    radicals.discard(1)                       # a rational slant length is free
+    if not slanted:
+        return
+    if len(radicals) > 1:
+        names = ", ".join(f"√{d}" for d in sorted(radicals))
+        _nope(f"shell(two different slant radicals in one lathe profile: "
+              f"{names})", "K3.1 (a bigger number field)",
+              predicate="one_radical_per_profile",
+              measured={"radicals": sorted(radicals)},
+              remedy=("the offset profile would live in ℚ[√d₁, √d₂], which is "
+                      "biquadratic; make the slants share a taper, or give one "
+                      "a Pythagorean (rational-length) slope"))
+    turns = set()
+    for i in range(n):
+        a, b, c = prof[i - 1], prof[i], prof[(i + 1) % n]
+        cross = ((b[0] - a[0]) * (c[1] - b[1])
+                 - (b[1] - a[1]) * (c[0] - b[0]))
+        if cross != 0:
+            turns.add(cross > 0)
+    if len(turns) > 1:
+        _nope("shell(a reflex corner beside a slanted lathe profile edge)",
+              "K4.2 (offset surfaces)", predicate="slanted_profile_is_convex",
+              measured={"profile": [(float(r), float(z)) for r, z in prof]},
+              remedy=("the true offset rounds a reflex corner with an arc of "
+                      "radius t rather than mitring it; split the profile at "
+                      "the reflex vertex, or keep the slant on a convex part"))
 
 
 def _signed_area2(poly):

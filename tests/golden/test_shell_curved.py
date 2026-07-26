@@ -91,12 +91,37 @@ def test_a_shelled_body_still_meshes_watertight(k) -> None:
     assert all(n == 2 for n in ec.values())
 
 
-def test_a_slanted_profile_edge_refuses_rather_than_thin_the_wall(k) -> None:
-    """A slanted edge's inward normal carries 1/sqrt(dr^2+dz^2), which leaves
-    Q. A shell wall must be EXACTLY the requested thickness or the part is
-    not the part — so refuse rather than round it."""
-    with pytest.raises(Exception, match="slanted lathe profile edge"):
-        k.shell(Cone(0, 0, 2, 5, 0, 10), [], 1.0)
+def test_a_slanted_profile_edge_keeps_the_wall_exactly_t_thick(k) -> None:
+    """SUPERSEDES "a slanted profile edge refuses rather than thin the wall".
+
+    The old contract on this exact cone said: a slanted edge's inward normal
+    carries 1/sqrt(dr^2+dz^2), which leaves Q, and a shell wall must be EXACTLY
+    the requested thickness or the part is not the part — so refuse. The
+    premise stopped being true when exact.F() was widened to carry a value
+    already exact in Q[sqrt d] through the B-rep untouched: the offset radii
+    (23-sqrt109)/10 and (47-sqrt109)/10 are now expressible, so the answer is
+    available and the refusal would be the wrong one.
+
+    What the old test was PROTECTING is unchanged and is still asserted, in
+    tests/golden/test_shell_cone.py: the wall is exactly t measured
+    perpendicular to the slant, never a rounded-off approximation, and the
+    volume is exact in Q[sqrt d][pi] rather than a float. The number below is
+    checked there against an 8M-sample Monte-Carlo erosion oracle
+    (244.66 +- 0.44, 244.71 +- 0.44).
+    """
+    out = k.shell(Cone(0, 0, 2, 5, 0, 10), [], 1.0)
+    assert k.mass_props(out)["volume"] == pytest.approx(
+        math.pi * (1458 + 420 * math.sqrt(109)) / 75)
+
+
+def test_a_slant_the_kernel_cannot_type_still_refuses(k) -> None:
+    """The refusal did not go away, it moved to the real boundary. Two slants
+    with different dr^2+dz^2 put the offset profile in Q[sqrt d1, sqrt d2], and
+    that biquadratic field is not one SurdVal holds. Floating one of the two
+    roots to get past it is precisely the trade ADR-0019 forbids."""
+    two_tapers = RevolveSolid([(0, 0), (4, 0), (6, 5), (3, 10), (0, 10)], 0, 0)
+    with pytest.raises(Exception, match="two different slant radicals"):
+        k.shell(two_tapers, [], 1.0)
 
 
 def test_a_thickness_that_eats_the_solid_refuses(k) -> None:
