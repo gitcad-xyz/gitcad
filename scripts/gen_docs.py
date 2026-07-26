@@ -145,6 +145,17 @@ def md_to_html(md: str) -> str:
 
 # -- pages --------------------------------------------------------------------
 
+def _release_version() -> str:
+    """The version the install line advertises — read from the metapackage,
+    never hardcoded. A hand-typed version here is the same defect the stale
+    install block was: true the day it is written, wrong one release later."""
+    text = (ROOT / "packages" / "gitcad" / "pyproject.toml").read_text(
+        encoding="utf-8")
+    return re.search(r'^version = "([^"]+)"', text, re.M).group(1)
+
+
+# NOT an f-string: the code samples below carry literal {braces}. The one
+# substitution goes through an explicit token instead.
 QUICKSTART = """
 # gitcad docs
 
@@ -154,12 +165,14 @@ drawings, and Gerbers are build artifacts.
 ## install
 
 ```
-pip install gitcad            # headless core (pure Python)
-pip install "gitcad[occt]"    # + the OCCT b-rep kernel (STEP, drawings)
-pip install "gitcad[mcp]"     # + the MCP server (gitcad-mcp entrypoint)
+pip install gitcad            # mech + ecad + MCP server + exact kernel (__VERSION__)
 ```
 
-Until the PyPI release lands: `pip install git+https://github.com/gitcad-xyz/gitcad`.
+One install brings the whole platform: `gitcad-core`, `gitcad-mech`,
+`gitcad-ecad`, the `gitcad-mcp` MCP server, and the exact-arithmetic
+[forge](https://github.com/gitcad-xyz/forge) kernel (`forgekernel`, with the
+`forgekernel_rs` native build on common platforms). No OCCT — the kernel refuses
+by name rather than approximate ([ADR-0020](adr/0020-forge-sole-kernel.html)).
 
 ## a part in five calls
 
@@ -211,6 +224,8 @@ an agent edit it) and the view updates in a second.
 - [Architecture decision records](adr/) — the durable spec
 - [Competitive feature map](https://github.com/gitcad-xyz/gitcad/blob/main/docs/research/feature-map.md)
 """
+
+QUICKSTART = QUICKSTART.replace("__VERSION__", _release_version())
 
 
 def gen_mcp_reference() -> str:
