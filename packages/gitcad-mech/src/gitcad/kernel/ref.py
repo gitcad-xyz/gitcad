@@ -595,22 +595,40 @@ class RefKernel:
 
         from forgekernel.quadric import DisjointUnion, SphereOverlap
 
-        # a sphere with a COAXIAL bore drilled clean through it: a napkin ring.
-        # Exact in ℚ[√d][π] — the arc term lives in forgekernel.surdrev and is
-        # proven there against the closed form V = (4/3)π(R²−r²)^(3/2).
+        # a sphere with a COAXIAL bore: exact in ℚ[√d][π] — the arc term lives
+        # in forgekernel.surdrev and is proven there against closed forms.
         #
-        # Only the CENTRED, THROUGH case. Off-axis, the volume acquires
-        # elliptic integrals and leaves every algebraic extension, so there is
-        # nothing to be exact about; a blind bore leaves a spherical cap floor
-        # that this two-face solid cannot hold. Both keep refusing, and that is
-        # the honest answer rather than a near-miss.
+        #   * drilled clean THROUGH → a napkin ring (two faces, no caps),
+        #     V = (4/3)π(R²−r²)^(3/2);
+        #   * entering from the TOP and STOPPING inside the band → a BLIND
+        #     bore (three faces: one-rim zone, wall, and the tool's own FLAT
+        #     disk floor — a plane, not the spherical cap an earlier note
+        #     guessed), V = π(2R³/3 + (2/3)(R²−r²)^(3/2) + r²·(z_floor−c_z)).
+        #
+        # Only the CENTRED cases. Off-axis, the volume acquires elliptic
+        # integrals and leaves every algebraic extension, so there is nothing
+        # to be exact about; a tool stopping ON the band edge, below it, or
+        # entirely inside the material is a different topology (no wall left /
+        # a through ring / a closed internal void). Those keep refusing, and
+        # that is the honest answer rather than a near-miss.
         if op == "cut" and isinstance(a, Sphere) and isinstance(b, Cyl):
-            from forgekernel.surdrev import NapkinRing
+            from forgekernel.surdrev import NapkinRing, SphereBlindBore
 
             ax, ay, az = a.c if hasattr(a, "c") else (a.cx, a.cy, a.cz)
             if b.cx == ax and b.cy == ay and 0 <= b.r < a.r \
                     and b.z0 <= az - a.r and b.z1 >= az + a.r:
                 return _audited(NapkinRing(a.r, b.r, ax, ay, az), "boolean.cut")
+            # blind from the top: the tool clears the north pole entirely
+            # (z1 ≥ c+R, else a cap would survive DISCONNECTED above the tool)
+            # and its floor sits strictly inside the band (exact, in ℚ:
+            # (z0−c)² < R²−r²). Entering from the BOTTOM instead still
+            # refuses — same mathematics, but nothing constructs it yet.
+            if b.cx == ax and b.cy == ay and 0 < b.r < a.r \
+                    and b.z1 >= az + a.r \
+                    and (b.z0 - az) * (b.z0 - az) < a.r * a.r - b.r * b.r:
+                return _audited(
+                    SphereBlindBore(a.r, b.r, b.z0 - az, ax, ay, az),
+                    "boolean.cut")
 
         # two overlapping spheres: exact ℚ[π] cap/lens booleans (K2.2)
         if isinstance(a, Sphere) and isinstance(b, Sphere) and op in ("union", "cut", "intersect"):

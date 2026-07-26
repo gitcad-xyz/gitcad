@@ -455,6 +455,26 @@ built**. No new number field, no new curve type, no conic.
 > — still inside ℚ[√35][π]. So the field is not the blocker; the third face and
 > the one-rim zone predicate are. Do NOT widen `_sphere_zone` to admit one rim
 > without also deciding band-versus-caps explicitly (see its docstring).
+>
+> **CLOSED (334/345).** `SphereBlindBore` (surdrev) + `from_sphere_blind_bore`
+> (body). The one-rim ambiguity was decided the way the zone docstring
+> demanded — a representational change, not a looser predicate: `SphereS`
+> gained a `pole` trim field (the Torus k0/span precedent) naming the pole the
+> face CONTAINS, and `_sphere_pole_span` reads it; a bare one-rim face still
+> refuses through the octant path. The volume term gained the axis-offset
+> piece `c_z·∮n̂_z dA` that a symmetric napkin zone had been silently hiding
+> (it is identically zero there; a one-rim face has ∮n̂dA = −πr²ẑ, so a
+> translated blind bore pins it). Verified against the banked closed form
+> exactly (float diff 0.0) and by fresh analytic MC, seed 987654321, 16M:
+> 885.651 ± 0.216 (z = −1.9). Found on the way and fixed with failing tests
+> first: (1) `napkin_ring_contour`/`_half_height` truncated a FRACTIONAL band
+> height through `int()` — sphere R=3/2 bored at r=1 was 1.6% light, silently
+> (`_band_half_height` now routes fractions through `sqrt_rational`); (2) the
+> STEP writer's whole-sphere branch IGNORED a sphere face's loops, so a
+> rational-rim zone would have shipped as a complete sphere — it now refuses
+> trimmed spherical faces by name. Off-axis, band-edge floors, and tools
+> stopping inside the material still refuse; bottom-entry blind bores are the
+> same mathematics with no constructor yet.
 
 **CORRECTION, made by checking rather than assuming.** The paragraph above
 originally said "the work is assembling them", implying a small construction.

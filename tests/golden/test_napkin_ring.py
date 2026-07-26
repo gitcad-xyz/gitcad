@@ -11,11 +11,12 @@ the same band. That makes it an unusually strong oracle — an implementation
 that quietly used R or r on its own would produce a plausible number that
 fails the equal-band test below, and nothing else would catch it.
 
-WHAT THIS DELIBERATELY DOES NOT DO. Only the CENTRED, THROUGH case is exact.
-Off-axis, the volume acquires elliptic integrals and leaves every algebraic
-extension — there is nothing to be exact about, so it refuses. A blind bore
-leaves a spherical-cap floor that this two-face solid cannot hold, so it
-refuses too. Both refusals are the finished answer for now, not a near-miss.
+WHAT THIS DELIBERATELY DOES NOT DO. Only the CENTRED case is exact. Off-axis,
+the volume acquires elliptic integrals and leaves every algebraic extension —
+there is nothing to be exact about, so it refuses, and that refusal is the
+finished answer. The centred BLIND bore, which this file once pinned as a
+refusal, is now exact too (three faces, including the tool's own FLAT disk
+floor — not a spherical cap): see tests/golden/test_blind_bore.py.
 """
 
 from __future__ import annotations
@@ -192,8 +193,6 @@ def test_the_representation_itself_meshes_inside_its_own_bbox(k) -> None:
 REFUSED = [
     ("off-axis bore", lambda k: k.transform(k.cylinder(1, 100),
                                             translate=(2, 0, -50))),
-    ("blind bore", lambda k: k.transform(k.cylinder(1, 100),
-                                         translate=(0, 0, 0))),
     ("bore wider than the sphere", lambda k: k.transform(
         k.cylinder(9, 100), translate=(0, 0, -50))),
 ]
@@ -202,6 +201,19 @@ REFUSED = [
 @pytest.mark.parametrize("label,tool", REFUSED, ids=[r[0] for r in REFUSED])
 def test_the_cases_that_are_not_exact_still_refuse(k, label, tool) -> None:
     """A near-miss silently answered is worse than a refusal. Each of these
-    leaves ℚ[√d][π] or needs a face this solid does not have."""
+    leaves ℚ[√d][π] or needs a face this solid does not have. (The centred
+    BLIND bore left this list when it became exact — its own refusal edge
+    cases live in tests/golden/test_blind_bore.py.)"""
     with pytest.raises(KernelError):
         k.boolean("cut", k.sphere(6), tool(k))
+
+
+def test_a_fractional_band_height_is_exact_through_the_seam(k) -> None:
+    """Regression for the truncation defect found while closing the blind
+    cell: sphere R=3/2 bored through at r=1 has band d = 5/4, and the old
+    half-height truncated √(5/4) to √1 — volume 1.6% light, watertight,
+    silent. Closed form by hand: (4/3)π·(5/4)^(3/2)."""
+    ring = k.boolean("cut", k.sphere(1.5),
+                     k.transform(k.cylinder(1, 400), translate=(0, 0, -200)))
+    assert float(k.mass_props(ring)["volume"]) == pytest.approx(
+        (4 / 3) * math.pi * 1.25 ** 1.5, rel=1e-12)
