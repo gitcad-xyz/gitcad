@@ -38,7 +38,14 @@ jobs:
           python-version: "3.12"
       - run: |
           pip install --no-deps -e packages/gitcad-core -e packages/gitcad-mech             -e packages/gitcad-ecad -e packages/gitcad
-          pip install pytest forgekernel
+          # forgekernel MUST come from the forge repo's git main, NOT PyPI.
+          # The two repos move in lockstep: gitcad main routinely uses forge
+          # API that exists on forge main but is not yet in a PyPI release
+          # (e.g. forgekernel.surdrev and the widened F(), which the released
+          # 0.9.6 lacks -- "pip install forgekernel" here meant 21 failures).
+          # Do not "simplify" this back to the PyPI name; release-pinned CI
+          # only works if gitcad main is also release-pinned, and it is not.
+          pip install pytest "git+https://github.com/gitcad-xyz/forge.git"
       - run: pytest -q
       - name: end-to-end demos
         run: |

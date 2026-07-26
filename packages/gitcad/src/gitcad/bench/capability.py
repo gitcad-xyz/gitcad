@@ -155,6 +155,13 @@ _EXACT_FIELD_BOUNDARY = {
         "∮r²dz; this cone's rim turns through π−arctan(5/2), and arctan(5/2) "
         "is transcendental (Lindemann) — by Niven only 90° and 45°/135° lathe "
         "corners have a turn angle in ℚ·π at all",
+    ("loft", "fillet(all)"):
+        "a fillet's toroidal patch contributes its SWEEP ANGLE linearly to "
+        "the volume; this loft's slanted faces meet the caps at dihedrals "
+        "with cos = ±1/√37 and each other at cos = 1/37 — cos² is rational, "
+        "but by Niven neither cosine puts the angle in ℚ·π, and by "
+        "Gelfond–Schneider arccos(1/√37)/π is transcendental outright, so no "
+        "extension of ℚ[√d][π] holds the sweep",
 }
 
 
