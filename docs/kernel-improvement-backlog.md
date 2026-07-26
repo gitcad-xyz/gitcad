@@ -119,7 +119,7 @@ Ranked by how many refusals each removes.
 |---|---|---|
 | **K5.2 general blends** | 7 of the 18 remaining cells | `fillet(all)` on a loft, an L-prism, a chamfered box, a shelled box. The single largest block. |
 | **K4.2 certified polygon inset** | 3–4 cells | A real straight-skeleton offset with topology change, replacing the per-edge offset that self-intersects on a thin base. Also fixes shelling any non-convex prism. |
-| **Torus-aware erosion** | 2 cells | A blind bore's floor rim and a counterbore's shoulder erode to a torus. Forge already has `Torus` and `ℚ[π]`; only the offset logic is missing. |
+| **Torus-aware erosion** | ~~2 cells~~ **DONE (#120/#130, see §12)** | Closed all five shell gaps (blind, counterbore, bored boss, shelled box, chamfered box) — and exposed two green cells that were silent wrong numbers on the way. |
 | **Conic sections** | 1–2 cells | A plane cutting a cone in an ellipse or hyperbola. Needed for any oblique cut on a quadric. |
 
 What is **not** on this list, deliberately: two cells (`sphere / cut box`, and
@@ -609,3 +609,81 @@ against. Doing #120 or the rest of #122 first would mean building each on a
 representation that cannot enter the canonical form — exactly the
 representation/canonical split ADR-0022 exists to end.
 
+
+---
+
+## 12. #120/#130 DONE — torus-aware erosion, and the two wrong greens it exposed
+
+The whole shell column is green (339/345, 2 gaps, 0 crashes). What landed,
+in dependency order, each volume verified against an INDEPENDENT Monte-Carlo
+membership test (`dist(p, complement) >= t`, 16M samples) BEFORE the
+construction was written — the closed forms are in the golden test files.
+
+1. **#130 first, because nothing else is auditable without it.** `lathe_body`
+   emitted `Face(Torus, (), True)` — no loops — so every rim where a fillet
+   meets its neighbours read as used-by-1 and `_audited` carried a blanket
+   pairing exemption for any body containing a torus. Torus faces now carry
+   their rims as `Loop` edges (a radius-0 rim on the axis is a singular point
+   on no edge, the pointed-cone precedent), and the exemption is gone; the
+   invariant test now pins the OPPOSITE (a loop-stripped torus body must
+   refuse through pairing alone — the mesh and volume checks cannot see it).
+
+2. **Blind bore + counterbore shell** (`_shell_drilled`): the void is
+   scaffolded as a stepped DrilledSolid whose FLAT faces are already correct,
+   then each scaffold step is replaced by the fillet torus
+   (`_erode_rim_to_torus`, k0=3 span=1, carried (ρ, Z−t) → (ρ+t, Z)). The
+   banked TRAP held exactly as advertised: the naive floor-disk-at-ρ+t body
+   passes all four audit checks while 3.744 mm³ heavy — the closed-form
+   golden is the only guard. Probe volumes: `2728 + (107/3)π + (3/2)π²`
+   (blind) and `2728 + (107/3)π + 2π²` (counterbore). The zf ≤ t regime was
+   a FALSE refusal (no torus exists; the through collar is exact) — fixed,
+   `2728 + 34π` pinned; it greens no cell, as predicted. Clipped regimes
+   (t < zf−bz0 ≤ 2t, shoulder step ≤ t) refuse by name: arcsin, outside
+   every exact field. Bottom-entry and sealed stacks refuse as unbuilt
+   mirrors.
+
+3. **Hollow box shell**: no torus — the void is the inset box minus the
+   cavity DILATED by t, which is a RoundedBox by Minkowski. Wall == 2t (the
+   probe) degenerates to the corner-and-edge lattice: FRAME faces whose
+   inner rings are exactly the quarter-cylinders' straight tangency edges.
+   `3704 + (148/3)π`; thick-wall case `3344 + (130/3)π`; wall < 2t refuses
+   (clipped cylinder = circular segment = arcsin).
+
+4. **Bossed plate (WRONG GREEN #1).** `disjoint union (boss) × shell` was
+   returning the PILE answer — members shelled separately — which is 60.9 mm³
+   heavy: touching members are one solid, the void connects through the
+   plate, and the exposed plate-top rim erodes to a quarter torus swept
+   INSIDE the plate (k0=2 span=1). Composite constructions landed for both
+   boss cells: `1916 + (103/3)π + 2π²` (plain) and `1916 + 47π + (5/2)π²`
+   (bored). `shell(DisjointUnion)` now guards the member-wise path with a
+   strict bbox-separation witness and refuses touching members outside the
+   bossed-plate pattern.
+
+5. **Chamfered box shell**: convex, so the erosion is the solid's own
+   half-spaces offset inward; relative to the inset box the void is the
+   chamfered box with depth `d' = d − (2−√2)t` — in ℚ[√2], buildable by
+   `fk_chamfer` with a SurdVal distance thanks to the F() widening.
+   `1952 − 12√2` pinned; `d' ≤ 0` collapses to a plain box void (exact).
+
+**WRONG GREEN #2, found while pinning the member-wise contract:**
+`_prism_shell`'s cap-boundary walk closed one loop without checking it
+CONSUMED every boundary edge, so a two-component solid (two 10³ boxes
+unioned into one Solid) hollowed ONE component and returned 1488 where the
+true member-wise value is 976. The walk now requires full consumption.
+
+**Left on the table, deliberately:**
+
+* `fillet(DisjointUnion)` (and `chamfer`) still operate member-wise on
+  TOUCHING members — the same pile-answer defect class as #1 above.
+  `disjoint union (boss) × fillet(all)` is green today and is almost
+  certainly a wrong number: the composite's junction ring needs a blend the
+  pile cannot see, and the member-wise result rounds the boss's buried base
+  rim as if it were exposed. Nobody has derived the composite closed form
+  yet; do that BEFORE touching the code, and expect the cell to become a
+  refusal or a torus construction.
+* Mirrored (bottom-entry) blind stacks, mixed 2t/thicker hollow-box walls,
+  and multi-loop prism caps are honest named refusals — buildable, unbuilt.
+* The clipped regimes are NOT gaps: Niven/Lindemann puts the clipped
+  torus/cylinder sectors outside every exact field. Do not widen
+  `Torus(k0, span)` to general angles to chase them — that is the edit that
+  lets the transcendental in.
