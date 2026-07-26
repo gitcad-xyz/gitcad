@@ -422,8 +422,11 @@ def test_a_compound_whose_volume_matches_its_bbox_is_not_a_box(k) -> None:
     with a watertight mesh. The predicate is the POINT SET, not the measure."""
     tool = k.compound([k.transform(k.box(4, 3, 4), translate=(3, 3, 3)),
                        k.transform(k.box(2, 2, 4), translate=(3, 5, 3))])
-    assert tool.volume() == 4 * 4 * 4          # the trap, still baited
-    assert k._box_check(tool) is None          # and the predicate that sees it
+    # compound() FUSES overlapping members now, so the trap can no longer even
+    # be baited through the seam: this reports its true point-set volume (an L
+    # of area 14, four deep) rather than the 64 a poly soup summed to.
+    assert tool.volume() == 14 * 4
+    assert k._box_check(tool) is None          # and the predicate still sees it
     base = RoundedBox(12, 10, 6, 2)            # top flat [2,10] x [2,8]
     before = float(k.mass_props(base)["volume"])
     with pytest.raises(KernelError, match="quadric operands"):
@@ -602,8 +605,12 @@ def test_a_pocket_tool_is_a_box_by_its_point_set_not_by_a_property(
     from gitcad.kernel.ref import _is_axis_box
 
     tool = build(k)
-    assert tool.volume() == 4 * 4 * 4, "every case must bait the volume screen"
+    # The honest boxes still measure 64; the impostors now measure their TRUE
+    # point-set volume, because compound() fuses. Both must still be classified
+    # correctly — the predicate cannot lean on the volume either way.
     assert _is_axis_box(k, tool, _exact_bbox(tool)) is is_box
+    if is_box:
+        assert tool.volume() == 4 * 4 * 4
 
     base = RoundedBox(20, 20, 6, 2)
     before = float(k.mass_props(base)["volume"])

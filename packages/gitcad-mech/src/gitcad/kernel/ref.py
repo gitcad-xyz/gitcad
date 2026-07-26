@@ -636,9 +636,46 @@ class RefKernel:
             _nope(f"boolean.{op} across mixed radicals ({exc})", "K3.1")
 
     def compound(self, shapes: list):
-        from forgekernel.brep import Solid
+        """Several bodies as one. FUSED where they meet, never merely piled up.
 
-        return Solid([p for s in shapes for p in s.polys])
+        This used to be ``Solid([p for s in shapes for p in s.polys])`` — a poly
+        soup. For disjoint bodies that is exactly right and very cheap, and it
+        is the multi-body import container the seam documents. For bodies that
+        OVERLAP it is a wrong answer that every downstream measurement inherits,
+        because volume is a divergence sum over faces and interior faces are
+        still faces:
+
+            compound([box[0,2]³, box[1,3]³])   reported 16, truth 15
+            cut / intersect against such a tool were wrong ~0.5% of the time
+            over random compounds, and two thirds of those returned MATERIAL
+            where the answer had to be empty — with validate() saying ok.
+
+        So: keep the soup only while the members are provably separated by an
+        exact bbox test, and otherwise fold them with the exact boolean engine,
+        which is the operation the caller actually meant. The stacked-plate
+        case proves the point — the kernel already knew the right answer, it
+        just was not asked: `union` of three touching plates gave 6000 while
+        `compound` of the same three gave a body that later measured 5853.39
+        against a true 5811.50.
+        """
+        from forgekernel.brep import Solid
+        from forgekernel.quadric import _exact_bbox
+
+        shapes = list(shapes)
+        if len(shapes) < 2:
+            return shapes[0] if shapes else Solid([])
+        boxes = [_exact_bbox(s) for s in shapes]
+        disjoint = all(
+            boxes[i] is not None and boxes[j] is not None and any(
+                boxes[i][1][k] <= boxes[j][0][k] or boxes[j][1][k] <= boxes[i][0][k]
+                for k in range(3))
+            for i in range(len(shapes)) for j in range(i + 1, len(shapes)))
+        if disjoint and all(isinstance(s, Solid) for s in shapes):
+            return Solid([p for s in shapes for p in s.polys])
+        out = shapes[0]
+        for s in shapes[1:]:
+            out = self.boolean("union", out, s)
+        return out
 
     # -- metrics --------------------------------------------------------------
 

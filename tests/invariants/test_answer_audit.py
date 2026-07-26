@@ -102,3 +102,92 @@ def test_every_hand_built_construction_survives_its_own_audit(k, label, build):
     body = out if isinstance(out, B.Body) else B.to_body(out)
     assert B.volume(body) > 0
     assert k.validate(out).ok
+
+
+# --- round 9, tier 1: two wrong numbers through the public seam --------------
+
+COMPOUNDS = [
+    ("two overlapping boxes", lambda k: [k.box(2, 2, 2),
+                                         k.transform(k.box(2, 2, 2),
+                                                     translate=(1, 1, 1))], 15),
+    ("disjoint (the fast path)", lambda k: [k.box(2, 2, 2),
+                                            k.transform(k.box(2, 2, 2),
+                                                        translate=(10, 10, 10))], 16),
+    ("touching face to face", lambda k: [k.box(2, 2, 2),
+                                         k.transform(k.box(2, 2, 2),
+                                                     translate=(2, 0, 0))], 16),
+    ("one nested inside the other", lambda k: [k.box(10, 10, 10),
+                                               k.transform(k.box(4, 4, 4),
+                                                           translate=(3, 3, 3))], 1000),
+    ("identical twice", lambda k: [k.box(3, 3, 3), k.box(3, 3, 3)], 27),
+]
+
+
+@pytest.mark.parametrize("label,build,truth", COMPOUNDS,
+                         ids=[c[0] for c in COMPOUNDS])
+def test_a_compound_measures_its_point_set_not_its_faces(k, label, build,
+                                                         truth) -> None:
+    """`compound` was a poly SOUP — every member's faces piled together. For
+    disjoint bodies that is right and cheap; for overlapping ones the interior
+    faces are still faces, and volume is a divergence sum over faces, so the
+    overlap got counted twice.
+
+    Two boxes sharing a unit corner reported 16 for a true 15, and cuts against
+    such a tool were wrong about 0.5% of the time over random compounds — two
+    thirds of those returning MATERIAL where the answer had to be empty, with
+    validate() saying ok throughout."""
+    assert k.mass_props(k.compound(build(k)))["volume"] == pytest.approx(truth)
+
+
+def test_cutting_with_an_overlapping_compound_is_right(k) -> None:
+    """The tool is a nested pair, so the naive soup counted its inner shell a
+    second time, inverted."""
+    tool = k.compound([k.transform(k.box(10, 10, 10), translate=(10, 10, 10)),
+                       k.transform(k.box(20, 20, 30), translate=(10, 10, 0))])
+    assert k.mass_props(tool)["volume"] == pytest.approx(12000)
+    cut = k.boolean("cut", k.box(30, 30, 30), tool)
+    assert k.mass_props(cut)["volume"] == pytest.approx(15000)
+
+
+LAMINATED = [
+    ("three plates, bore through", [0, 5, 10], (20, 20, 5), 15, 6000, 60),
+    ("two pairs with a gap", [0, 1, 8, 9], (20, 20, 1), 10, 1600, 16),
+]
+
+
+@pytest.mark.parametrize("label,zs,dims,h,solid,bore", LAMINATED,
+                         ids=[l[0] for l in LAMINATED])
+def test_a_laminated_stack_counts_every_plate_it_drills(k, label, zs, dims, h,
+                                                        solid, bore) -> None:
+    """`_column_slabs` keyed its level set on z ALONE, so a shared interface —
+    which contributes an up-facing cap AND a down-facing one at the same height
+    — was counted once, and the floor/ceiling parity inverted from there up.
+
+    Three stacked plates drilled through recorded two bores instead of three
+    (5853.39 against a true 5811.50); four plates in two pairs billed 6 mm of
+    pure air as metal. The kernel already knew better — `union` of the same
+    plates gave the right answer — it simply was not asked.
+
+    The fix sweeps the caps with a depth counter, so a shared interface opens
+    and closes in the same breath and cancels."""
+    import math
+
+    stack = k.compound([k.transform(k.box(*dims), translate=(0, 0, z))
+                        for z in zs])
+    assert k.mass_props(stack)["volume"] == pytest.approx(solid)
+    out = k.boolean("cut", stack,
+                    k.transform(k.cylinder(2, h), translate=(10, 10, 0)))
+    assert k.mass_props(out)["volume"] == pytest.approx(solid - bore * math.pi)
+
+
+def test_a_shelled_plate_still_bores_through_two_slabs(k) -> None:
+    """The case the parity code was written for, which must keep working: an
+    outer top and bottom plus the void's ceiling and floor is genuinely two
+    slabs, and only the walls carry material."""
+    import math
+
+    sh = k.shell(k.box(20, 20, 10), [], 2)
+    out = k.boolean("cut", sh, k.transform(k.cylinder(2, 12),
+                                           translate=(10, 10, -1)))
+    assert k.mass_props(out)["volume"] == pytest.approx(
+        float(k.mass_props(sh)["volume"]) - 4 * math.pi * 4)
