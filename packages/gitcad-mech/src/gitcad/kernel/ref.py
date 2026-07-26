@@ -105,6 +105,16 @@ def _audited(body, op: str):
         bad += B.manifold_violations(subject)
     if B.volume(subject) <= 0:
         bad.append(f"volume is not positive ({float(B.volume(subject)):.6g})")
+    # Orientation, which edge pairing cannot see: it counts how many faces use
+    # each edge, never which DIRECTION. Reversing one face of a box leaves
+    # every edge used exactly twice and passes the pairing check outright.
+    # Gauss' identity closes that gap — the face vector areas of a closed shell
+    # sum to zero — and it is a boundary integral, so it needs no per-surface
+    # area formula. None means NOT CHECKED (a body carrying arcs), never passed.
+    defect = B.vector_area_defect(subject)
+    if defect is not None and any(d != 0 for d in defect):
+        bad.append("faces are not consistently oriented — the shell's vector "
+                   f"areas sum to {tuple(float(d) for d in defect)}, not zero")
     if bad:
         raise GeometryInvalidError(
             f"{op} built an invalid body — refusing to return it: "
