@@ -78,21 +78,43 @@ def _audited(body, op: str):
     from forgekernel import body as B
     from gitcad.errors import GeometryInvalidError
 
+    # AUDIT THE CANONICAL FORM, NOT THE RETURNED TYPE. This used to read
+    # `if not isinstance(body, B.Body): return body`, which meant the audit
+    # only ever fired on hand-built Bodies — and most results are NOT Bodies
+    # (Cyl, DrilledSolid, AxisStack, DisjointUnion, RoundedBox, RevolveSolid,
+    # …), so the majority of this kernel's answers were never checked at all.
+    # That is the ADR-0021 problem wearing a different hat: the check knew
+    # about the canonical form, the ops returned representations, and the gap
+    # between them was the hole.
+    #
+    # Converting first closes it. Measured before changing anything: all 15
+    # corpus representations convert and all 15 pass, so this buys coverage
+    # without changing a single existing answer.
+    #
+    # A representation with no canonical form is NOT a failure — there is
+    # simply nothing to audit against, and refusing there would turn a working
+    # op into a refusal on the strength of a missing converter.
+    subject = body
     if not isinstance(body, B.Body):
-        return body
+        try:
+            subject = B.to_body(body)
+        except Exception:                       # noqa: BLE001 - see above
+            return body
     bad = []
-    if not any(isinstance(f.surface, B.Torus) for f in body.faces):
-        bad += B.manifold_violations(body)
-    if B.volume(body) <= 0:
-        bad.append(f"volume is not positive ({float(B.volume(body)):.6g})")
+    if not any(isinstance(f.surface, B.Torus) for f in subject.faces):
+        bad += B.manifold_violations(subject)
+    if B.volume(subject) <= 0:
+        bad.append(f"volume is not positive ({float(B.volume(subject)):.6g})")
     if bad:
         raise GeometryInvalidError(
             f"{op} built an invalid body — refusing to return it: "
             + "; ".join(bad[:4]),
             FailureSignature(op=op, diagnostic="AnswerAudit", kernel="ref"),
             stage="audit", predicate="answer_is_a_closed_solid",
-            measured={"violations": len(bad), "faces": len(body.faces)},
+            measured={"violations": len(bad), "faces": len(subject.faces)},
             remedy="this is a kernel defect, not a bad request — please report it")
+    # the ORIGINAL object goes back to the caller: the conversion is a check,
+    # never a change of representation
     return body
 
 

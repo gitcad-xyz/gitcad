@@ -40,3 +40,6 @@ Thumbs.db
 # disposable evidence, never source (ADR-0004): the live activity log the
 # viewer tails while an agent works
 .gitcad/
+
+# workflow worktrees are scratch, never source (ADR-0004)
+.claude/worktrees/
