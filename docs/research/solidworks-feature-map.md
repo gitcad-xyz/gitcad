@@ -170,8 +170,8 @@ play. Mold tools (parting lines, core/cavity) ❌ defer; draft analysis
 | **GD&T: FCF, datums, tolerances** | ✅ tolerances-as-data on feature ids; GD&T block + toleranced hole callouts on drawings | ✅ |
 | Surface finish / weld symbols | ISO 1302 tick + ISO 2553 weld symbols in drawings | ✅ |
 | BOM table + balloons | ✅ | ✅ |
-| Revision table | — git history IS the revision table; projection possible | ✅ (beyond) |
-| Sheet formats / standards | title block basic; ASME/ISO styles | 🟡 |
+| Revision table | git history IS the revision table — drawn on the sheet from the part file's git log (#139) | ✅ (beyond) |
+| Sheet formats / standards | ISO 5457 A4-A0 + ANSI Y14.1 A-E frames (grid refs, centring marks), ISO 7200 title block with git-derived fields, standard scale series, auto sheet pick (#139) | ✅ |
 
 ## 9. System machinery
 
