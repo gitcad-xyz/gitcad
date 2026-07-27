@@ -83,7 +83,11 @@ def test_client_ships_checks_tab():
 
     assert '"/api/checks"' in PAGE
     assert "checksState" in PAGE
-    assert '"#checks"' in PAGE
+    # #checks deep-links into the one page. The literal was '"#checks"' until
+    # tab routing moved to hash TOKENS ("checks" in the TABS list, matched
+    # against location.hash) so every tab is addressable and composable
+    # (#checks,x=0.6) — same capability, wider.
+    assert '"checks"' in PAGE and "hashTokens" in PAGE
 
 
 def test_review_mode_endpoint_and_client(tmp_path):

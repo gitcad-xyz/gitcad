@@ -164,9 +164,12 @@ class Activity:
 
     def state(self, since: int = 0) -> dict:
         """What the viewer needs in one shot: new events, the currently active
-        instance, and any question still waiting on a human."""
-        events = self.read(since)
+        instance, any question still waiting on a human, and ``idle_s`` — how
+        long the channel has been silent. ``active`` stays exact (only ``done``
+        clears it); ``idle_s`` is what lets a page stop calling a crashed
+        agent "working"."""
         every = self.read(0)
+        events = [e for e in every if e["seq"] > since]
         active = None
         for ev in every:
             if ev.get("kind") == "status" and ev.get("instance"):
@@ -178,5 +181,8 @@ class Activity:
         pending = next((e for e in reversed(every)
                         if e.get("kind") == "question"
                         and e.get("id") not in answered), None)
+        last_t = every[-1].get("t") if every else None
+        idle = (max(0.0, time.time() - last_t)
+                if isinstance(last_t, (int, float)) else None)
         return {"events": events, "seq": len(every), "active": active,
-                "pending": pending}
+                "pending": pending, "idle_s": idle}

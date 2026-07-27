@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import urllib.request
 from pathlib import Path
 
@@ -63,6 +64,20 @@ def test_reading_since_a_sequence_returns_only_what_is_new(project) -> None:
     later = act.state(first["seq"])
     assert [e["text"] for e in later["events"]] == ["two"]
     assert later["seq"] == 2
+
+
+def test_state_reports_how_long_the_channel_has_been_silent(project) -> None:
+    """`idle_s` lets the page stop the "working" pulse honestly: an agent that
+    crashed after working() would otherwise look alive forever."""
+    act = Activity(project)
+    assert act.state()["idle_s"] is None          # no events: nothing to age
+    act._append("status", text="long ago", instance="left_arm",
+                t=time.time() - 600)
+    s = act.state()
+    assert s["active"]["instance"] == "left_arm"  # active is still exact…
+    assert 590 < s["idle_s"] < 700                # …but its age is visible
+    act.status("just now")
+    assert act.state()["idle_s"] < 5
 
 
 def test_a_torn_final_line_is_skipped_not_fatal(project) -> None:
@@ -133,6 +148,7 @@ def test_the_page_can_read_activity_and_post_an_answer(project) -> None:
         state = _get(f"{base}/api/activity?since=0")
         assert state["active"]["instance"] == "left_arm"
         assert state["pending"]["id"] == qid
+        assert state["idle_s"] < 60               # the page's staleness signal
 
         req = urllib.request.Request(
             f"{base}/api/answer", method="POST",
@@ -239,3 +255,53 @@ def test_a_sink_that_cannot_write_does_not_take_the_build_down(project) -> None:
         A.note(text="this must not raise")
     finally:
         A.narrate_to(None)
+
+
+# --- the page's half of the live loop (string contracts, browser-free) -------
+
+def test_page_ships_the_activity_tab() -> None:
+    """The full build story is a TAB in the one page, not a separate page:
+    every event, timestamped, and clicking an event that names an instance
+    jumps to that part in 3D (scrub the history by pointing at it)."""
+    from gitcad.viewer.page import PAGE
+
+    assert 'id="activity"' in PAGE
+    assert 'mk("activity"' in PAGE
+    assert "renderActivity" in PAGE
+
+
+def test_page_ships_camera_follow() -> None:
+    """Attention, not just color: when the agent moves to another instance the
+    camera glides to frame it. A follow toggle keeps the human in charge."""
+    from gitcad.viewer.page import PAGE
+
+    assert 'id="follow"' in PAGE
+    assert "focusActive" in PAGE
+    assert "glideTo" in PAGE
+
+
+def test_page_reads_the_idle_signal() -> None:
+    """The pulsing "working on X" must go quiet when the channel does."""
+    from gitcad.viewer.page import PAGE
+
+    assert "idle_s" in PAGE
+
+
+def test_page_routes_every_tab_through_the_hash() -> None:
+    """ONE page, addressable: #checks, #review, #drawing, #activity, #sheets
+    deep-link into the same page, and switching tabs updates the URL."""
+    from gitcad.viewer.page import PAGE
+
+    assert "hashTokens" in PAGE
+    assert "hashchange" in PAGE
+    for t in ("sheets", "checks", "review", "drawing", "activity"):
+        assert f'"{t}"' in PAGE
+
+
+def test_page_reapplies_highlights_after_a_mesh_reload() -> None:
+    """A rebuild lands a fresh mesh mid-watch; the green "being worked on"
+    highlight must survive it, not vanish until the agent changes subject."""
+    from gitcad.viewer.page import PAGE
+
+    body = PAGE[PAGE.index("function upload"):PAGE.index("// -- tiny matrix")]
+    assert "recolor()" in body

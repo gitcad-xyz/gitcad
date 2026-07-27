@@ -94,6 +94,42 @@ def test_server_serves_page_version_and_mesh(tmp_path) -> None:
         httpd.shutdown()
 
 
+def test_assembly_reload_digest_sees_member_model_edits(tmp_path) -> None:
+    """Watching an assembly means watching its members' MODELS — the files an
+    agent actually edits. The reload digest must change when one does.
+
+    Root cause of the original silence: _assembly_part_files called the
+    nonexistent Assembly.loads, the AttributeError was swallowed by
+    view_dependencies' broad catch, and every assembly digest covered only
+    the manifest itself — so a viewer watching an assembly never reloaded."""
+    from gitcad.derive import model_to_part
+    from gitcad.kernel.ref import RefKernel
+    from gitcad.part import Assembly
+    from gitcad.viewer.server import _version_digest, view_dependencies
+
+    kernel = RefKernel()
+    doc = Document()
+    doc.add(Feature(op="box", params={"dx": 10, "dy": 10, "dz": 10}))
+    (tmp_path / "cube.model").write_text(doc.dumps(), newline="\n")
+    part = model_to_part(doc, kernel, part_id="prt_0000000000000001", name="cube")
+    (tmp_path / "cube.part").write_text(part.dumps(), newline="\n")
+    asm = Assembly("solo")
+    asm.add("one", part)
+    apath = tmp_path / "solo.part.json"
+    apath.write_text(asm.to_manifest("prt_00000000000000aa").dumps(), newline="\n")
+
+    text = apath.read_text(encoding="utf-8")
+    deps = view_dependencies(apath, text, "assembly")
+    assert tmp_path / "cube.part" in deps
+    assert tmp_path / "cube.model" in deps          # the file agents edit
+
+    before = _version_digest(apath, text, "assembly")
+    doc2 = Document()
+    doc2.add(Feature(op="box", params={"dx": 10, "dy": 10, "dz": 99}))
+    (tmp_path / "cube.model").write_text(doc2.dumps(), newline="\n")
+    assert _version_digest(apath, text, "assembly") != before
+
+
 def test_server_board_svg_route(tmp_path) -> None:
     from gitcad.viewer.server import serve
 
