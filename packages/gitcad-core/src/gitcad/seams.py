@@ -67,7 +67,15 @@ class Kernel(Protocol):
         ...
 
     def mass_props(self, shape: Shape) -> dict[str, float]:
-        """Unit-density volume, center of mass, inertia tensor about the COM."""
+        """Unit-density volume, center of mass, inertia tensor about the COM.
+
+        Kernels that distinguish exact from certified arithmetic (ADR-0019)
+        also report ``provenance``: ``"exact"`` when the floats render exact
+        field elements, ``"certified"`` when the value is a proven interval
+        bracket — then the reported number is the midpoint and its half-width
+        rides alongside (``volume_halfwidth``). A certified value is
+        "certified ± e", never a bare float a consumer could mistake for
+        exact."""
         ...
 
     def chamfer(self, shape: Shape, edges: list[int] | None, distance: float) -> Shape:

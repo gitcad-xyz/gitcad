@@ -336,12 +336,23 @@ def _guard_seam(cls):
     return cls
 
 
-def _mp(volume: float, cx: float, cy: float, cz: float, **extra) -> dict[str, Any]:
+def _mp(volume: float, cx: float, cy: float, cz: float, *,
+        provenance: str = "exact", **extra) -> dict[str, Any]:
     """A mass-properties dict with the centroid available both as split
     ``cx/cy/cz`` scalars and as a ``centroid`` tuple (forge does not compute
-    an inertia tensor — that stays out of the seam contract)."""
+    an inertia tensor — that stays out of the seam contract).
+
+    ``provenance`` is the ADR-0019 label: ``"exact"`` when the numbers are
+    float renderings of exact field elements (ℚ, ℚ[√d], ℚ[π] — the default,
+    because every ref path is exact unless it says otherwise), and
+    ``"certified"`` when the underlying value is a proven interval bracket
+    (CInterval), in which case the midpoint is reported here and the
+    half-width rides alongside (e.g. ``volume_halfwidth``). The field exists
+    so K7's certified results can flow through the seam without ever being
+    mistaken for exact — a certified value is "certified ± e", never a bare
+    float."""
     return {"volume": volume, "cx": cx, "cy": cy, "cz": cz,
-            "centroid": (cx, cy, cz), **extra}
+            "centroid": (cx, cy, cz), "provenance": provenance, **extra}
 
 
 def _edge_point(e, t) -> list[float]:
@@ -949,6 +960,32 @@ class RefKernel:
 
         from forgekernel.quadric import DisjointUnion, SphereOverlap
 
+        # A FREEFORM operand (spline loft, spline prism, helical tube) has no
+        # boolean path at all yet — that is K7, not a quadric gap and not an
+        # "unsupported representation" AttributeError. Dispatching here, ahead
+        # of everything, is what keeps the refusal honestly labelled: a loft
+        # cut by a cylinder used to blame K2.2 (quadric booleans), and a loft
+        # cut by a box leaked "'LoftSolid' object has no attribute 'polys'"
+        # with stage=None (#96 gap 11 / item 10). No freeform×anything boolean
+        # works today (probed exhaustively), so this turns refusals into
+        # better-named refusals and reclassifies nothing.
+        from forgekernel.curve import TubeSolid
+        from forgekernel.loft import LoftSolid
+        from forgekernel.profile2d import SplinePrism
+
+        ff = [type(s).__name__ for s in (a, b)
+              if isinstance(s, (LoftSolid, SplinePrism, TubeSolid))]
+        if ff:
+            _nope(f"boolean.{op} on freeform operands ({', '.join(ff)})",
+                  "K7 (booleans over freeform solids)",
+                  predicate="freeform_boolean_unbuilt",
+                  remedy="K7 brings this: SSI trim loops between the operand "
+                         "surfaces, certified point-membership classification "
+                         "of the face fragments, and a trimmed-patch shell "
+                         "whose volume is certified ± e (ADR-0019); until it "
+                         "lands, model the boolean against a planar or "
+                         "quadric representation instead")
+
         # a sphere with a COAXIAL bore: exact in ℚ[√d][π] — the arc term lives
         # in forgekernel.surdrev and is proven there against closed forms.
         #
@@ -1289,10 +1326,12 @@ class RefKernel:
             return _mp(float(shape.volume()), cx, cy, cz)
         if isinstance(shape, TubeSolid):
             # certified provenance (ADR-0019): volume is an interval; report
-            # the midpoint plus the proven half-width bracketing the truth.
+            # the midpoint plus the proven half-width bracketing the truth,
+            # LABELLED as certified so no consumer reads midpoint as exact.
             v = shape.volume()
             cx, cy, cz = shape.centroid_f()
             return _mp(v.to_float(), cx, cy, cz,
+                       provenance=shape.provenance,
                        volume_halfwidth=float(v.width) / 2)
         # Measure the volume on the ORIGINAL shape, before the AxisStack wrap
         # below: a Sphere has a canonical body and an AxisStack does not, so
@@ -1500,7 +1539,8 @@ class RefKernel:
         from forgekernel.profile2d import SplinePrism
         if isinstance(shape, (LoftSolid, SplinePrism)):
             return ValidationReport(ok=shape.volume() > 0,
-                                    checks={"method": "exact-green-area"},
+                                    checks={"method": "exact-green-area",
+                                            "provenance": shape.provenance},
                                     violations=[])
         if isinstance(shape, TubeSolid):
             # watertight by construction (closed section, non-self-overlapping
@@ -1515,7 +1555,8 @@ class RefKernel:
         from forgekernel.quadric import FilletedPrism as _FP
         from forgekernel.quadric import VariableFilletedBox as _VFB
         if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, _FB, _FP, _FCB, _VFB)):
-            return ValidationReport(ok=True, checks={"method": "analytic"},
+            return ValidationReport(ok=True, checks={"method": "analytic",
+                                                     "provenance": "exact"},
                                     violations=[])
         from forgekernel import body as _B
         if isinstance(shape, _B.Body):
@@ -1541,6 +1582,7 @@ class RefKernel:
             return ValidationReport(
                 ok=not bad,
                 checks={"method": "exact-edge-pairing",
+                        "provenance": "exact",
                         "faces": len(shape.faces)},
                 violations=list(bad))
         if isinstance(shape, DrilledSolid):
@@ -1548,6 +1590,7 @@ class RefKernel:
             return ValidationReport(
                 ok=not bad and shape.volume() > 0,
                 checks={"method": "exact-composite",
+                        "provenance": "exact",
                         "bores": len(shape.bores)},
                 violations=list(bad))
         if not shape.polys:
@@ -1558,6 +1601,7 @@ class RefKernel:
             # volume falls through and keeps failing below.
             return ValidationReport(ok=True,
                                     checks={"method": "exact-line-coverage",
+                                            "provenance": "exact",
                                             "polygons": 0, "empty": True},
                                     violations=[])
         bad = shape.watertight_violations()
@@ -1565,6 +1609,7 @@ class RefKernel:
             bad = list(bad) + ["nonpositive-volume"]
         return ValidationReport(ok=not bad,
                                 checks={"method": "exact-line-coverage",
+                                        "provenance": "exact",
                                         "polygons": len(shape.polys)},
                                 violations=list(bad))
 
