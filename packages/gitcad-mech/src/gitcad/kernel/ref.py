@@ -1297,8 +1297,8 @@ class RefKernel:
         if isinstance(shape, (Cone, Sphere)):
             shape = AxisStack(shape.cx, shape.cy, [shape])
         from forgekernel.quadric import (FilletedBox, FilletedChamferedBox,
-                                         FilletedPrism)
-        if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, FilletedBox, FilletedPrism, FilletedChamferedBox)):
+                                         FilletedPrism, VariableFilletedBox)
+        if isinstance(shape, (Cyl, DrilledSolid, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, FilletedBox, FilletedPrism, FilletedChamferedBox, VariableFilletedBox)):
             cx, cy, cz = shape.centroid_f()
             return _mp(vol, cx, cy, cz)
         c = shape.centroid()
@@ -1435,6 +1435,9 @@ class RefKernel:
         from forgekernel.quadric import FilletedPrism as _FPr
         if isinstance(shape, _FPr):
             return [{"surface": "filleted-prism"}]
+        from forgekernel.quadric import VariableFilletedBox as _VFBx
+        if isinstance(shape, _VFBx):
+            return [{"surface": "variable-filleted-box"}]
         from forgekernel.quadric import FilletedChamferedBox as _FCB
         if isinstance(shape, _FCB):
             return [{"surface": "filleted-chamfered-box"}]
@@ -1505,7 +1508,8 @@ class RefKernel:
         from forgekernel.quadric import FilletedBox as _FB
         from forgekernel.quadric import FilletedChamferedBox as _FCB
         from forgekernel.quadric import FilletedPrism as _FP
-        if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, _FB, _FP, _FCB)):
+        from forgekernel.quadric import VariableFilletedBox as _VFB
+        if isinstance(shape, (Cyl, Cone, Sphere, AxisStack, RevolveSolid, DisjointUnion, RoundedBox, MiteredSweep, SphereOverlap, _FB, _FP, _FCB, _VFB)):
             return ValidationReport(ok=True, checks={"method": "analytic"},
                                     violations=[])
         from forgekernel import body as _B
@@ -1915,6 +1919,11 @@ class RefKernel:
         from forgekernel.kernel import fillet_box
         from forgekernel.quadric import FilletedBox
 
+        if isinstance(radius, (tuple, list)):
+            # radius=(r0, r1): the variable-radius (linear taper) fillet —
+            # the DISC-SWEEP semantic, the one member of the family the
+            # tower holds (#134)
+            return self._fillet_variable(shape, edges, radius)
         if not isinstance(shape, Solid) and not edges:
             from forgekernel.quadric import DisjointUnion, DrilledSolid, Sphere
 
@@ -1975,7 +1984,38 @@ class RefKernel:
                 return _audited(B.Body(faces), "fillet(drilled solid)")
             if isinstance(shape, DisjointUnion):
                 from forgekernel import body as B
+                from forgekernel.quadric import _exact_bbox
 
+                bossy = self._fillet_bossed_plate(shape, r)
+                if bossy is not None:
+                    return bossy
+                # Rounding distributes over STRICTLY SEPARATED components
+                # and over nothing else: members that touch are one
+                # connected solid, and the member-wise answer rounds their
+                # BURIED contact rims as if exposed while keeping the
+                # contact patches as internal walls — a silent wrong number
+                # (measured: 2938.67 pile vs 2949.45 composite on the
+                # matrix's boss shape). Shell got this witness in #120;
+                # fillet ran without it until #134. Closed bboxes are the
+                # same conservative separation witness shell uses.
+                boxes = [_exact_bbox(m) for m in shape.members]
+                for i in range(len(boxes)):
+                    for j in range(i + 1, len(boxes)):
+                        (alo, ahi), (blo, bhi) = boxes[i], boxes[j]
+                        if all(alo[c] <= bhi[c] and blo[c] <= ahi[c]
+                               for c in range(3)):
+                            _nope("fillet(disjoint union: members touch — "
+                                  "rounding the parts separately rounds "
+                                  "their buried contact rims and misses "
+                                  "the junction blend, so the pile answer "
+                                  "is a different solid)",
+                                  "K5.4 (face blends)",
+                                  predicate="members_strictly_separated",
+                                  measured={"member_pair": [i, j]},
+                                  remedy="one boss standing on a boxy "
+                                         "plate has the exact composite "
+                                         "path; separate the members or "
+                                         "reshape to that pattern")
                 parts = [self.fillet(m, (), radius) for m in shape.members]
                 if any(isinstance(q, B.Body) for q in parts):
                     return B.Body(tuple(f for q in parts
@@ -2015,6 +2055,24 @@ class RefKernel:
         # K5.0: constant-radius rolling-ball fillet on SELECTED straight
         # edges — exact in ℚ[π]. Adjacent selections (shared vertex →
         # spherical corner patch) refuse inside FilletedBox with K5.1.
+        specs = self._box_edge_specs(shape, (lo, hi), edges)
+        try:
+            return FilletedBox(lo, hi, specs, radius)
+        except ValueError as exc:
+            if "exceeds" in str(exc):
+                r = (radius if isinstance(radius, Fraction)
+                     else Fraction(str(radius)))
+                self._nope_blend_overflow(
+                    f"fillet({exc})", r,
+                    min(hi[c] - lo[c] for c in range(3)) / 2)
+            raise KernelError(str(exc), FailureSignature(
+                op="fillet", diagnostic="NotYetImplemented", kernel="ref"))
+
+    def _box_edge_specs(self, shape, box, edges):
+        """Map seam edge indices (the ``entities(shape, "edge")`` order) to
+        FilletedBox ``(axis, side, side)`` specs — shared by the constant
+        and variable selected-edge fillets."""
+        lo, hi = box
         all_edges = self._sorted_edges(shape)
         axis_name = {0: "x", 1: "y", 2: "z"}
         specs = []
@@ -2042,9 +2100,84 @@ class RefKernel:
                 else:
                     _nope("fillet(interior edge)", "K5.2")
             specs.append((axis_name[a], side[0], side[1]))
+        return specs
+
+    def _fillet_variable(self, shape, edges, radius):
+        """Variable-radius (LINEAR TAPER) fillet on selected straight box
+        edges — the DISC-SWEEP semantic, the one member of the family the
+        tower holds (#134).
+
+        Two G1-valid surfaces answer to "linear variable fillet" and they
+        sit on opposite sides of the exact-field boundary. The disc-sweep
+        (each perpendicular slice is the 2D fillet of radius r(t)) is an
+        oblique circular cone; its removed volume is polynomial and the
+        result stays in ℚ[π]. The rolling ball (Parasolid/SolidWorks —
+        envelope of spheres) slices to an ELLIPSE whose segment area
+        carries the eccentric-anomaly span Δu linearly with cos Δu = b²
+        (b the taper slope): by Niven, in-field only for b² ∈ {0, ½, 1},
+        i.e. NEVER for a rational nonzero taper — the same Lindemann class
+        as the cone fillet. So this kernel ships disc-sweep BY DEFINITION;
+        the divergence table lives on ``VariableFilletedBox``'s docstring
+        (0.33% of removed volume at b=0.1 up to 16.1% at b=0.8).
+
+        volume/bbox/mass_props are exact; mesh and STEP refuse by name
+        until the oblique-cone band lands (the FilletedPrism precedent).
+        """
+        from forgekernel.brep import Solid
+        from forgekernel.quadric import VariableFilletedBox
+
+        if len(radius) != 2:
+            raise KernelError(
+                f"fillet: a variable radius is (r0, r1), got {len(radius)} "
+                "values",
+                FailureSignature(op="fillet", diagnostic="BadInput",
+                                 kernel="ref"))
+        r0, r1 = (v if isinstance(v, Fraction) else Fraction(str(v))
+                  for v in radius)
+        if r0 == r1:
+            # r0 == r1 IS the constant fillet — the same surface exactly,
+            # and the constant machinery also meshes, so collapsing is
+            # strictly better than a parallel representation
+            return self.fillet(shape, edges, r0)
+        if not isinstance(shape, Solid):
+            _nope("fillet(variable radius on a curved representation: a "
+                  "tapered blend along a circular rim is neither a torus "
+                  "nor a cone, and the rolling-ball reading is "
+                  "transcendental for every rational taper — cos Δu = b², "
+                  "Niven)", "K5.3 (variable blends beyond straight edges)",
+                  predicate="variable_radius_needs_a_straight_edge",
+                  measured={"representation": type(shape).__name__},
+                  remedy="taper only straight box edges, or use a constant "
+                         "radius")
+        box = self._box_check(shape)
+        if box is None:
+            _nope("fillet(variable radius on a non-box planar solid)",
+                  "K5.3 (variable blends beyond straight edges)",
+                  predicate="variable_radius_needs_a_straight_edge",
+                  remedy="taper straight edges of an axis-aligned box, or "
+                         "use a constant radius")
+        if not edges:
+            _nope("fillet(variable radius on ALL edges: every pair of box "
+                  "edges shares a vertex, and the blend between two taper "
+                  "cones needs the variable corner patch — a sphere octant "
+                  "at matched vertex radii would be C0-watertight but not "
+                  "G1 against the cones)", "K5.3 (variable corner patch)",
+                  predicate="variable_edges_share_a_vertex",
+                  remedy="select pairwise non-adjacent edges")
+        lo, hi = box
+        specs = self._box_edge_specs(shape, box, edges)
         try:
-            return FilletedBox(lo, hi, specs, radius)
+            return VariableFilletedBox(
+                lo, hi, [(ax, sa, sb, r0, r1) for ax, sa, sb in specs])
         except ValueError as exc:
+            if "exceeds" in str(exc):
+                self._nope_blend_overflow(
+                    f"fillet({exc})", max(r0, r1),
+                    min(hi[c] - lo[c] for c in range(3)) / 2)
+            if "corner patch" in str(exc):
+                _nope(f"fillet({exc})", "K5.3 (variable corner patch)",
+                      predicate="variable_edges_share_a_vertex",
+                      remedy="select pairwise non-adjacent edges")
             raise KernelError(str(exc), FailureSignature(
                 op="fillet", diagnostic="NotYetImplemented", kernel="ref"))
 
@@ -2974,6 +3107,57 @@ class RefKernel:
                       + tuple(B.Face(f.surface, f.loops, not f.sense)
                               for f in faces)), "shell(drilled solid)")
 
+    def _bossed_plate_spec(self, shape):
+        """Classify a two-member ``DisjointUnion`` as ONE boss standing on a
+        boxy plate, or return None.
+
+        Returns ``(plate, box, cx, cy, R, zb, bt, bore)`` with ``bore`` either
+        ``None`` or ``(r, floor_z)`` for a coaxial blind bore open at the boss
+        top. Shared by the shell (#120) and fillet (#134) composite paths so
+        the two cannot drift apart on what "the bossed-plate pattern" means.
+        The plate gate is ``_box_check`` — the sound rebuild-and-compare
+        predicate, not a corner probe."""
+        from forgekernel.brep import Solid
+        from forgekernel.quadric import Cyl, RevolveSolid
+
+        if len(shape.members) != 2:
+            return None
+        plate = boss = None
+        for a, b in ((shape.members[0], shape.members[1]),
+                     (shape.members[1], shape.members[0])):
+            if isinstance(a, Solid) and isinstance(b, (Cyl, RevolveSolid)):
+                plate, boss = a, b
+                break
+        if plate is None:
+            return None
+        box = self._box_check(plate)
+        if box is None:
+            return None
+        bore = None
+        if isinstance(boss, Cyl):
+            cx, cy, R = Fraction(boss.cx), Fraction(boss.cy), Fraction(boss.r)
+            zb, bt = Fraction(boss.z0), Fraction(boss.z1)
+        else:
+            loop = [(Fraction(r), Fraction(z)) for r, z in boss.loop]
+            cx, cy = Fraction(boss.cx), Fraction(boss.cy)
+            if (len(loop) == 4 and loop[0][0] == 0 and loop[3][0] == 0
+                    and loop[1][0] == loop[2][0] > 0
+                    and loop[0][1] == loop[1][1] < loop[2][1] == loop[3][1]):
+                R, zb, bt = loop[1][0], loop[0][1], loop[2][1]
+            elif (len(loop) == 6 and loop[0][0] == 0 and loop[5][0] == 0
+                    and loop[1][0] == loop[2][0] > 0
+                    and loop[3][0] == loop[4][0] > 0
+                    and loop[3][0] < loop[1][0]
+                    and loop[0][1] == loop[1][1] < loop[2][1] == loop[3][1]
+                    and loop[0][1] < loop[4][1] == loop[5][1] < loop[2][1]):
+                R, zb, bt = loop[1][0], loop[0][1], loop[2][1]
+                bore = (loop[3][0], loop[4][1])       # (r, floor z)
+            else:
+                return None
+        if zb != box[1][2]:
+            return None                # the boss does not stand on the plate
+        return plate, box, cx, cy, R, zb, bt, bore
+
     def _shell_bossed_plate(self, shape, t):
         """Shell a plate with ONE boss standing on it (bored or not), or None.
 
@@ -2997,45 +3181,12 @@ class RefKernel:
         """
         from forgekernel import body as B
         from forgekernel.brep import Solid
-        from forgekernel.quadric import Cyl, RevolveSolid
 
-        if len(shape.members) != 2:
+        spec = self._bossed_plate_spec(shape)
+        if spec is None:
             return None
-        plate = boss = None
-        for a, b in ((shape.members[0], shape.members[1]),
-                     (shape.members[1], shape.members[0])):
-            if isinstance(a, Solid) and isinstance(b, (Cyl, RevolveSolid)):
-                plate, boss = a, b
-                break
-        if plate is None:
-            return None
-        box = self._box_check(plate)
-        if box is None:
-            return None
+        plate, box, cx, cy, R, zb, bt, bore = spec
         (px0, py0, pz0), (px1, py1, pz1) = box
-        bore = None
-        if isinstance(boss, Cyl):
-            cx, cy, R = Fraction(boss.cx), Fraction(boss.cy), Fraction(boss.r)
-            zb, bt = Fraction(boss.z0), Fraction(boss.z1)
-        else:
-            loop = [(Fraction(r), Fraction(z)) for r, z in boss.loop]
-            cx, cy = Fraction(boss.cx), Fraction(boss.cy)
-            if (len(loop) == 4 and loop[0][0] == 0 and loop[3][0] == 0
-                    and loop[1][0] == loop[2][0] > 0
-                    and loop[0][1] == loop[1][1] < loop[2][1] == loop[3][1]):
-                R, zb, bt = loop[1][0], loop[0][1], loop[2][1]
-            elif (len(loop) == 6 and loop[0][0] == 0 and loop[5][0] == 0
-                    and loop[1][0] == loop[2][0] > 0
-                    and loop[3][0] == loop[4][0] > 0
-                    and loop[3][0] < loop[1][0]
-                    and loop[0][1] == loop[1][1] < loop[2][1] == loop[3][1]
-                    and loop[0][1] < loop[4][1] == loop[5][1] < loop[2][1]):
-                R, zb, bt = loop[1][0], loop[0][1], loop[2][1]
-                bore = (loop[3][0], loop[4][1])       # (r, floor z)
-            else:
-                return None
-        if zb != pz1:
-            return None                # the boss does not stand on the plate
         margin = min(cx - px0, px1 - cx, cy - py0, py1 - cy)
         if margin - t <= R:
             _nope("shell(bossed plate: the boss-base fillet needs the void's "
@@ -3118,6 +3269,146 @@ class RefKernel:
         return _audited(B.Body(B.to_body(shape).faces
                       + tuple(B.Face(f.surface, f.loops, not f.sense)
                               for f in vfaces)), "shell(bossed plate)")
+
+    def _fillet_bossed_plate(self, shape, r):
+        """fillet(all) of a plate with ONE boss standing on it, or None (#134).
+
+        A ``DisjointUnion`` whose members TOUCH is one connected solid, and
+        filleting the members separately is NOT the fillet of the composite:
+        the boss's base rim is BURIED, so rounding it removes material that is
+        genuinely there, and the concatenated faces keep the contact patches
+        as internal walls. Measured on the matrix's boss shape (30×30×3 plate,
+        r=4 h=6 boss, r=1): the pile answer is 2464 + 425π/3 + 3π² ≈ 2938.67
+        where the composite is 2464 + 473π/3 − π² ≈ 2949.45.
+
+        The composite, bottom to top: the ROUNDED plate (every plate edge is
+        exposed), its top flat punched at R+r; the CONCAVE junction quarter
+        torus — the reentrant-edge precedent from the planar-prism path, a
+        blend that ADDS material, k0=2 span=1 about the tube circle
+        (R+r, pz1+r), sense False because the material lies outside the tube;
+        the boss wall from pz1+r to bt−r; the convex top-rim quarter torus
+        (k0=0, tube circle (R−r, bt−r)); and the top cap at radius R−r. A
+        coaxial blind bore open at the top keeps its SHARP rims — the
+        DrilledSolid precedent: a hole is a hole, fillet(all) does not chase
+        rims into it (the lathe path's concave-corner rule, uniformly).
+
+        Junction term by exact Pappus: V_add = πr(2Rr+r²) − π²r²(R+r)/2 +
+        2πr³/3 — it needs π², which is why the closed forms are PiPolys. Both
+        golden cells were verified against 2D quadrature and a 20M-sample
+        Monte-Carlo membership test BEFORE this construction was written
+        (z = +1.13 plain, +0.94 bored at 3σ; tests/golden/test_blend_family).
+        """
+        from forgekernel import body as B
+        from forgekernel.kernel import fillet_box
+
+        spec = self._bossed_plate_spec(shape)
+        if spec is None:
+            return None
+        plate, box, cx, cy, R, zb, bt, bore = spec
+        (px0, py0, pz0), (px1, py1, pz1) = box
+        margin = min(cx - px0, px1 - cx, cy - py0, py1 - cy)
+        if r <= 0:
+            # fillet_box accepts r=0 and the degenerate RoundedBox then
+            # divides by r in from_rounded_box — a raw ZeroDivisionError
+            # through the seam (found by probing, not by luck)
+            raise KernelError(
+                f"fillet radius must be positive, got {float(r)}",
+                FailureSignature(op="fillet", diagnostic="BadInput",
+                                 kernel="ref"))
+        if r >= R:
+            self._nope_blend_overflow(
+                "fillet(bossed plate: the top-rim blend consumes the whole "
+                "cap)", r, R, extra={"R": float(R)})
+        if zb + r >= bt - r:
+            self._nope_blend_overflow(
+                "fillet(bossed plate: the junction and top-rim blends meet "
+                "on the boss wall — the clipped blend carries an arccos, "
+                "outside every exact field)", r, (bt - zb) / 2,
+                extra={"boss_height": float(bt - zb)})
+        if R + r >= margin - r:
+            self._nope_blend_overflow(
+                "fillet(bossed plate: the junction ring must clear the "
+                "plate's own edge blends)", r, margin - R - r,
+                extra={"margin": float(margin), "R": float(R)})
+        if bore is not None and bore[0] >= R - r:
+            self._nope_blend_overflow(
+                "fillet(bossed plate: the bore mouth meets the top-rim "
+                "blend's tangency circle)", r, R - bore[0],
+                extra={"bore_r": float(bore[0]), "R": float(R)})
+        try:
+            rounded = fillet_box(px1 - px0, py1 - py0, pz1 - pz0, r,
+                                 (px0, py0, pz0))
+        except ValueError as exc:
+            if "exceeds" in str(exc):
+                self._nope_blend_overflow(
+                    f"fillet(bossed plate: {exc})", r,
+                    min(px1 - px0, py1 - py0, pz1 - pz0) / 2)
+            raise KernelError(str(exc), FailureSignature(
+                op="fillet", diagnostic="NotYetImplemented", kernel="ref"))
+        one, zero = Fraction(1), Fraction(0)
+        naxis = (zero, zero, one)
+        faces = []
+        for f in B.to_body(rounded).faces:
+            # the plate's top flat carries the junction ring as an inner
+            # loop — matched by direction sign and vertex height, the way
+            # the shell composite matches its slab cap
+            if (isinstance(f.surface, B.Plane)
+                    and f.surface.n[0] == 0 and f.surface.n[1] == 0
+                    and f.surface.n[2] > 0
+                    and Fraction(f.loops[0].edges[0].v0[2]) == pz1):
+                f = B.Face(f.surface,
+                           f.loops + (B.Loop((_rim_edge(cx, cy, pz1,
+                                                        R + r),)),),
+                           f.sense)
+            faces.append(f)
+        faces.append(B.Face(B.Torus((cx, cy, pz1 + r), naxis, R + r, r, 2, 1),
+                            (B.Loop((_rim_edge(cx, cy, pz1, R + r),
+                                     _rim_edge(cx, cy, pz1 + r, R))),),
+                            False))
+        faces.append(B.Face(B.Cylinder((cx, cy, pz1 + r), naxis, R),
+                            (B.Loop((_rim_edge(cx, cy, pz1 + r, R),
+                                     _rim_edge(cx, cy, bt - r, R))),),
+                            True))
+        faces.append(B.Face(B.Torus((cx, cy, bt - r), naxis, R - r, r, 0, 1),
+                            (B.Loop((_rim_edge(cx, cy, bt - r, R),
+                                     _rim_edge(cx, cy, bt, R - r))),),
+                            True))
+        cap_loops = [B.Loop((_rim_edge(cx, cy, bt, R - r),))]
+        if bore is not None:
+            rb, zf = bore
+            cap_loops.append(B.Loop((_rim_edge(cx, cy, bt, rb),)))
+            faces.append(B.Face(B.Cylinder((cx, cy, zf), naxis, rb),
+                                (B.Loop((_rim_edge(cx, cy, zf, rb),
+                                         _rim_edge(cx, cy, bt, rb))),),
+                                False))
+            faces.append(B.Face(B.Plane(naxis, zf),
+                                (B.Loop((_rim_edge(cx, cy, zf, rb),)),),
+                                True))
+        faces.append(B.Face(B.Plane(naxis, bt), tuple(cap_loops), True))
+        return _audited(B.Body(tuple(faces)), "fillet(bossed plate)",
+                        require_body=True)
+
+    def _nope_blend_overflow(self, op, r, room, *, extra=None):
+        """The blend-overflow refusal, structured (#134).
+
+        A blend radius exceeding the room its face offers clips the quarter
+        arc to a circular segment either way the overflow is resolved
+        (keep-edge trims it, roll-over rides over it), and a segment's area
+        is r²·arccos(d/r) − d√(r²−d²) — the arccos of an algebraic number,
+        transcendental by Lindemann except at the two Niven ratios. So the
+        honest answer is this refusal, never a silently clamped radius, and
+        never widening ``Torus(k0, span)`` to general angles (that is the
+        edit that lets the transcendental in — §12's warning)."""
+        measured = {"radius": float(r), "room": float(room)}
+        if room > 0:
+            measured["ratio"] = float(Fraction(room) / Fraction(r))
+        measured.update(extra or {})
+        _nope(op, "K5.4 (blend overflow)", predicate="blend_overflow",
+              measured=measured,
+              remedy="reduce the radius to fit the adjacent face, or use "
+                     "d/r = 1/2 or √3/2 — the two Niven ratios whose "
+                     "clipped segment stays in ℚ[√3][π] (meshing gated on "
+                     "K3.7 twelfths)")
 
     def _shell_lathe(self, shape, t):
         """Hollow a solid of revolution: the void is the profile inset by t,

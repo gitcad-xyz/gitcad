@@ -706,17 +706,84 @@ true member-wise value is 976. The walk now requires full consumption.
 
 **Left on the table, deliberately:**
 
-* `fillet(DisjointUnion)` (and `chamfer`) still operate member-wise on
-  TOUCHING members — the same pile-answer defect class as #1 above.
-  `disjoint union (boss) × fillet(all)` is green today and is almost
-  certainly a wrong number: the composite's junction ring needs a blend the
-  pile cannot see, and the member-wise result rounds the boss's buried base
-  rim as if it were exposed. Nobody has derived the composite closed form
-  yet; do that BEFORE touching the code, and expect the cell to become a
-  refusal or a torus construction.
+* `chamfer(DisjointUnion)` still operates member-wise on TOUCHING members —
+  the same pile-answer defect class as #1 above: `disjoint union (boss) ×
+  chamfer(all)` bevels the boss's buried base rim as if exposed. The fillet
+  half of this bullet is DONE (§13): the composite construction and the
+  bbox-separation witness landed; chamfer needs its own junction CONE face
+  and the same witness. Derive the closed form before touching the code.
 * Mirrored (bottom-entry) blind stacks, mixed 2t/thicker hollow-box walls,
   and multi-loop prism caps are honest named refusals — buildable, unbuilt.
 * The clipped regimes are NOT gaps: Niven/Lindemann puts the clipped
   torus/cylinder sectors outside every exact field. Do not widen
   `Torus(k0, span)` to general angles to chase them — that is the edit that
   lets the transcendental in.
+
+## 13. #134 DONE — the blend family beyond one constant radius, and its walls
+
+The load-bearing fact, derived by execution before any code moved: **"linear
+variable-radius fillet" names two different surfaces**, they share their
+tangency curves on both faces, and they sit on opposite sides of the
+exact-field boundary.
+
+* **Disc-sweep** (each slice perpendicular to the edge is the 2D fillet arc
+  of radius r(t)): an OBLIQUE circular cone, apex on the edge line where r
+  extrapolates to 0 (scaling identity verified to 4e-14), G1 to both faces.
+  Removed volume `(1−π/4)·L(r0²+r0r1+r1²)/3` — polynomial, ℚ[π]. **This is
+  what shipped**: `fillet(shape, edges, radius=(r0, r1))` returns forge's
+  `VariableFilletedBox` (volume/bbox/mass_props exact; mesh and STEP refuse
+  by name until the oblique-cone band — the FilletedPrism precedent).
+  r0 == r1 collapses to the constant fillet (same surface, and it meshes).
+* **Rolling ball** (Parasolid/SolidWorks — envelope of spheres r(t)): a
+  right cone whose perpendicular slice is an ELLIPSE; the slice-segment area
+  carries the eccentric-anomaly span Δu linearly with **cos Δu = b²** (b the
+  taper slope). Niven ⇒ in-field only for b² ∈ {0, ½, 1} — never for a
+  rational nonzero taper. Same Lindemann class as the cone fillet.
+  **Permanent wall**, and the divergence is documented on the class
+  docstring (0.33% of removed volume at b=0.1, 4.9% at 0.4, 16.1% at 0.8)
+  so nobody mistakes the semantic gap for a defect when diffing against a
+  Parasolid-derived kernel.
+
+**WRONG GREEN #3 (the §12 leftover), fixed.** `fillet(DisjointUnion)` ran
+member-wise with no touching witness: the bossed plate rounded its BURIED
+base rim as if exposed and kept the contact patches as internal walls —
+2464 + (425/3)π + 3π² ≈ 2938.67 where the composite is
+**2464 + (473/3)π − π² ≈ 2949.45** (matrix boss shape, r=1). The composite
+path mirrors `_shell_bossed_plate` off the shared `_bossed_plate_spec`:
+rounded plate punched at R+r, the CONCAVE junction quarter torus (tube
+circle (R+r, pz1+r), k0=2 span=1, sense False — a blend that ADDS material,
+the planar path's reentrant-edge precedent), boss wall, convex top-rim
+quarter torus, cap at R−r. Junction term by exact Pappus:
+`V_add = πr(2Rr+r²) − π²r²(R+r)/2 + 2πr³/3` (needs π² — PiPoly). A blind
+bore keeps its SHARP rims (the DrilledSolid hole precedent); bored cell
+`2464 + (458/3)π − π²`. Both cells verified against 2D quadrature AND a
+20M-sample Monte-Carlo membership test BEFORE construction (z = +1.13,
++0.94 at 3σ); goldens in `tests/golden/test_blend_family.py`. Touching
+members outside the pattern refuse via the same strict bbox-separation
+witness shell got in #120 (`members_strictly_separated`); strictly
+separated members still fillet member-wise, pinned.
+
+**Overflow is a wall with two pinholes, and now says so as data.** A blend
+radius exceeding its face clips the quarter arc to a circular segment
+whichever way the overflow resolves; segment area
+`r²arccos(d/r) − d√(r²−d²)` is transcendental except **d/r ∈ {1/2, √3/2}**
+(d/r = 1/2 → `r²(π/3 − √3/4)`, ℚ[√3][π], meshing gated on K3.7 twelfths).
+Every overflow site (constant and variable selected-edge fillets, all four
+bossed-plate fit guards) now refuses with `predicate="blend_overflow"`,
+the measured radius/room/ratio, and the two admissible ratios in the
+remedy. Never clamp; never widen `Torus(k0, span)` to general angles.
+
+**Setback corners are a SPEC wall, not a field wall.** The n-sided setback
+patch is a vendor-defined freeform surface; any "exact setback volume"
+would be exactness about a fiction. Refusal by name is the finished answer;
+the degenerate case (equal radii, setback = r) is RoundedBox's sphere
+octant. Related: K5.3 adjacent variable edges stay refused — a sphere
+octant at matched vertex radii is C0-watertight but NOT G1 against the
+taper cones; if K5.3 picks it, the doc must say C0.
+
+**Still open in the family**, in value order: full-round rib tip
+(half-cylinder r = t/2 + quarter-sphere caps, exact ℚ[π], machinery
+exists); 45°/135° planar corners (ℚ[√2][π], refused by name in
+`_fillet_profile`); cylinder×cylinder and off-axis face pairs (elliptic
+integrals — permanent); `chamfer(DisjointUnion)` pile answer (see §12's
+leftover bullet, now fillet-free).

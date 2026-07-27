@@ -60,7 +60,10 @@ Status is honest: ✅ shipped · 🟡 partial · ❌ missing · — non-goal.
 | Lofted boss/cut | `loft` (+ ruled) | ✅ |
 | Boundary boss | loft covers common cases; true boundary surfaces | ❌ defer |
 | Fillet (constant radius) | `fillet` on lineage-stable edge refs | ✅ |
-| Variable-radius fillet | linear-taper per-edge, exact ℚ[π] (VariableFilletedBox); face/full-round later | 🟡 |
+| Variable-radius fillet | ✅ `fillet(edges, radius=(r0, r1))` — linear taper on selected straight edges, exact ℚ[π] volume/centroid. The semantic is DISC-SWEEP (perpendicular slices are 2D fillet arcs; the surface is an oblique cone) **by definition**: the SolidWorks/Parasolid rolling ball is transcendental for every rational taper (cos Δu = b², Niven), so expect the documented divergence (0.33% of removed volume at slope 0.1 → 16.1% at 0.8). Mesh/STEP refuse by name until the oblique-cone band (K5.3); adjacent tapered edges refuse (K5.3 corner patch) | ✅ |
+| Face blend (boss junction) | ✅ `fillet(all)` on a boss-on-plate composite builds the concave junction quarter torus (ℚ[π] with π², Pappus-derived, MC-verified) instead of the old member-wise pile answer; touching members outside the pattern refuse with a bbox-separation witness | ✅ |
+| Setback (corner) fillet | ❌ permanent SPEC wall, not a field wall: the n-sided setback patch is a vendor-defined freeform surface — there is no canonical closed form to be exact about, so an "exact setback volume" would be exactness about a fiction. The degenerate case (equal radii, setback = r) is RoundedBox's sphere octant | ❌ |
+| Fillet overflow (radius exceeds face) | ❌ structured refusal `blend_overflow`: the clipped segment carries arccos(d/r) — Lindemann — except d/r ∈ {1/2, √3/2} (ℚ[√3][π], meshing gated on K3.7 twelfths); never a silently clamped radius | ∎ |
 | Chamfer | `chamfer` | ✅ |
 | Shell | `shell` | ✅ |
 | **Draft** | ✅ `draft` op: selected faces (lineage-stable ids), pull dir, neutral plane OR mid-face parting line (two half-drafts, widest at the plane), exact rational `tan` as the spec (`angle_deg` = float sugar); cylinder wall → cone (ℚ[π]); rectilinear prisms exact in ℚ; caps/sphere walls/lathe segments refused loud by name | ✅ |
