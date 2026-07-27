@@ -68,16 +68,20 @@ def _refusal(fn) -> KernelError:
 
 @pytest.mark.parametrize("op", ["cut", "union", "intersect"])
 @pytest.mark.parametrize("order", ["freeform-first", "freeform-second"])
-def test_boolean_on_a_loft_is_a_k7_staged_refusal(k, op, order) -> None:
+def test_boolean_on_a_loft_and_a_body_names_the_remaining_gap(k, op,
+                                                              order) -> None:
+    """A smooth loft now converts to its exact patch skin at the boolean
+    dispatch (LoftSolid.to_patches — the K7 flagship), so the refusal a
+    loft × planar-Body boolean gets names the gap that actually remains:
+    the OTHER operand's missing patch conversion, not the loft's."""
     loft, box = _loft(k), k.box(4, 4, 40)
     a, b = (loft, box) if order == "freeform-first" else (box, loft)
     err = _refusal(lambda: k.boolean(op, a, b))
     assert err.signature.diagnostic == "NotYetImplemented"
     assert err.stage is not None and "K7" in err.stage
-    assert "LoftSolid" in str(err)
     assert "no attribute" not in str(err)   # the leaked AttributeError text
-    assert err.predicate == "freeform_boolean_unbuilt"
-    assert err.remedy                        # says what K7 will bring
+    assert err.predicate == "mixed_patchsolid_boolean_unbuilt"
+    assert err.remedy                        # says what would unblock it
 
 
 @pytest.mark.parametrize("make", [_tube, _spline_prism],

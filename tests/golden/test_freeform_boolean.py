@@ -123,12 +123,17 @@ def test_the_refusals_serialise_for_an_agent(k) -> None:
     json.dumps(err.as_dict())
 
 
-# --- the shell's unbuilt sides refuse by name, never AttributeError ----------
+# --- the shell's sides: a certified-safe view, refusals elsewhere ------------
 
-def test_tessellate_of_a_trimmed_shell_refuses_by_name(k, cap) -> None:
-    err = _refusal(lambda: k.tessellate(cap))
-    assert err.stage is not None and "K7" in err.stage
-    assert "no attribute" not in str(err)
+def test_tessellate_of_a_trimmed_shell_is_the_certified_safe_view(
+        k, cap) -> None:
+    """The refusal became a capability: a coarse view that meshes ONLY
+    cells whose membership is certified and shows the SSI strip as
+    explicit gap quads — provenance "render", never a measure."""
+    mesh = k.tessellate(cap)
+    assert mesh["provenance"] == "render"
+    assert mesh["triangles"]
+    assert mesh["gaps"]
 
 
 def test_bbox_and_measure_of_a_trimmed_shell_refuse_by_name(k, cap) -> None:

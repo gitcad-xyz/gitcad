@@ -961,33 +961,46 @@ class RefKernel:
 
         from forgekernel.quadric import DisjointUnion, SphereOverlap
 
-        # A FREEFORM operand (spline loft, spline prism, helical tube) has no
-        # boolean path at all yet — that is K7, not a quadric gap and not an
-        # "unsupported representation" AttributeError. Dispatching here, ahead
-        # of everything, is what keeps the refusal honestly labelled: a loft
-        # cut by a cylinder used to blame K2.2 (quadric booleans), and a loft
-        # cut by a box leaked "'LoftSolid' object has no attribute 'polys'"
-        # with stage=None (#96 gap 11 / item 10). No freeform×anything boolean
-        # works today (probed exhaustively), so this turns refusals into
-        # better-named refusals and reclassifies nothing.
+        # FREEFORM operands. A smooth loft now HAS its exact patch-skin
+        # converter — LoftSolid.to_patches (K7 flagship): walls degree (1,3)
+        # straight from the natural-spline coefficients, caps planar, seam
+        # topology proven by exact control-point equality — so LoftSolid
+        # operands convert here and take the PatchSolid assembly below,
+        # open branches included (loft × loft is the case that forced the
+        # seam-edge pairing to exist). SplinePrism and TubeSolid still have
+        # no converter and keep the K7-staged refusal: a spline prism cut
+        # by a box must never leak "'SplinePrism' object has no attribute
+        # 'polys'" with stage=None (#96 gap 11 / item 10).
         from forgekernel.curve import TubeSolid
         from forgekernel.loft import LoftSolid
         from forgekernel.profile2d import SplinePrism
 
+        if isinstance(a, LoftSolid) or isinstance(b, LoftSolid):
+            try:
+                a = a.to_patches() if isinstance(a, LoftSolid) else a
+                b = b.to_patches() if isinstance(b, LoftSolid) else b
+            except ValueError as exc:
+                _nope(f"boolean.{op} (loft skin: {exc})", _K7,
+                      predicate="loft_skin_unbuildable",
+                      remedy="the loft's sections refuse an outward patch "
+                             "skin (mixed orientation or a zero-area "
+                             "section); fix the section loops and re-loft")
+
         ff = [type(s).__name__ for s in (a, b)
-              if isinstance(s, (LoftSolid, SplinePrism, TubeSolid))]
+              if isinstance(s, (SplinePrism, TubeSolid))]
         if ff:
             _nope(f"boolean.{op} on freeform operands ({', '.join(ff)})",
                   _K7,
                   predicate="freeform_boolean_unbuilt",
                   remedy="K7's boolean assembly works over PatchSolid "
-                         "operands today (SSI trim loops, certified "
+                         "operands today (SSI chains, certified "
                          "point-membership classification, an audited "
                          "trimmed-patch shell whose volume is certified ± e, "
-                         "ADR-0019); these representations still need their "
-                         "patch-skin converters — until those land, model "
-                         "the boolean against a planar, quadric, or "
-                         "PatchSolid representation instead")
+                         "ADR-0019), and smooth lofts convert via "
+                         "LoftSolid.to_patches; these representations still "
+                         "need their patch-skin converters — until those "
+                         "land, model the boolean against a planar, quadric, "
+                         "or PatchSolid representation instead")
 
         # K7 gap 5 through the seam: PatchSolid × PatchSolid dispatches to
         # forge's boolean_trimmed — per face-pair SSI, certified trim loops,
@@ -1759,16 +1772,17 @@ class RefKernel:
         deflection = _check_deflection("tessellate", deflection)
         from forgekernel.trimshell import TrimmedShell as _TShell
         if isinstance(shape, _TShell):
-            # the trim boundary is only known as a certified cell enclosure;
-            # a trimmed-patch mesher (the piece shared with K3.7 import) has
-            # not landed. Volume and audit stay certified without it — the
-            # FilletedPrism precedent: meshing refuses by name, nothing lies.
-            _nope("tessellate on a TrimmedShell (trimmed-patch "
-                  "tessellation)", _K7,
-                  predicate="trimmed_patch_tessellation_unbuilt",
-                  remedy="use mass_props (certified volume ± e) and "
-                         "validate (the shell audit) — the mesher for "
-                         "trimmed patches is the K7/K3.7 shared follow-on")
+            # the trim boundary is only known as a certified cell enclosure,
+            # so a watertight mesh would lie — but a CERTIFIED-SAFE view
+            # exists: triangulate exactly the dyadic cells whose membership
+            # is certain and show the SSI strip as explicit gap quads
+            # (forgekernel.tess.trimmed_shell_mesh). The viewer gets an
+            # honest picture of a freeform boolean; measures stay with
+            # mass_props/validate. ``deflection`` is not honoured — the
+            # grid is fixed by the boolean's own strip depth (5, matching
+            # the dispatch above) so gaps align with strip cells 1:1.
+            from forgekernel.tess import trimmed_shell_mesh
+            return trimmed_shell_mesh(shape, depth=5)
         if isinstance(shape, B.Body):
             try:
                 return B.tessellate(shape, deflection)

@@ -143,6 +143,34 @@ machinery.
   trimmed-patch mesher (shared with K3.7) lands. *Still open:* booleans of
   already-trimmed results (re-trim), loft/prism/tube patch-skin
   converters, open-branch assembly, rational operands end to end.
+- **✅ Loft skin + the open-branch loft × loft boolean** (done — the
+  flagship). `LoftSolid.to_patches()`: the loft's EXACT Bézier skin —
+  walls degree (1,3) straight from the natural-spline coefficients, caps
+  planar — whose flux volume equals the loft's own `∫A(v)z′(v)dv` as one
+  rational (two independent exact pipelines; pinned on 1668/35, 2582/35).
+  Convex-quad skins carry seam topology PROVEN by exact 3D control-point
+  equality (`PatchSolid.seams`). On top of it, OPEN branches landed in
+  `boolean_trimmed` — forced by the flagship, since two z-fibered lofts
+  can never meet in a closed single-face-pair loop: `ssi.ssi_chains`
+  returns certified chains with exactly-classified border-crossing ends;
+  every seam crossing is canonicalized (one certified solve, transferred
+  to the adjacent face through the seam's exact control-point equality —
+  one `TrimVertex` bound to three faces); chains glue across the other
+  operand's seams; `trim.split_domain_by_paths` partitions a face by
+  border-anchored paths; kept faces carry full border loops so the exact
+  pairing audit closes over seam edges. Verified on barrel(2582/35) ×
+  slab(12): intersect bracket contains the hand-derived 89/16, union/cut
+  contain their closed forms, interval conservation identities hold,
+  certified-MC membership agrees at 6 points × 3 ops, and any operand
+  without proven seams still refuses `open_branch` by name. Seam:
+  `RefKernel.boolean` converts LoftSolid operands via `to_patches` (loft
+  × loft returns "certified ± e" through `mass_props`); `tessellate` on a
+  `TrimmedShell` is now the CERTIFIED-SAFE view (`tess.
+  trimmed_shell_mesh`): only certain-membership cells are meshed, the SSI
+  strip shows as explicit gap quads, provenance `"render"`. *Still open:*
+  re-trim of results, prism/tube skins, rational operands, fan-cap
+  (non-quad-section) lofts in the open-branch path, a watertight
+  trimmed-patch mesher.
 
 ### K3.7 — the freeform import gap **[K]**
 - Freeform STEP **topology**: trimmed `ADVANCED_FACE` over B-spline
