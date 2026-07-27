@@ -1585,6 +1585,16 @@ class RefKernel:
         if isinstance(shape, LoftSolid):
             return [{"surface": "spline-loft"}, {"surface": "plane"},
                     {"surface": "plane"}]
+        from forgekernel.trimshell import TrimmedShell as _TShl
+        if isinstance(shape, _TShl):
+            # a freeform shell's faces ARE enumerable (the audit names
+            # them); descriptors carry the trim topology so a K3.7 import
+            # can be indexed by the document (edges stay unenumerated —
+            # trim edges live in parameter space, and inventing 3D edge
+            # descriptors for them would be a wrong number wearing
+            # coordinates)
+            return [{"surface": "trimmed-bspline", "sense": f.sense,
+                     "loops": len(f.loops)} for f in shape.faces]
         if isinstance(shape, TubeSolid):
             # swept lateral surface + two round end caps
             return [{"surface": "swept-tube"}, {"surface": "plane"},
@@ -5117,24 +5127,56 @@ class RefKernel:
         # K3.6: planar-faced STEP solids import as EXACT Solids — STEP
         # reals are decimal text, decimal→Fraction is lossless, and face
         # loops orient by exact Newell-vs-plane-normal comparison.
-        # Freeform faces / holes refuse with their stage (K3.7).
         #
-        # K3.6b (#135): the border is audited. A CLOSED_SHELL that lies
-        # (missing face, torn seam) used to import silently and hand
-        # measure/mass_props an origin-dependent non-number; now closure is
-        # established BEFORE the orientation flip and an open shell refuses
-        # with a gap report in user millimetres — or heals by exact vertex
-        # merge when the import feature records that intent (ADR-0022).
+        # K3.7: freeform (B-spline-faced) solids route to the trimmed
+        # importer and arrive as an audited TrimmedShell — pcurve chains
+        # carry each face's exact parameter-space trim, orientation is
+        # decided by certified volume sign, and the volume bracket is
+        # width-0 on the exact tier (polynomial faces, degree-1 pcurves).
+        # Downstream the K7 contract applies: mass_props certified,
+        # validate re-audits, tessellate shows the certified-safe mesh,
+        # bbox/boolean keep refusing by name. Analytic surfaces,
+        # sign-varying weights, missing pcurves, VERTEX_LOOPs and
+        # periodic seams refuse with their names.
+        #
+        # K3.6b (#135), BOTH paths: the border is audited. A CLOSED_SHELL
+        # that lies (missing face, torn seam) used to import silently and
+        # hand measure/mass_props an origin-dependent non-number; now
+        # closure is established BEFORE any orientation decision and an
+        # open shell refuses with a gap report in user millimetres — or
+        # heals by exact vertex merge when the import feature records
+        # that intent (ADR-0022).
         from forgekernel.brep import NonClosedShellError, SnapClusterError
-        from forgekernel.stepio import read_step_planar_solid
+        from forgekernel.stepio import read_step_solid
+        from forgekernel.trimshell import (ShellAuditError,
+                                           ShellAuditUncertified)
 
         with open(path, encoding="utf-8", errors="replace") as f:
             text = f.read()
         rep: dict = {}
         self.last_import_report = None
         try:
-            s = read_step_planar_solid(text, heal_tolerance=heal_tolerance,
-                                       report=rep)
+            s = read_step_solid(text, heal_tolerance=heal_tolerance,
+                                report=rep)
+        except ShellAuditError as exc:
+            # the FILE's shell is proven wrong (mis-oriented face flags,
+            # degenerate trim loop) — a modeling/export error, refused
+            # with the audit's own finding
+            raise KernelError(str(exc), FailureSignature(
+                op="import_step", diagnostic="ShellAuditFailed",
+                kernel="ref"),
+                stage="import", predicate="shell_audit_failed",
+                remedy="the freeform shell fails its own certified audit "
+                       "— repair the orientation/trim in the source "
+                       "system and re-export")
+        except ShellAuditUncertified as exc:
+            raise KernelError(str(exc), FailureSignature(
+                op="import_step", diagnostic="ShellAuditUncertified",
+                kernel="ref"),
+                stage="import", predicate="shell_audit_uncertified",
+                remedy="the certified brackets are too wide to prove the "
+                       "shell at this depth; raise the import depth "
+                       "(tighten-or-refuse, never a silent pass)")
         except NonClosedShellError as exc:
             measured = dict(exc.report)
             if exc.healed is not None:

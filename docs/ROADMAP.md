@@ -222,9 +222,25 @@ awaits sign-off and is not in the release.
   hull descent (pure-Python cost ~4 s at depth 5 default).
 
 ### K3.7 — the freeform import gap **[K]**
-- Freeform STEP **topology**: trimmed `ADVANCED_FACE` over B-spline
-  surfaces → importable freeform solids (consumes K7's trimmed-patch
-  type). This is the real-world STEP round-trip for SolidWorks exports.
+- **✅ Freeform STEP topology** (landed): trimmed `ADVANCED_FACE` over
+  B-spline surfaces imports as an audited `TrimmedShell` — pcurve chains
+  (`SURFACE_CURVE→PCURVE→DEFINITIONAL_REPRESENTATION`) carry exact
+  parameter-space trims, one `TrimVertex` per `VERTEX_POINT` entity,
+  curved edges subdivide per EDGE entity (shared breakpoints, no
+  T-junctions), planar faces lift to bilinear patches, closure is audited
+  BEFORE orientation (#135 gap report in mm; heal = vertex-identity merge,
+  never face invention), global orientation by certified volume sign.
+  Width-0 volume brackets on the exact tier (polynomial faces, degree-1
+  pcurves — a loft skin round-trips to its exact rational volume);
+  certified hull-strip brackets for curved trims; one-signed rational
+  surfaces via the reciprocal rule. `write_step_patch_solid` exports any
+  seam-proven `PatchSolid` (loft skins) as real B-spline STEP faces.
+  *Still open:* curve inversion (edges without pcurves on B-spline
+  faces), analytic surfaces in freeform shells (need irrational weights),
+  periodic seams, sign-varying weights, rational pcurves — each refuses
+  by name; booleans/bbox on imported `TrimmedShell`s stay refused until
+  K7 re-trim lands. Third-party (SolidWorks/OCCT) exports remain
+  untested against the exact-or-refuse bar.
 - **✅ Smooth (spline-fit) multi-section lofts** (done). Natural cubic
   spline through the section rows (exact ℚ tridiagonal solve); `LoftSolid`
   returns **exact volume AND exact centroid** by polynomial integration of
