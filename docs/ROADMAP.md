@@ -171,6 +171,38 @@ machinery.
   re-trim of results, prism/tube skins, rational operands, fan-cap
   (non-quad-section) lofts in the open-branch path, a watertight
   trimmed-patch mesher.
+- **✅ Bracket tightening — the second-order tube bound** (done). Three
+  stage-1/2 limits closed at once (`forgekernel/tube.py`). (1) A boolean
+  face's flux is now the EXACT polygon flux over its certified trim
+  loops ± a tube error built from what SSI already certifies: a
+  transversality anchor δ = residual/σ (σ from a 4·det/trace² singular-
+  value bound over hodograph hulls), a tangent cone whose chord
+  components are hulled as exact B-forms (`D_u = n_other·H_u` — the
+  near-cancellation survives), a two-ended ramp area bound, and a Band
+  flood-fill audit that verifies polygon parity against certified
+  membership per Band-free component (pockets are priced, not guessed).
+  Chord-halving via extra residual-certified midpoints (`tube_refine`)
+  halves the error per round. Dome cap at depth 5: width 2.04 → 0.038
+  default, ±2.2e-3 at `tube_refine=5` — the hand pipeline's error scale,
+  now with a rigorous bar; converges O(h²) per depth (d6: ±2.0e-3 at
+  r3). `TrimmedShell.volume` intersects tube and strip brackets
+  (disjointness = proven contradiction → audit error); positivity now
+  certifies at depth 4. (2) Certified B-side strip prune: `ssi_chains`
+  returns strips where every dropped cell is PROVEN empty (swapped-role
+  subdivision exclusion, Rust hot loop with the Python path as spec) —
+  the measured 3× B-side inflation (228→76 cells on dome×plane) is gone,
+  and the boolean runs one SSI detection instead of two. (3) Dyadic
+  snapping: closed-loop vertices snap to the 2^-(2·depth+10) grid
+  (denominators 2^20 vs ~1e12), snap distance folded into the tube pads
+  — enclosures stay enclosures. Rational leaves upgraded too: the
+  Neumann rule 1/Q = 2/qm − Q/qm² + (Q−qm)²/(qm²Q) with the P·Q product
+  form subdivided alongside makes `patch_flux_ci` second order — quarter
+  cylinder at depth 5: width 0.375 → 0.0147. Documented premise (same
+  residual class as chain ordering): one branch pass per covered cell
+  set; guarded by the one-signed cone, coverage fixpoint, and the strip
+  intersection. *Still open:* the tube path for rational faces and open
+  branches (falls back to the strip bracket by name), a Rust port of the
+  hull descent (pure-Python cost ~4 s at depth 5 default).
 
 ### K3.7 — the freeform import gap **[K]**
 - Freeform STEP **topology**: trimmed `ADVANCED_FACE` over B-spline
