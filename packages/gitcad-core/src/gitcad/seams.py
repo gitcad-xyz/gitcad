@@ -147,8 +147,14 @@ class Kernel(Protocol):
         """Tessellate and write STL for 3D printing."""
         ...
 
-    def import_step(self, path: str) -> Shape:
-        """Read STEP — the onboarding path for existing mechanical work."""
+    def import_step(self, path: str, heal_tolerance=None) -> Shape:
+        """Read STEP — the onboarding path for existing mechanical work.
+
+        The border is audited: a shell that does not close refuses with a
+        structured gap report (never a silent import with an origin-dependent
+        "volume"). ``heal_tolerance`` (mm, decimal string) is the caller's
+        RECORDED intent to merge vertices coincident within that tolerance —
+        an exact repair that can never invent a face (#135)."""
         ...
 
     def import_brep(self, path: str) -> Shape:

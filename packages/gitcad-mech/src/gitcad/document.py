@@ -460,7 +460,13 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
                 f"document pins {p['sha256'][:12]}..."
             )
         if fmt == "step":
-            return kernel.import_step(path)
+            # heal_tolerance is the ADR-0022 shape of tolerant import: the
+            # feature records the INTENT (merge vertices coincident within
+            # this many mm, exactly, once, at the border) so a rebuild
+            # replays the same certified repair — the anti-Parasolid
+            # contrast with per-entity tolerance fuzz carried forever.
+            return kernel.import_step(
+                path, heal_tolerance=p.get("heal_tolerance"))
         if fmt == "brep":
             return kernel.import_brep(path)
         raise GitcadError(f"unknown import format {fmt!r} (want step|brep)")

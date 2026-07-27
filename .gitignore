@@ -2,6 +2,9 @@
 *.brep
 *.step
 *.stp
+# ...but AUTHORED broken-geometry fixtures are source for the import contract
+# (#135): no correct exporter can produce them, which is why they exist.
+!tests/golden/fixtures/*.step
 *.stl
 *.gltf
 *.glb

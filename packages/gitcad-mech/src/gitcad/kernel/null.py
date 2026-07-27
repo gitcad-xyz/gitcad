@@ -111,7 +111,7 @@ class NullKernel:
     def export_stl(self, shape: Shape, path: str, *, deflection: float = 0.1) -> None:
         raise NotImplementedError("STL export requires the OCCT backend (pip install 'gitcad[occt]')")
 
-    def import_step(self, path: str) -> Shape:
+    def import_step(self, path: str, heal_tolerance=None) -> Shape:
         raise NotImplementedError("STEP import requires the OCCT backend (pip install 'gitcad[occt]')")
 
     def import_brep(self, path: str) -> Shape:

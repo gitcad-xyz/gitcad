@@ -755,6 +755,11 @@ class RefKernel:
 
     name = "ref-k2-exact"
 
+    # Evidence channel for the last import (#135): what was dropped, what was
+    # healed and its certificate. The importer's ImportReport reads this after
+    # a build — intent lives in the feature params (ADR-0022), evidence here.
+    last_import_report: dict | None = None
+
     def __init__(self) -> None:
         from forgekernel import kernel as fk
 
@@ -4886,27 +4891,98 @@ class RefKernel:
         with open(path, "w", newline=chr(10)) as f:
             f.write(text)
 
-    def import_step(self, path):
+    # The remedy every non-closing import gets: both sanctioned outs, and the
+    # bet that rules out a third. Named once so import_step and import_brep
+    # cannot drift apart about what the user is allowed to do next.
+    _NONCLOSED_REMEDY = (
+        "the shell does not close and gitcad will not invent geometry to "
+        "close it (the anti-Parasolid bet): repair the part in its source "
+        "system, or — if the gaps are small tears — set heal_tolerance=<mm> "
+        "on the import feature for an exact, recorded vertex merge (never "
+        "face invention); a quarantined sheet-body import (as_sheet) is a "
+        "named future option pending the ADR-0022 Body-seam reconciliation")
+
+    def import_step(self, path, heal_tolerance=None):
         # K3.6: planar-faced STEP solids import as EXACT Solids — STEP
         # reals are decimal text, decimal→Fraction is lossless, and face
         # loops orient by exact Newell-vs-plane-normal comparison.
         # Freeform faces / holes refuse with their stage (K3.7).
+        #
+        # K3.6b (#135): the border is audited. A CLOSED_SHELL that lies
+        # (missing face, torn seam) used to import silently and hand
+        # measure/mass_props an origin-dependent non-number; now closure is
+        # established BEFORE the orientation flip and an open shell refuses
+        # with a gap report in user millimetres — or heals by exact vertex
+        # merge when the import feature records that intent (ADR-0022).
+        from forgekernel.brep import NonClosedShellError, SnapClusterError
         from forgekernel.stepio import read_step_planar_solid
 
         with open(path, encoding="utf-8", errors="replace") as f:
             text = f.read()
+        rep: dict = {}
+        self.last_import_report = None
         try:
-            return read_step_planar_solid(text)
+            s = read_step_planar_solid(text, heal_tolerance=heal_tolerance,
+                                       report=rep)
+        except NonClosedShellError as exc:
+            measured = dict(exc.report)
+            if exc.healed is not None:
+                measured["heal_moved"] = exc.healed["moved"]
+                measured["heal_max_move_mm"] = exc.healed["max_move_mm"]
+            raise KernelError(str(exc), FailureSignature(
+                op="import_step", diagnostic="NonClosedShell", kernel="ref"),
+                stage="import", predicate="shell_closure",
+                measured=measured, remedy=self._NONCLOSED_REMEDY)
+        except SnapClusterError as exc:
+            raise KernelError(str(exc), FailureSignature(
+                op="import_step", diagnostic="HealClusterOverflow",
+                kernel="ref"),
+                stage="import", predicate="heal_cluster_diameter",
+                measured={"cluster": exc.cluster,
+                          "diameter_sq": float(exc.diameter_sq),
+                          "heal_tolerance": float(exc.tolerance)},
+                remedy="lower heal_tolerance below the smallest real vertex "
+                       "spacing — a transitive merge would move a vertex "
+                       "farther than the promised tolerance")
         except ValueError as exc:
+            if "non-planar face loop" in str(exc):
+                raise KernelError(str(exc), FailureSignature(
+                    op="import_step", diagnostic="NonPlanarFaceLoop",
+                    kernel="ref"),
+                    stage="import", predicate="face_loop_planar",
+                    remedy="the loop's vertices do not lie in one exact "
+                           "plane; repair or re-export from the source "
+                           "system (freeform faces arrive at K3.7)")
             raise KernelError(str(exc), FailureSignature(
                 op="import_step", diagnostic="NotYetImplemented",
                 kernel="ref"))
+        self.last_import_report = rep
+        return s
 
     def import_brep(self, path):
         from forgekernel import io
+        from forgekernel.brep import (Solid, boundary_gap_report,
+                                      open_boundary_segments)
 
         with open(path, encoding="utf-8") as f:
-            return io.loads(f.read())
+            s = io.loads(f.read())
+        # same border, same audit (#135): a polygon-soup file can describe an
+        # open shell just as easily as a torn STEP, and the empty solid — an
+        # ANSWER (#136), no boundary at all — passes vacuously.
+        if isinstance(s, Solid):
+            segs = open_boundary_segments(s.polys)
+            if segs:
+                gr = boundary_gap_report(segs)
+                raise KernelError(
+                    f"import_brep: the shell does not close — "
+                    f"{gr['open_edges']} open boundary edges, "
+                    f"{gr['open_perimeter_mm']:.6g} mm open perimeter",
+                    FailureSignature(op="import_brep",
+                                     diagnostic="NonClosedShell",
+                                     kernel="ref"),
+                    stage="import", predicate="shell_closure",
+                    measured=gr, remedy=self._NONCLOSED_REMEDY)
+        return s
 
 
 def _drop_collinear_2d(poly):
