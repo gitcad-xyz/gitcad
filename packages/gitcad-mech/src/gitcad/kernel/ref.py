@@ -10,6 +10,7 @@ else refuses honestly, naming the stage that brings it. The scorecard
 
 from __future__ import annotations
 
+import math
 from fractions import Fraction
 from typing import Any
 
@@ -246,6 +247,41 @@ def _nope(op: str, stage: str, *, predicate: str | None = None,
         f"ref kernel does not implement {op} yet — {stage}",
         FailureSignature(op=op, diagnostic="NotYetImplemented", kernel="ref"),
         stage=stage, predicate=predicate, measured=measured, remedy=remedy)
+
+
+# A mesh tolerance below this is a request no mesher here can honour without
+# unbounded subdivision — the refusal names the floor instead of exhausting
+# memory trying (docket R7).
+_DEFLECTION_FLOOR = 1e-9
+
+
+def _check_deflection(op: str, deflection) -> float:
+    """Refuse a degenerate mesh tolerance BEFORE it reaches a mesher.
+
+    Docket R7: nothing between the seam and the meshers validated
+    ``deflection``, so 0.0 escaped as a raw MemoryError, -0.5 as a raw
+    OverflowError, and NaN sailed through every comparison (each is False) to
+    SILENTLY return the default-quality mesh — the caller asked for an
+    impossible tolerance and got 124 triangles with no signal. Deflection is a
+    display property (its VALUE never decides topology, ADR-0019), but a
+    refusal is still owed where no honest mesh exists.
+    """
+    if isinstance(deflection, bool) or not isinstance(
+            deflection, (int, float, Fraction)):
+        # `float("0.1")` would coerce, but a string is not a number and the
+        # seam should not guess — same strictness `loads_body` applies to
+        # `sense` (truthy is not True).
+        raise KernelError(
+            f"{op}: deflection must be a number, got "
+            f"{type(deflection).__name__} {deflection!r}",
+            FailureSignature(op=op, diagnostic="BadInput", kernel="ref"))
+    d = float(deflection)
+    if not (math.isfinite(d) and d >= _DEFLECTION_FLOOR):
+        raise KernelError(
+            f"{op}: deflection must be a finite number >= {_DEFLECTION_FLOOR}"
+            f" (a linear mesh tolerance in model units), got {deflection!r}",
+            FailureSignature(op=op, diagnostic="BadInput", kernel="ref"))
+    return d
 
 
 _SEAM_OPS = (
@@ -1192,6 +1228,7 @@ class RefKernel:
     def tessellate(self, shape, *, deflection: float = 0.2) -> dict[str, list]:
         from forgekernel import body as B
 
+        deflection = _check_deflection("tessellate", deflection)
         if isinstance(shape, B.Body):
             try:
                 return B.tessellate(shape, deflection)
@@ -2889,7 +2926,22 @@ class RefKernel:
         void_lo = [lo[c] + t for c in range(3)]
         void_hi = [hi[c] - t for c in range(3)]
         for idx in remove_faces:
-            if idx >= len(ordered):
+            if isinstance(idx, bool) or not isinstance(idx, int):
+                # Docket R7: a string like 'top' used to reach the comparison
+                # below and leak a raw TypeError through the seam. Face NAMES
+                # are not a form this kernel speaks — indices into
+                # entities(shape, "face") are (the Document layer maps stable
+                # ids to them; ADR-0003 keeps names/ids out of the kernel).
+                raise KernelError(
+                    f"shell: remove_faces must be integer face indices into "
+                    f"entities(shape, 'face'), got {idx!r} — named faces are "
+                    "not supported at the kernel seam",
+                    FailureSignature(op="shell", diagnostic="BadInput",
+                                     kernel="ref"))
+            if idx < 0 or idx >= len(ordered):
+                # A negative index would silently wrap to the END of the
+                # enumeration (Python list semantics) — an ordinal accident,
+                # not an answer.
                 raise KernelError(
                     f"shell: face index {idx} out of range",
                     FailureSignature(op="shell",
@@ -2953,6 +3005,7 @@ class RefKernel:
         # property (floats legal), the geometry drawn is the exact solid.
         from forgekernel.hlr import hidden_line
 
+        deflection = _check_deflection("hlr_project", deflection)
         return hidden_line(shape, direction, xdir, deflection=deflection)
 
     def section_polys(self, shape, direction, xdir, offset, *, deflection=0.05):
@@ -2960,6 +3013,7 @@ class RefKernel:
         # sheet frame as hlr_project, so a section view overlays exactly.
         from forgekernel.hlr import section_polys
 
+        deflection = _check_deflection("section_polys", deflection)
         return section_polys(shape, direction, xdir, offset, deflection=deflection)
 
     def export_step(self, shape, path):
@@ -3001,6 +3055,7 @@ class RefKernel:
         # ADR-0021, ONE mesher: the export path IS `self.tessellate`, at the
         # caller's deflection. Where the mesh would be wrong, this now refuses
         # structurally instead of shipping — the refusal is the answer.
+        deflection = _check_deflection("export_stl", deflection)
         mesh = self.tessellate(shape, deflection=deflection)
         v = mesh["vertices"]
         out = ["solid forge"]

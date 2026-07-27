@@ -197,3 +197,48 @@ def test_can_does_not_mutate_or_leak(k) -> None:
 def test_an_unknown_operation_is_answered_not_raised(k) -> None:
     v = k.can("teleport", 1, 2)
     assert v["ok"] is False and "teleport" in v["remedy"]
+
+
+# --- docket R7: degenerate inputs must refuse, never crash raw or degrade ---
+#
+# `tessellate(cyl, deflection=0.0)` escaped as a raw MemoryError, `-0.5` as a
+# raw OverflowError, and NaN sailed straight through every comparison (each is
+# False) to SILENTLY return the default-quality mesh — a caller asking for an
+# impossible tolerance got 124 triangles and no signal. `shell(box, ['top'],
+# 2)` leaked a raw TypeError from `idx >= len(ordered)`. A refusal is a
+# finished answer; a raw crash is not.
+
+DEGENERATE_DEFLECTIONS = [0.0, -0.5, float("nan"), float("inf"), 5e-10, "0.1"]
+
+
+@pytest.mark.parametrize("bad", DEGENERATE_DEFLECTIONS,
+                         ids=["zero", "negative", "nan", "inf",
+                              "below-floor", "string"])
+def test_a_degenerate_deflection_refuses_by_name(k, bad) -> None:
+    err = _refusal(lambda: k.tessellate(Cyl(0, 0, 5, 0, 12), deflection=bad))
+    assert err.signature.diagnostic == "BadInput"
+    assert "deflection" in str(err)
+
+
+def test_export_stl_checks_the_deflection_before_meshing(k, tmp_path) -> None:
+    err = _refusal(lambda: k.export_stl(Cyl(0, 0, 5, 0, 12),
+                                        str(tmp_path / "c.stl"),
+                                        deflection=float("nan")))
+    assert err.signature.diagnostic == "BadInput"
+    assert "deflection" in str(err)
+    assert not (tmp_path / "c.stl").exists()   # refused BEFORE writing
+
+
+def test_shell_with_a_named_face_names_the_supported_form(k) -> None:
+    """`remove_faces` are indices into entities(shape, 'face'); a string like
+    'top' used to hit `idx >= len(ordered)` and leak a raw TypeError."""
+    err = _refusal(lambda: k.shell(Solid.box(10, 10, 10), ["top"], 2))
+    assert err.signature.diagnostic == "BadInput"
+    assert "index" in str(err) or "indices" in str(err)
+
+
+def test_shell_with_a_negative_face_index_refuses_instead_of_wrapping(k) -> None:
+    """Python list semantics made -1 silently mean 'the last face' — an
+    ordinal accident, not an answer (ADR-0003 forbids ordinal identity)."""
+    err = _refusal(lambda: k.shell(Solid.box(10, 10, 10), [-1], 2))
+    assert "out of range" in str(err)
