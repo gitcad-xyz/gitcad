@@ -31,15 +31,21 @@ regenerable — no more discovering fundamentals by accident.
 
 ## Current state
 
-**339/345 (98%) working · 2 honest gaps · 4 permanent (outside any exact
-field) · 0 crashes** — main, 2026-07-26, unreleased. The released 0.9.6
-wheels score **327/345 (95%)** — 16 gaps, 2 permanent, 0 crashes.
+**340/345 (99%) working · 0 honest gaps · 5 permanent (outside any exact
+field) · 0 crashes** — identical on main (repo venv, 2026-07-27) and on the
+released **0.9.8** wheels (clean-venv `pip install gitcad==0.9.8`).
 
 (Progression: 218/345 when this document was written; 236 after ADR-0021
 landed; 247 after transforms and STEP moved to the canonical form; 290 after
 the Cone and RevolveSolid converters, the native body text format, and
 chamfer/shell on curved solids; 327 at the 0.9.6 release; 339 after
-the trimmed-quadric, torus, and Q[√d] exact-field work on main.)
+the trimmed-quadric, torus, and Q[√d] exact-field work; 340 — the ceiling
+short of the five proven walls — measured on the 0.9.8 wheels.)
+
+The matrix does not yet probe the K7 freeform boolean cells (loft × loft
+and PatchSolid × PatchSolid land outside its 15 representations × 23 ops
+grid); 0.9.8's freeform booleans are verified by their own oracle suite
+and by hand-derived closed forms instead.
 
 Rules this establishes:
 
@@ -90,13 +96,14 @@ matrix from 290 to 339. The predictions that paid off:
   ℚ[√d][π], which is what unblocked cone shell/chamfer, the mitred sweep, and
   the straddling-bore cuts.
 
-What remains, per the matrix on main (2 honest gaps, 4 permanent):
+What remains, per the matrix on the 0.9.8 wheels (0 honest gaps, 5
+permanent — each wall carries a transcendence proof, recorded in
+`docs/releases/0.9.7.md`):
 
 | cell | status |
 |---|---|
-| cone × cut cylinder | gap (K2.2) — the general plane/quadric–cone intersection curve |
-| chamfered box × fillet(all) | gap — fillet of an already-chamfered edge network |
 | sphere × cut box | permanent — the intersection curve is outside any exact field |
+| cone × cut box | permanent — same |
 | cone × fillet(all) | permanent — same |
 | chamfered box × chamfer(all) | permanent — same |
 | loft × fillet(all) | permanent — a wall, not a gap |
@@ -112,8 +119,12 @@ the suite.
 - **engrave** — text strokes rotate by arbitrary angles, which leave ℚ[√d]
   (mixed radicals). Needs a bigger number field (K3.1) or a different
   formulation. Honest refusal is correct for now.
-- **freeform STEP topology (K3.7), general NURBS booleans (K7)** — the crown
-  work; unchanged in scope.
+- **freeform STEP topology (K3.7)** — still open (the real-world round-trip
+  for SolidWorks exports; consumes K7's trimmed-patch type).
+- **NURBS booleans (K7)** — shipped in 0.9.8 for PatchSolid × PatchSolid and
+  loft × loft, with certified volume brackets and named refusals for the
+  tangent/corner/mixed cases; re-trim of results, prism/tube skins, and
+  rational operands remain (see `docs/ROADMAP.md`).
 
 ## How to work this list
 

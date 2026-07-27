@@ -72,14 +72,22 @@ otherwise.
 
 ## Capabilities
 
-Mechanical — primitives and booleans; fillet, chamfer, shell; extrude, revolve,
-loft, sweep, mirror; sketch planes and sketch-on-face; an authoring-time
-constraint solver; holes with counterbore (countersink currently refuses,
-pending the cone-cut stage); patterns; sheet metal;
-weldments; stable entity identity; exact mass properties; STEP/STL/DXF;
-dimensioned drawings (third-angle and section views, GD&T, BOM and balloons);
-exploded views; mate checking and solving; exact interference with clash
-budgets; feature recognition from STEP.
+Mechanical — primitives and booleans, including booleans over freeform
+(lofted NURBS) solids whose volume is reported as a certified interval;
+fillet, chamfer, shell, plus taper and variable-radius fillets and composite
+boss blends; extrude, revolve, loft, sweep, mirror; direct editing
+(move/offset/delete face with exact heal, recorded as replayable intent);
+molding draft with face selection, exact rational tangents, and parting
+lines; sketch planes and sketch-on-face; an authoring-time constraint
+solver; holes with counterbore (countersink currently refuses, pending the
+cone-cut stage); patterns; sheet metal; weldments; stable entity identity;
+exact mass properties with provenance (`exact`, or `certified ± e` where
+the volume is a proven bracket); STEP/STL/DXF; STEP import that audits
+shell closure at the border — a file whose `CLOSED_SHELL` lies is refused
+with a gap report in millimetres, and the opt-in exact heal is recorded as
+intent; dimensioned drawings (third-angle and section views, GD&T, BOM and
+balloons); exploded views; mate checking and solving; exact interference
+with clash budgets; feature recognition from STEP.
 
 Electrical — schematic capture with typed pins and sheet authoring;
 hierarchical sheets, buses, and multi-sheet systems; ERC, electrical envelopes,

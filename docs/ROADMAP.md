@@ -17,17 +17,30 @@ cross-domain · **[G]** GUI/viewer · **[I]** infra/ecosystem ·
 
 ---
 
-## Where things stand (2026-07-26)
+## Where things stand (2026-07-27)
 
-**Released:** all six packages are live on PyPI at **0.9.6** (`gitcad`,
+**Released:** all six packages are live on PyPI at **0.9.8** (`gitcad`,
 `gitcad-core`, `gitcad-mech`, `gitcad-ecad`, `forgekernel`, `forgekernel_rs`).
-A clean `pip install gitcad==0.9.6` scores **327/345 (95%)** on the capability
-matrix (`python -m gitcad.bench.capability --md`) — 16 honest gaps, 2 cells
-permanently outside any exact field, 0 crashes.
+A clean `pip install gitcad==0.9.8` scores **340/345 (99%)** on the capability
+matrix (`python -m gitcad.bench.capability --md`) — 0 honest gaps, 5 cells
+permanently outside any exact field (each carries a transcendence proof; see
+`docs/releases/0.9.7.md`), 0 crashes. Main and the release currently coincide
+— the matrix run from the repo venv reports the same 340/345.
 
-**On main, unreleased:** the matrix is **339/345 (98%)** — 2 gaps, 4 cells now
-classified permanent, 0 crashes. gitcad main requires forge main (CI installs
-`forgekernel` from git, not PyPI); the next release must publish forge first.
+**0.9.8's headline is K7**: booleans over freeform NURBS solids — two lofted
+solids in, one audited shell out, the volume reported as a certified interval
+(a bracket proven to contain the true value, never a bare float), and
+`mass_props` carrying provenance `exact` vs `certified ± e`. Verified from
+the released wheels: the loft × loft flagship brackets its hand-derived
+89/16 intersection at ±0.72, the dome cap brackets 1.0794724554159 at
+±0.019, and the tangent-contact / operand-corner / mixed loft × planar
+cases refuse by name. Bracket widths are O(2^-depth); loft × planar-Body
+refuses (only PatchSolid × PatchSolid and loft × loft are assembled).
+0.9.8 also shipped the SolidWorks-parity wave: direct editing
+(move/offset/delete face + exact heal, recorded as replayable intent),
+draft with face selection and parting lines, the blend family beyond one
+radius, and the STEP border audit that refuses a lying `CLOSED_SHELL` with
+a gap report in millimetres.
 
 OCCT is gone entirely (ADR-0020): forge is the sole geometry kernel, and the
 OCCT references below are to its former role as a differential oracle. Before
@@ -39,9 +52,10 @@ shipped: exact planar/quadric solids, certified intervals (ADR-0019),
 NURBS eval, complete-branch SSI, exact STEP geometry import + planar
 topology import, open/prism shells, selected-edge + corner fillets,
 exact Gaussian curvature, G1/G2 continuity **proofs**, Coons patches,
-self-certifying blend strips. Rust carries the hot loops (BSP booleans,
-NURBS eval, SSI detection), oracle-locked bit-identical to the Python
-executable spec.
+self-certifying blend strips — and, in 0.9.8, the K7 freeform boolean
+assembly itself. Rust carries the hot loops (BSP booleans,
+NURBS eval, SSI detection, strip pruning), oracle-locked bit-identical
+to the Python executable spec.
 
 Platform: full mech+ecad feature surface (SW attack list P1–P8 and the
 KiCad map are both complete), registry, semantic merge, requirements-
@@ -51,11 +65,14 @@ as-code, review tooling, viewer with zebra inspection.
 
 ## Horizon 1 — Now (the current arc: finish the kernel's honest edges)
 
-### K7 — booleans over freeform NURBS solids **[K]** — *the crown assembly*
-The one big kernel capability not yet attempted: solid booleans where
-faces are NURBS patches. Everything it needs now exists — SSI with
-complete branch detection, Bézier extraction, exact point classification
-machinery.
+### K7 — booleans over freeform NURBS solids **[K]** — *shipped in 0.9.8*
+Solid booleans where faces are NURBS patches, released end to end in
+0.9.8 (loft × loft included). What remains open, per the item notes
+below: re-trim of boolean results, prism/tube patch-skin converters,
+rational operands end to end, a watertight trimmed-patch mesher, and
+the tube error bound for rational faces and open branches. The
+`k7/closure-signoff` soundness upgrade to SSI closure classification
+awaits sign-off and is not in the release.
 
 - **✅ K7.0 — exact volume of a Bézier-patch-bounded solid** (done). The
   divergence-theorem flux `⅓∮ S·(S_u×S_v)` has a *polynomial* integrand,
@@ -220,8 +237,9 @@ machinery.
 
 ### K5.2 / K4.2 — blend & offset edges **[K]**
 - ✅ `fillet(all)` on rectilinear right prisms (`FilletedPrism`, exact in
-  ℚ[π]) — landed on main, unreleased. Arbitrary (non-rectilinear) prism
-  edge frames still open.
+  ℚ[π]) — released (the prism × fillet(all) cell is green in the 0.9.8
+  wheels' matrix). Arbitrary (non-rectilinear) prism edge frames still
+  open.
 - Two-edge corner blends (the genuinely non-spherical patch) — likely
   certified rather than exact.
 - Variable-radius fillet along an edge (linear r(t): exact volume by
@@ -242,7 +260,7 @@ bbox touches. A real BSP change; do it in Rust where the engine lives.
 The `auto` backend (forge-first, OCCT fallback) shipped, and then
 ADR-0020 removed OCCT outright — `forge` is the *only* kernel; a
 refusal is now surfaced honestly instead of backfilled. `forgekernel`
-and `forgekernel_rs` are published on PyPI (0.9.6).
+and `forgekernel_rs` are published on PyPI (0.9.8).
 
 ### Native STEP **export** from forge **[K]** — **✅ done**
 `stepio.write_step_planar_solid`: AP214 planar-solid export with full
@@ -325,7 +343,7 @@ change, requires human approval before implementation.*
   synthetic reports.
 
 ### Ecosystem **[I]**
-- ✅ `pip install gitcad` is live — six packages on PyPI at 0.9.6,
+- ✅ `pip install gitcad` is live — six packages on PyPI at 0.9.8,
   including `forgekernel` and the `forgekernel_rs` native build.
 - Docs site: task-oriented guides (import your SW parts, route a board,
   verify a release), kernel whitepaper from the bench data (the
@@ -348,7 +366,7 @@ change, requires human approval before implementation.*
 
 | item | needs |
 |---|---|
-| ~~PyPI publication (`gitcad`, `forgekernel`)~~ | done — all six packages live at 0.9.6 |
+| ~~PyPI publication (`gitcad`, `forgekernel`)~~ | done — all six packages live at 0.9.8 |
 | release tags (`vX.Y.Z` publish trigger) | user call, per release |
 | Cloudflare relay (ADR-0012) | user CF account |
 | Night Shift autonomous runs | explicit opt-in + quota |
