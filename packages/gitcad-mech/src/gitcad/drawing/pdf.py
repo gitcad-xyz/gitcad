@@ -67,9 +67,6 @@ def _content_stream(d: Drawing) -> bytes:
         else:
             s.append(f"BT /F1 {float(size):.2f} Tf {float(x):.3f} {float(y):.3f} Td ({_esc(value)}) Tj ET")
 
-    # Border
-    polyline([(5, 5), (d.width - 5, 5), (d.width - 5, d.height - 5), (5, d.height - 5), (5, 5)], 0.3)
-
     for view in d.views:
         for poly in view.visible:
             polyline(poly, 0.35)
@@ -116,12 +113,23 @@ def _content_stream(d: Drawing) -> bytes:
     for nx, ny, value in d.notes:
         text(nx, ny, 3.0, value)
 
-    # Title block (bottom right)
-    w, h = 92.0, 20.0
-    x0, y0 = d.width - 5 - w, 5.0
-    polyline([(x0, y0), (x0 + w, y0), (x0 + w, y0 + h), (x0, y0 + h), (x0, y0)], 0.3)
-    text(x0 + 3, y0 + h - 6.5, 3.5, d.title)
-    text(x0 + 3, y0 + h - 12.0, 3.0, f"SCALE {float(d.scale):g}:1   UNITS mm   SHEET {d.sheet}")
-    text(x0 + 3, y0 + 2.5, 3.0, "gitcad - generated drawing")
+    # Sheet furniture: ISO 5457/ANSI frame + ISO 7200 title block (or the
+    # legacy plain border) — same primitives the SVG renderer draws.
+    from gitcad.drawing.frame import sheet_furniture
+
+    furn = sheet_furniture(d)
+    wide = {"frame": 0.7, "block": 0.7, "cm": 0.7, "legacy": 0.3}
+    for cls, x0, y0, rw, rh in furn["rects"]:
+        polyline([(x0, y0), (x0 + rw, y0), (x0 + rw, y0 + rh),
+                  (x0, y0 + rh), (x0, y0)], wide.get(cls, 0.25))
+    for cls, pts in furn["lines"]:
+        polyline(pts, wide.get(cls, 0.25))
+    for _cls, ccx, ccy, cr in furn["circles"]:
+        circle(ccx, ccy, cr)
+    for _cls, tx, ty, th, value, anchor in furn["texts"]:
+        # Helvetica averages ~0.52 em per glyph — close enough to centre
+        # or right-align the short title-block strings.
+        dx = {"middle": -0.26, "end": -0.52}.get(anchor, 0.0) * th * len(value)
+        text(tx + dx, ty, th, value)
 
     return "\n".join(s).encode("latin-1", errors="replace")

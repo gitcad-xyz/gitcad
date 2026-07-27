@@ -198,7 +198,9 @@ def release(sources: list[str], outdir: str, version: str) -> ReleaseResult:
             stl = out / f"{stem}.stl"
             kernel.export_stl(shape, str(stl))
             pdf = out / f"{stem}.pdf"
-            pdf.write_bytes(make_drawing(shape, kernel, title=f"{stem} {version}").to_pdf())
+            # source_path feeds the git-derived title-block fields (#139)
+            pdf.write_bytes(make_drawing(shape, kernel, title=f"{stem} {version}",
+                                         settings={"source_path": str(p)}).to_pdf())
             for f in (step, stl, pdf):
                 result.artifacts[f.name] = _sha(f)
         elif kind == "board":

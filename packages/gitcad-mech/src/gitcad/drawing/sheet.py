@@ -1,5 +1,10 @@
 """Sheet layout: views arranged third-angle on a standard sheet, auto-scaled,
 with overall dimensions and a title block. Output via :mod:`.svg` / :mod:`.pdf`.
+
+Sheets are ISO 5457 (A4 portrait, A3-A0 landscape) or ANSI Y14.1 (A-E); the
+frame, grid references and the ISO 7200 title block are drawn by
+:mod:`.frame` from :mod:`.formats` data. Title-block fields derive from git
+(:mod:`.titleblock`) with explicit overrides via the drawing-settings dict.
 """
 
 from __future__ import annotations
@@ -8,12 +13,19 @@ import math
 from dataclasses import dataclass, field
 
 from gitcad.drawing import hlr
+from gitcad.drawing.formats import (FORMATS, STANDARD_SCALES, TITLE_BLOCK_H,
+                                    TITLE_BLOCK_W, fitted_scale, pick_sheet,
+                                    scale_text)
+from gitcad.drawing.titleblock import TitleBlock, resolve_title_block
 
 Point = tuple[float, float]
 
-SHEETS = {"A4": (297.0, 210.0), "A3": (420.0, 297.0), "A2": (594.0, 420.0)}
-STANDARD_SCALES = [20.0, 10.0, 5.0, 2.0, 1.0, 0.5, 0.2, 0.1, 0.05, 0.02]
-MARGIN = 12.0
+# Trimmed (w, h) per sheet name — kept for the section/assembly modules.
+# ISO 5457 makes A4 portrait; that is the one deliberate size migration
+# (task #139): every drawing already carried an implied sheet + title block,
+# so the whole engine moved to the standard formats together.
+SHEETS = {name: (f.width, f.height) for name, f in FORMATS.items()}
+MARGIN = 12.0       # legacy inset (pre-#139); layout now uses the format frame
 GAP = 18.0          # spacing between views (sheet mm)
 DIM_OFFSET = 9.0    # dimension line offset from geometry (sheet mm)
 
@@ -80,6 +92,7 @@ class Drawing:
     notes: list[tuple[float, float, str]] = field(default_factory=list)
     surface_finishes: list[SurfaceFinish] = field(default_factory=list)
     welds: list[WeldSymbol] = field(default_factory=list)
+    block: TitleBlock | None = None     # resolved title-block fields (data)
 
     def surface_finish(self, x, y, ra, *, all_around=False) -> "Drawing":
         self.surface_finishes.append(SurfaceFinish(x, y, ra, all_around))
@@ -143,42 +156,95 @@ def _clip_poly_to_circle(poly, cx: float, cy: float, r: float):
     return out
 
 
+def _count_top_holes(kernel, shape) -> int:
+    """Unique z-axis cylindrical holes — the dims that will stack left of and
+    above the top view, so the layout reserves room for them up front."""
+    try:
+        faces = kernel.entities(shape, "face")
+    except Exception:            # noqa: BLE001 — reservation only, never fatal
+        return 0
+    seen = set()
+    for f in faces:
+        if f.get("surface") == "cylinder" and abs(abs(f["axis_dir"][2]) - 1.0) < 1e-6:
+            seen.add((round(f["axis_origin"][0], 6), round(f["axis_origin"][1], 6),
+                      round(f["radius"], 6)))
+    return len(seen)
+
+
 def make_drawing(shape, kernel=None, *, title: str = "part", sheet: str = "A3",
                  thread_specs: dict | None = None,
                  notes: list | None = None,
                  details: list | None = None,
-                 bom: list | None = None) -> Drawing:
+                 bom: list | None = None,
+                 settings: dict | None = None) -> Drawing:
     """Project ``shape`` into front/top/right/iso via the kernel's HLR engine,
-    lay out third-angle on the sheet, add overall dimensions."""
+    lay out third-angle on the sheet, add overall dimensions.
+
+    ``sheet`` names an ISO 5457 (``A4``-``A0``) or ANSI Y14.1 (``ANSI A``-
+    ``ANSI E``) format, or ``"auto"`` / ``"auto:ansi"`` to pick the smallest
+    sheet of the series holding the views at a standard scale. ``settings``
+    is the drawing-settings dict: title-block overrides (owner,
+    drawing_number, revision, date, author, approved_by, units, sheet_no,
+    sheet_count) plus ``source_path`` for the git-derived fields.
+    """
     if kernel is None:
         from gitcad.kernel import get_kernel
 
         kernel = get_kernel()          # forge HLR (ADR-0020) — no OCCT needed
-    w, h = SHEETS[sheet]
+    settings = settings or {}
+    if settings.get("projection") == "first":
+        raise ValueError(
+            "make_drawing lays views out in third-angle projection; a "
+            "first-angle title-block symbol would misstate the sheet")
 
     proj = {v: hlr.project(kernel, shape, v) for v in ("front", "top", "right", "iso")}
     bb = {v: hlr.bounds(p["visible"] + p["hidden"]) for v, p in proj.items()}
     size = {v: (bb[v][2] - bb[v][0], bb[v][3] - bb[v][1]) for v in bb}
-
-    # Auto-scale: front+right across, front+top down, iso shares the top row.
-    avail_w = w - 2 * MARGIN - 2 * GAP
-    avail_h = h - 2 * MARGIN - GAP - 24.0  # 24 = title block clearance
     need_w = size["front"][0] + size["right"][0] + size["iso"][0]
     need_h = size["front"][1] + size["top"][1]
-    scale = next((s for s in STANDARD_SCALES
-                  if need_w * s <= avail_w and need_h * s <= avail_h), 0.01)
+
+    if sheet.startswith("auto"):
+        sheet, _ = pick_sheet(need_w, need_h,
+                              "ansi" if sheet.endswith("ansi") else "iso")
+    fmt = FORMATS[sheet]
+    w, h = fmt.width, fmt.height
+    fx0, fy0, fx1, fy1 = fmt.frame
+
+    # Title-block fields resolve before layout: the revision table (git log)
+    # and BOM table claim sheet height above the block, and views must start
+    # above that whole bottom band — the block spans the full frame on A4.
+    block = resolve_title_block(title=title, scale=scale_text(1.0),
+                                sheet_name=sheet, settings=settings)
+    from gitcad.drawing.frame import revision_table_height
+
+    band = TITLE_BLOCK_H + revision_table_height(block)
+    if bom:
+        band += 2.0 + 3.6 * (min(len(bom), 14) + 1 + (1 if len(bom) > 14 else 0))
+
+    # Reserved bands inside the frame: stacked hole-position dims left of and
+    # above the top view, the title block band at the bottom.
+    n_holes = _count_top_holes(kernel, shape)
+    left_inset = DIM_OFFSET * (n_holes + 1) + 8
+    top_reserve = DIM_OFFSET * n_holes + 4
+
+    # Auto-scale: front+right across, front+top down, iso shares the top row.
+    fx, fy = fx0 + left_inset, fy0 + band + DIM_OFFSET + 6
+    avail_w = (fx1 - fx0) - left_inset - 2 * GAP
+    avail_h = (fy1 - 2) - fy - GAP - top_reserve
+    scale = fitted_scale(need_w, need_h, avail_w, avail_h)
 
     d = Drawing(sheet=sheet, width=w, height=h, scale=scale, title=title)
+    block.scale = scale_text(scale)
+    d.block = block
 
     # Third-angle placement (sheet coords, y up): front bottom-left; top above
     # front; right beside front; iso in the top-right corner.
-    fx, fy = MARGIN + DIM_OFFSET + 8, MARGIN + DIM_OFFSET + 8
     placements = {
         "front": (fx, fy),
         "top": (fx, fy + size["front"][1] * scale + GAP),
         "right": (fx + size["front"][0] * scale + GAP, fy),
-        "iso": (w - MARGIN - size["iso"][0] * scale,
-                h - MARGIN - size["iso"][1] * scale),
+        "iso": (fx1 - 2 - size["iso"][0] * scale,
+                fy1 - 2 - size["iso"][1] * scale),
     }
     for name, (ox, oy) in placements.items():
         p, b = proj[name], bb[name]
@@ -205,7 +271,7 @@ def make_drawing(shape, kernel=None, *, title: str = "part", sheet: str = "A3",
     # view gets a circle marker + letter, the crop lands bottom-right.
     tx0, ty0 = placements["top"]
     b_top = bb["top"]
-    detail_x = w - MARGIN
+    detail_x = fx1 - 2.0
     for di, spec in enumerate(details or []):
         letter = chr(ord("A") + di)
         dcx, dcy, dr = spec["cx"], spec["cy"], spec["r"]
@@ -226,7 +292,7 @@ def make_drawing(shape, kernel=None, *, title: str = "part", sheet: str = "A3",
                      for c in _clip_poly_to_circle(poly, dcx, dcy, dr)]
         box = 2 * dr * dscale
         detail_x -= box + GAP
-        ox, oy = detail_x, MARGIN + 30.0
+        ox, oy = detail_x, fy0 + band + 4.0
         d.views.append(PlacedView(
             name=f"detail_{letter}",
             visible=_transform(clipped_v, dscale, ox, oy, (dcx - dr, dcy - dr)),
@@ -238,16 +304,16 @@ def make_drawing(shape, kernel=None, *, title: str = "part", sheet: str = "A3",
     # notes block (GD&T table, general tolerances): stacked bottom-left,
     # rendered through the existing callout machinery (zero-length leader)
     for i, note in enumerate(notes or []):
-        ny = 28.0 + 5.0 * i
-        d.callouts.append(Callout((MARGIN + 2.0, ny), (MARGIN + 2.0, ny),
+        ny = fy0 + 18.0 + 5.0 * i
+        d.callouts.append(Callout((fx0 + 2.0, ny), (fx0 + 2.0, ny),
                                   str(note)))
     if bom:
-        _add_bom(d, bom, placements["front"], bb["front"], scale, w)
+        _add_bom(d, bom, placements["front"], bb["front"], scale, fmt)
     return d
 
 
 def _add_bom(d: Drawing, bom: list, front_origin: Point, front_bounds,
-             scale: float, sheet_w: float) -> None:
+             scale: float, fmt) -> None:
     """BOM table above the title block + numbered balloons on the front view.
 
     ``bom`` lines come from :func:`gitcad.drawing.bom.model_bom`: item, qty,
@@ -266,8 +332,13 @@ def _add_bom(d: Drawing, bom: list, front_origin: Point, front_bounds,
         # no silent caps: the drop is written on the drawing itself
         text_rows.append(f"... {len(bom) - max_rows} more lines not shown")
     line_h = 3.6
-    x0 = sheet_w - 5.0 - 92.0 + 1.5      # aligned with the title block
-    y_top = 27.0 + line_h * len(text_rows)
+    from gitcad.drawing.frame import revision_table_height
+
+    # aligned with the ISO 7200 block, stacked above it (and above the
+    # revision table when the git log put one there)
+    x0 = fmt.width - fmt.right - TITLE_BLOCK_W + 1.5
+    base = fmt.bottom + TITLE_BLOCK_H + revision_table_height(d.block) + 2.0
+    y_top = base + line_h * len(text_rows)
     for i, row in enumerate(text_rows):
         d.notes.append((x0, y_top - line_h * i, row))
 

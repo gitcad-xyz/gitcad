@@ -18,7 +18,39 @@ _STYLE = (
     ".t{font:3px sans-serif;fill:#111}"
     ".lbl{font:3.5px sans-serif;fill:#111}"
     ".tb{stroke:#111;stroke-width:0.3;fill:none}"
+    ".frame{stroke:#111;stroke-width:0.7;fill:none}"
+    ".block{stroke:#111;stroke-width:0.7;fill:none}"
+    ".cm{stroke:#111;stroke-width:0.7;fill:none}"
+    ".thin{stroke:#111;stroke-width:0.25;fill:none}"
 )
+
+_RECT_CLS = {"legacy": "tb", "thin": "thin"}    # frame/block keep their name
+_TEXT_FILL = {"micro": "#555"}
+
+
+def _furniture_svg(d: Drawing, y) -> list[str]:
+    """Sheet frame + title block (or the legacy border) via :mod:`.frame`."""
+    from gitcad.drawing.frame import sheet_furniture
+
+    furn = sheet_furniture(d)
+    out: list[str] = []
+    for cls, x, yv, rw, rh in furn["rects"]:
+        out.append(f'<rect x="{float(x):.2f}" y="{float(y(yv + rh)):.2f}" '
+                   f'width="{float(rw):.2f}" height="{float(rh):.2f}" '
+                   f'class="{_RECT_CLS.get(cls, cls)}"/>')
+    for cls, pts in furn["lines"]:
+        p = " ".join(f"{float(x):.3f},{float(y(yy)):.3f}" for x, yy in pts)
+        out.append(f'<polyline class="{cls}" points="{p}"/>')
+    for cls, cx, cy, r in furn["circles"]:
+        out.append(f'<circle class="{cls}" cx="{float(cx):.2f}" '
+                   f'cy="{float(y(cy)):.2f}" r="{float(r):.2f}"/>')
+    for cls, x, yv, hh, s, anchor in furn["texts"]:
+        extra = f' text-anchor="{anchor}"' if anchor != "start" else ""
+        fill = _TEXT_FILL.get(cls, "#111")
+        out.append(f'<text class="{cls}" x="{float(x):.2f}" y="{float(y(yv)):.2f}" '
+                   f'font-size="{float(hh):.2f}" font-family="sans-serif" '
+                   f'fill="{fill}"{extra}>{escape(s)}</text>')
+    return out
 
 
 def render_svg(d: Drawing) -> str:
@@ -28,8 +60,8 @@ def render_svg(d: Drawing) -> str:
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{d.width}mm" height="{d.height}mm" '
         f'viewBox="0 0 {d.width} {d.height}"><style>{_STYLE}</style>'
         f'<rect x="0" y="0" width="{d.width}" height="{d.height}" fill="white"/>'
-        f'<rect x="5" y="5" width="{d.width - 10}" height="{d.height - 10}" class="tb"/>'
     )
+    out += _furniture_svg(d, y)
 
     for view in d.views:
         for cls, polys in (("v", view.visible), ("h", view.hidden)):
@@ -67,7 +99,6 @@ def render_svg(d: Drawing) -> str:
     for w in d.welds:
         out.append(_weld_svg(w, y))
 
-    out.append(_title_block(d, y))
     out.append("</svg>")
     return "".join(out) + "\n"
 
@@ -136,16 +167,3 @@ def _dim_svg(dim: Dimension, y) -> str:
     return "".join(s)
 
 
-def _title_block(d: Drawing, y) -> str:
-    """Bottom-right title block: title, scale, units, generator."""
-    w, h = 92.0, 20.0
-    x0, y0 = d.width - 5 - w, 5.0
-    rows = [
-        (d.title, 5.2, "lbl"),
-        (f"SCALE {float(d.scale):g}:1   UNITS mm   SHEET {d.sheet}", 10.6, "t"),
-        ("gitcad — generated drawing", 15.6, "t"),
-    ]
-    s = [f'<rect x="{x0}" y="{float(y(y0 + h)):.2f}" width="{w}" height="{h}" class="tb"/>']
-    for text, dy, cls in rows:
-        s.append(f'<text class="{cls}" x="{float(x0 + 3):.2f}" y="{float(y(y0 + h) + dy):.2f}">{escape(text)}</text>')
-    return "".join(s)

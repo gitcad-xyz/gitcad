@@ -105,6 +105,7 @@ _ALSO_NEEDS_KERNEL = {
     "test_sw_fr1_ops.py",
     "test_sw_fr2_sketch_planes.py",
     "test_sw_fr3_drawings.py",
+    "test_title_blocks.py",
     "test_tolerances.py",
     "test_viewer.py",
 }
