@@ -3298,17 +3298,158 @@ class RefKernel:
             (void_lo[0], void_lo[1], void_lo[2]))
         return self._fk.boolean("cut", shape, void)
 
-    def draft(self, shape, faces, angle_deg, pull=(0, 0, 1), neutral_z=0.0):
-        from forgekernel.brep import Solid
-        from forgekernel.kernel import draft as fk_draft
+    def draft(self, shape, faces, angle_deg=None, pull=(0, 0, 1),
+              neutral_z=0.0, tan=None, parting_z=None):
+        """Molding draft (#133): tilt the selected walls about the neutral
+        plane — or split them at a parting plane into two half-drafts — by
+        an exact rational tangent.
 
-        if not isinstance(shape, Solid) or tuple(pull) != (0, 0, 1):
-            _nope("draft(non-planar or tilted pull)", "K2.3")
-        try:
-            return fk_draft(shape, angle_deg, neutral_z)
-        except ValueError as exc:
-            raise KernelError(str(exc), FailureSignature(
-                op="draft", diagnostic="NotYetImplemented", kernel="ref"))
+        ``tan`` is the SPEC (an exact Fraction; 0.1 means 1/10);
+        ``angle_deg`` is sugar that snaps to the exact binary Fraction of a
+        float tangent. ``faces``: indices into entities(shape, "face");
+        empty/None drafts every wall. A cap whose normal is parallel to the
+        pull cannot be drafted — that is BadInput, not a missing capability.
+        Exact cells: rectilinear prisms stay in ℚ; a cylinder wall drafts
+        to a Cone (ℚ[π]), with a parting line to a two-cone AxisStack.
+        Named walls: sphere/torus (the drafted surface leaves every exact
+        field); lathe/cone tan-addition and non-axis-aligned prism edges
+        arrive at K2.3.
+        """
+        from forgekernel.brep import Solid, draft_prism
+        from forgekernel.quadric import (AxisStack, Cone, Cyl, RevolveSolid,
+                                         Sphere)
+
+        if (angle_deg is None) == (tan is None):
+            raise KernelError(
+                "draft wants exactly one of angle_deg (float sugar) or tan "
+                "(the exact rational tangent of the draft angle)",
+                FailureSignature(op="draft", diagnostic="BadInput",
+                                 kernel="ref"))
+        t = _exact_in("draft", tan, "tangent") if tan is not None else \
+            Fraction(math.tan(math.radians(angle_deg)))
+        if tuple(pull) != (0, 0, 1):
+            _nope("draft(tilted pull)", "K2.3")
+        pz = None if parting_z is None else \
+            _exact_in("draft", parting_z, "parting_z")
+        nz = _exact_in("draft", neutral_z, "neutral_z")
+        if pz is not None and nz != 0 and nz != pz:
+            raise KernelError(
+                "a parting-line draft's neutral plane IS the parting plane "
+                f"— got neutral_z={neutral_z} with parting_z={parting_z}; "
+                "drop neutral_z",
+                FailureSignature(op="draft", diagnostic="BadInput",
+                                 kernel="ref"))
+        if isinstance(shape, Cyl):
+            return self._draft_cyl(shape, faces, t, nz, pz)
+        if isinstance(shape, Solid):
+            walls = self._draft_wall_pairs(shape, faces)
+            try:
+                return draft_prism(shape, t, neutral_z=nz, parting_z=pz,
+                                   drafted_walls=walls)
+            except ValueError as exc:
+                msg = str(exc)
+                diag = ("NotYetImplemented" if "K2.3" in msg or "K2" in msg
+                        else "BadInput")
+                raise KernelError(msg, FailureSignature(
+                    op="draft", diagnostic=diag, kernel="ref"))
+        if isinstance(shape, Sphere):
+            # not a backlog item: tilting a sphere wall about a pull line
+            # yields a surface that is no quadric, and its volume needs the
+            # arcsin class — outside every ℚ[√d][π] (ADR-0019). The refusal
+            # IS the finished answer.
+            _nope("draft(sphere wall — the drafted surface is no quadric; "
+                  "no exact field holds it)", "exact-field boundary",
+                  predicate="draft_of_curved_quadric_wall",
+                  remedy="draft the mating planar walls instead, or accept "
+                         "the undrafted sphere")
+        if isinstance(shape, (Cone, RevolveSolid)):
+            _nope("draft(lathe/cone wall — straight profile segments stay "
+                  "cones by tan-addition tan(α+δ)=(tanα+t)/(1−tanα·t))",
+                  "K2.3",
+                  predicate="draft_of_slanted_lathe_segment",
+                  remedy="rational-in-rational-out; arrives with the "
+                         "profile-segment editor")
+        _nope(f"draft({type(shape).__name__})", "K2.3")
+
+    def _draft_cyl(self, shape, faces, t, nz, pz):
+        """Cylinder wall → Cone frustum (single pull) or a two-cone
+        AxisStack (parting line): r(z) = r − t·(z−nz) or r − t·|z−zp|."""
+        from forgekernel.quadric import AxisStack, Cone
+
+        for idx in faces or []:
+            if isinstance(idx, bool) or not isinstance(idx, int) or \
+                    not 0 <= idx <= 2:
+                raise KernelError(
+                    f"draft: face index {idx!r} out of range for a cylinder "
+                    "(0=wall, 1=top cap, 2=bottom cap)",
+                    FailureSignature(op="draft", diagnostic="BadInput",
+                                     kernel="ref"))
+            if idx != 0:
+                raise KernelError(
+                    "draft: a cylinder cap's normal is parallel to the pull "
+                    "direction — only the wall (face 0) drafts",
+                    FailureSignature(op="draft", diagnostic="BadInput",
+                                     kernel="ref"))
+        r, cx, cy, z0, z1 = shape.r, shape.cx, shape.cy, shape.z0, shape.z1
+
+        def wall_radius(z, about):
+            rz = r - t * abs(z - about) if pz is not None else \
+                r - t * (z - about)
+            if rz <= 0:
+                raise KernelError(
+                    f"draft consumes the cylinder wall: r(z={float(z):g}) = "
+                    f"{float(rz):g} ≤ 0 — reduce the tangent or the band "
+                    "height",
+                    FailureSignature(op="draft", diagnostic="BadInput",
+                                     kernel="ref"))
+            return rz
+
+        if pz is None:
+            return Cone(cx, cy, wall_radius(z0, nz), wall_radius(z1, nz),
+                        z0, z1)
+        if not z0 < pz < z1:
+            raise KernelError(
+                f"draft: parting plane z={float(pz):g} must lie strictly "
+                f"inside the cylinder z∈({float(z0):g},{float(z1):g})",
+                FailureSignature(op="draft", diagnostic="BadInput",
+                                 kernel="ref"))
+        return AxisStack(cx, cy, [
+            Cone(cx, cy, wall_radius(z0, pz), r, z0, pz),
+            Cone(cx, cy, r, wall_radius(z1, pz), pz, z1)])
+
+    def _draft_wall_pairs(self, shape, faces):
+        """Map face indices (entities enumeration) to the xy endpoint pairs
+        of the walls they name; None/empty = all walls. A cap — normal
+        parallel to the pull — is BadInput, not a capability gap."""
+        if not faces:
+            return None
+        ordered = sorted(shape.logical_faces().items(),
+                         key=lambda kv: (kv[0][1], kv[0][0]))
+        pairs = []
+        for idx in faces:
+            if isinstance(idx, bool) or not isinstance(idx, int):
+                raise KernelError(
+                    f"draft: faces must be integer indices into "
+                    f"entities(shape, 'face'), got {idx!r}",
+                    FailureSignature(op="draft", diagnostic="BadInput",
+                                     kernel="ref"))
+            if idx < 0 or idx >= len(ordered):
+                raise KernelError(
+                    f"draft: face index {idx} out of range",
+                    FailureSignature(op="draft",
+                                     diagnostic="FaceIndexOutOfRange",
+                                     kernel="ref"))
+            (_key, _src), frags = ordered[idx]
+            xy = {(v[0], v[1]) for p in frags for v in p.verts}
+            if len(xy) != 2:
+                raise KernelError(
+                    f"draft: face {idx} is not a vertical wall — its normal "
+                    "is parallel to the pull direction (a cap cannot be "
+                    "drafted about its own normal)",
+                    FailureSignature(op="draft", diagnostic="BadInput",
+                                     kernel="ref"))
+            pairs.append(frozenset(xy))
+        return pairs
 
     # -- direct edits (#132): move_face / offset_face / delete_face -----------
     #

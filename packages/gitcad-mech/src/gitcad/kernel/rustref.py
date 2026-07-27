@@ -114,11 +114,14 @@ class RustKernel:
 
     # -- draft / shell / loft via Rust prismatoid + booleans ------------------
 
-    def draft(self, shape, faces, angle_deg, pull=(0, 0, 1), neutral_z=0.0):
+    def draft(self, shape, faces, angle_deg=None, pull=(0, 0, 1),
+              neutral_z=0.0, tan=None, parting_z=None):
         import math
 
-        if faces or not isinstance(shape, PySolid) or tuple(pull) != (0, 0, 1):
-            return self._ref.draft(shape, faces, angle_deg, pull, neutral_z)
+        if faces or tan is not None or parting_z is not None or \
+                not isinstance(shape, PySolid) or tuple(pull) != (0, 0, 1):
+            return self._ref.draft(shape, faces, angle_deg, pull, neutral_z,
+                                   tan=tan, parting_z=parting_z)
         t = Fraction(math.tan(math.radians(angle_deg)))
         nz = Fraction(neutral_z)
         b = shape.bbox()

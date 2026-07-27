@@ -85,11 +85,16 @@ class NullKernel:
         _require_positive(fx=fx)
         return NullShape("scale", {"fx": fx, "fy": fy, "fz": fz}, (shape,))
 
-    def draft(self, shape: Shape, faces: list[int], angle_deg: float,
+    def draft(self, shape: Shape, faces: list[int],
+              angle_deg: float | None = None,
               pull: tuple[float, float, float] = (0, 0, 1),
-              neutral_z: float = 0.0) -> Shape:
-        return NullShape("draft", {"faces": list(faces), "angle_deg": angle_deg},
-                         (shape,))
+              neutral_z: float = 0.0, tan=None, parting_z=None) -> Shape:
+        params: dict = {"faces": list(faces), "angle_deg": angle_deg}
+        if tan is not None:
+            params["tan"] = tan
+        if parting_z is not None:
+            params["parting_z"] = parting_z
+        return NullShape("draft", params, (shape,))
 
     def bbox(self, shape: Shape) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
         """Analytic bounds for primitives; unions/first-child for symbolic ops.

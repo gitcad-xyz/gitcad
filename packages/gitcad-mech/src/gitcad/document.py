@@ -657,12 +657,15 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
                             p.get("fz", 1.0))
     if f.op == "draft":
         # Molding draft on selected faces (lineage-stable ids), pulled along
-        # `pull` about the neutral plane z=`neutral_z`.
+        # `pull` about the neutral plane z=`neutral_z` — or split at a
+        # parting plane z=`parting_z` into two half-drafts. `tan` is the
+        # exact rational tangent (the spec); `angle_deg` is float sugar.
         face_indices = _resolve_entity_indices(p.get("faces", []), f.inputs[0],
                                                result, kind="face")
-        return kernel.draft(ins[0], face_indices, p["angle_deg"],
+        return kernel.draft(ins[0], face_indices, p.get("angle_deg"),
                             pull=tuple(p.get("pull", (0, 0, 1))),
-                            neutral_z=p.get("neutral_z", 0.0))
+                            neutral_z=p.get("neutral_z", 0.0),
+                            tan=p.get("tan"), parting_z=p.get("parting_z"))
     if f.op == "split":
         # Keep one side of an axis-aligned plane: a half-space boolean sized
         # from the body's own bounds — the SolidWorks Split, agent-first.

@@ -63,7 +63,7 @@ Status is honest: ✅ shipped · 🟡 partial · ❌ missing · — non-goal.
 | Variable-radius fillet | linear-taper per-edge, exact ℚ[π] (VariableFilletedBox); face/full-round later | 🟡 |
 | Chamfer | `chamfer` | ✅ |
 | Shell | `shell` | ✅ |
-| **Draft** | ✅ `draft` op: selected faces (lineage-stable ids), pull dir, neutral plane; non-draftable faces refused loud | ✅ |
+| **Draft** | ✅ `draft` op: selected faces (lineage-stable ids), pull dir, neutral plane OR mid-face parting line (two half-drafts, widest at the plane), exact rational `tan` as the spec (`angle_deg` = float sugar); cylinder wall → cone (ℚ[π]); rectilinear prisms exact in ℚ; caps/sphere walls/lathe segments refused loud by name | ✅ |
 | **Rib** | ✅ `rib` op: wall along a segment, exact-volume-tested | ✅ |
 | Hole Wizard | `hole` (plain/cbore/csink/pilot) | ✅ |
 | **Threads (cosmetic + modeled)** | 🟡 thread spec as data on holes, surfaced in drawing callouts ("M3x0.5-6H (Ø2.5)"); modeled helical cut later | 🟡 |

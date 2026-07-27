@@ -102,11 +102,17 @@ class Kernel(Protocol):
         """Uniform (one factor) or anisotropic (three) scale about the origin."""
         ...
 
-    def draft(self, shape: Shape, faces: list[int], angle_deg: float,
+    def draft(self, shape: Shape, faces: list[int],
+              angle_deg: float | None = None,
               pull: tuple[float, float, float] = (0, 0, 1),
-              neutral_z: float = 0.0) -> Shape:
-        """Molding draft: tilt the listed faces (empty = all faces normal to
-        pull) by ``angle_deg`` about the neutral plane z=``neutral_z``."""
+              neutral_z: float = 0.0, tan: object = None,
+              parting_z: object = None) -> Shape:
+        """Molding draft: tilt the listed faces (empty = every wall parallel
+        to the pull) about the neutral plane z=``neutral_z``, or — with
+        ``parting_z`` — split each wall at that plane into two half-drafts
+        (the parting plane is then the neutral plane). ``tan`` is the exact
+        rational tangent of the draft angle and is the spec; ``angle_deg``
+        is float-tangent sugar. Pass exactly one of the two."""
         ...
 
     def helix(self, radius: float, pitch: float, turns: float,
