@@ -1,10 +1,16 @@
 """The viewer page — one self-contained HTML string, zero external assets.
 
-WebGL2 with flat shading via fragment-shader derivatives, orbit/zoom, live
-reload by content-hash polling. Design review additions: a Schematics tab
-(the electrical sheets underlying a 3D assembly, served by /api/schematics)
-and a measure tool — raycast picking with vertex snap, two picks give
-distance + per-axis deltas. Monospace dark aesthetic to match gitcad.xyz.
+ONE page; everything else is a tab in it (3d, schematics, checks, review,
+drawing, activity), each addressable as a hash token composable with the
+older deep links (#checks,x=0.6). WebGL2 with flat shading via
+fragment-shader derivatives, orbit/zoom, live reload by content-hash
+polling, and the live loop: a narration rail tailing /api/activity, a
+camera that follows the assembly instance being worked on (the #follow
+toggle), an ask banner that blocks a waiting agent on the human's answer,
+and an activity tab holding the whole session — click an event to jump to
+the part it touched. Plus a measure tool — raycast picking with vertex
+snap, two picks give distance + per-axis deltas. Monospace dark aesthetic
+to match gitcad.xyz.
 """
 
 PAGE = r"""<!DOCTYPE html>
@@ -19,6 +25,7 @@ PAGE = r"""<!DOCTYPE html>
   #gl,#board{position:fixed;inset:0;width:100%;height:100%}
   #board{display:none;align-items:center;justify-content:center;padding:24px}
   #board svg{max-width:100%;max-height:100%}
+  #sheets,#checks,#review,#activity{background:var(--bg)}  /* opaque over #board */
   #sheets{position:fixed;inset:0;display:none;overflow:auto;padding:44px 24px 24px}
   .sheet-card{background:#fff;border-radius:4px;margin:0 auto 18px;max-width:1200px;padding:10px}
   .sheet-card svg{display:block;width:100%;height:auto}
@@ -75,10 +82,28 @@ PAGE = r"""<!DOCTYPE html>
   #live .ev.done{border-left-color:var(--acc)}
   #live .ev .who{color:#3fb950}
   #livehead{display:flex;align-items:center;gap:6px;color:#3fb950;
-            background:rgba(13,17,23,.86);padding:3px 8px;border-radius:3px}
+            background:rgba(13,17,23,.86);padding:3px 8px;border-radius:3px;
+            pointer-events:auto}
+  #livehead.idle{color:var(--dim)} #livehead.idle b{color:var(--dim)}
   #livedot{width:7px;height:7px;border-radius:50%;background:#3fb950;
            animation:pulse 1.4s ease-in-out infinite}
+  #follow{margin-left:auto;cursor:pointer;border:1px solid var(--line);
+          border-radius:3px;padding:0 6px;color:var(--dim);user-select:none}
+  #follow.on{color:#3fb950;border-color:#3fb950}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+  /* the activity tab: the whole session, not the rail's last few lines */
+  #activity{position:fixed;inset:0;display:none;overflow:auto;
+            padding:44px 24px 24px;font-size:12px}
+  .act{max-width:900px;margin:0 auto;display:flex;gap:10px;padding:2px 8px;
+       border-left:2px solid var(--line);color:var(--dim)}
+  .act time{opacity:.65;flex:0 0 auto} .act .who{color:#3fb950}
+  .act.problem{border-left-color:#f85149;color:#f85149}
+  .act.done{border-left-color:var(--acc);color:var(--ink)}
+  .act.question{border-left-color:#d29922;color:#d29922}
+  .act.answer{border-left-color:#3fb950;color:#3fb950}
+  .act.click{cursor:pointer}
+  .act.click:hover{background:rgba(88,166,255,.08)}
+  #actempty{color:var(--dim);max-width:900px;margin:0 auto}
   /* a question BLOCKS the eye: the agent is stopped until this is answered */
   #ask{position:fixed;left:50%;top:44px;transform:translateX(-50%);z-index:9;
        display:none;max-width:620px;background:#161b22;border:1px solid #d29922;
@@ -97,6 +122,7 @@ PAGE = r"""<!DOCTYPE html>
 </style></head><body>
 <canvas id="gl"></canvas><div id="board"></div><div id="sheets"></div>
 <div id="checks"></div><div id="review"></div><div id="drawing"></div>
+<div id="activity"></div>
 <div id="tabs"></div>
 <div id="explodebox"><span>explode</span>
   <input id="explodeslider" type="range" min="0" max="100" value="0"></div>
@@ -195,12 +221,21 @@ function upload(mesh){
       if(v < v0) v0 = v; if(v > v1) v1 = v; }
     let cx = 0, cy = 0, cz = 0, n = Math.max(1, v1 - v0 + 1);
     for(let v = v0; v <= v1; v++){ cx += basePos[3*v]; cy += basePos[3*v+1]; cz += basePos[3*v+2]; }
+    const cen = [cx/n, cy/n, cz/n];
+    let r2 = 0;                       // group radius, for framing the camera
+    for(let v = v0; v <= v1; v++){
+      const dx = basePos[3*v] - cen[0], dy = basePos[3*v+1] - cen[1],
+            dz = basePos[3*v+2] - cen[2];
+      const q = dx*dx + dy*dy + dz*dz;
+      if(q > r2) r2 = q;
+    }
     groups.push({name: g.name, part: g.part, i0, i1, v0, v1,
-                 centroid: [cx/n, cy/n, cz/n]});
+                 centroid: cen, radius: Math.sqrt(r2)});
     i0 = i1;
   }
   const [lo, hi] = mesh.bbox;
-  center = [(lo[0]+hi[0])/2, (lo[1]+hi[1])/2, (lo[2]+hi[2])/2];
+  modelCenter = [(lo[0]+hi[0])/2, (lo[1]+hi[1])/2, (lo[2]+hi[2])/2];
+  center = modelCenter.slice(); tween = null;
   radius = Math.max(1e-6, Math.hypot(hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]) / 2);
   const s = mesh.stats;
   const dims = `bbox ${(hi[0]-lo[0]).toFixed(2)} x ${(hi[1]-lo[1]).toFixed(2)} x ${(hi[2]-lo[2]).toFixed(2)} mm`;
@@ -211,6 +246,10 @@ function upload(mesh){
     hud.textContent = `${s.features} features · ${s.triangles} tris · vol ${s.volume_mm3} mm³ · ${dims}\n` +
                       `kernel ${s.kernel} · drag orbit · wheel zoom`;
   }
+  // a rebuild mid-watch must not lose either highlight, nor the camera's
+  // attention on the part being worked on
+  recolor();
+  if(follow && activeName) focusActive();
 }
 
 // -- tiny matrix math ---------------------------------------------------------
@@ -238,6 +277,45 @@ function eyePos(){
   return [center[0] + d*Math.cos(pitch)*Math.cos(yaw),
           center[1] + d*Math.cos(pitch)*Math.sin(yaw),
           center[2] + d*Math.sin(pitch)];
+}
+
+// -- camera attention: follow the part being worked on ------------------------
+// The live rail names the instance under the agent's hands; colour alone does
+// not draw the eye when that part is small or off-screen. With follow on, the
+// camera target glides to frame it — and pulls back out when the work is done.
+// Orbit stays the human's: a drag or wheel cancels only the glide in flight,
+// never the mode. The #follow toggle on the rail head is the mode.
+let follow = true, tween = null, modelCenter = [0, 0, 0];
+function glideTo(c, d){
+  tween = {c0: center.slice(), c1: c, d0: dist, d1: d,
+           t0: performance.now(), dur: 650};
+}
+function stepTween(now){
+  if(!tween) return;
+  let k = Math.min(1, (now - tween.t0) / tween.dur);
+  k = k * k * (3 - 2 * k);                                    // smoothstep
+  center = [tween.c0[0] + (tween.c1[0] - tween.c0[0]) * k,
+            tween.c0[1] + (tween.c1[1] - tween.c0[1]) * k,
+            tween.c0[2] + (tween.c1[2] - tween.c0[2]) * k];
+  dist = tween.d0 + (tween.d1 - tween.d0) * k;
+  if(k >= 1) tween = null;
+}
+function groupCenter(g){          // centroid, exploded-view offset included
+  if(!(explode > 0) || groups.length < 2) return g.centroid.slice();
+  let d = sub3(g.centroid, modelCenter);
+  const l = Math.hypot(...d);
+  d = l < 1e-6 ? [0, 0, 1] : scl3(d, 1 / l);
+  return add3(g.centroid, scl3(d, explode * radius * 0.9));
+}
+function frameGroup(g){
+  glideTo(groupCenter(g),
+          Math.max(0.35, Math.min(12, (g.radius * 3.0) / radius)));
+}
+function focusActive(){
+  if(!follow || !basePos) return;
+  const g = activeName ? groups.find(x => x.name === activeName) : null;
+  if(g) frameGroup(g);
+  else glideTo(modelCenter.slice(), 3);   // work finished: pull back out
 }
 
 // -- measure tool -------------------------------------------------------------
@@ -325,7 +403,7 @@ function applySelection(idx){ selected = idx; recolor(); }
 function setActive(name){
   if(name === activeName) return;
   activeName = name;
-  if(basePos) recolor();
+  if(basePos){ recolor(); focusActive(); }
 }
 function selectAt(px, py){
   const hit = raycast(px, py);
@@ -354,7 +432,7 @@ document.getElementById("sheets").addEventListener("click", e => {
   if(!t) return;
   const idx = groups.findIndex(g => g.name === t.textContent.trim());
   if(idx < 0) return;
-  activeTab = "3d"; showTab(); renderTabs();
+  activeTab = "3d"; writeTabHash(); showTab(); renderTabs();
   applySelection(idx);
 });
 
@@ -363,7 +441,7 @@ function applyExplode(){
   const out = new Float32Array(basePos);
   if(explode > 0 && groups.length > 1){
     for(const g of groups){
-      let d = sub3(g.centroid, center);
+      let d = sub3(g.centroid, modelCenter);
       const l = Math.hypot(...d);
       d = l < 1e-6 ? [0, 0, 1] : scl3(d, 1 / l);
       const off = scl3(d, explode * radius * 0.9);
@@ -416,6 +494,7 @@ function updateMeasure(){
 }
 
 function draw(){
+  stepTween(performance.now());
   const w = canvas.clientWidth, h = canvas.clientHeight;
   if(canvas.width !== w || canvas.height !== h){ canvas.width = w; canvas.height = h; }
   gl.viewport(0, 0, w, h);
@@ -453,21 +532,39 @@ addEventListener("pointerup", e => {
 });
 addEventListener("pointermove", e => {
   if(!dragging) return;
-  if(Math.abs(e.clientX - px) + Math.abs(e.clientY - py) > 2) moved = true;
+  if(Math.abs(e.clientX - px) + Math.abs(e.clientY - py) > 2){ moved = true; tween = null; }
   yaw -= (e.clientX - px) * 0.008;
   pitch = Math.max(-1.5, Math.min(1.5, pitch + (e.clientY - py) * 0.008));
   px = e.clientX; py = e.clientY;
 });
-addEventListener("wheel", e => { dist = Math.max(1.2, Math.min(12, dist * (e.deltaY > 0 ? 1.1 : 0.9))); });
+addEventListener("wheel", e => { tween = null;
+  dist = Math.max(0.35, Math.min(12, dist * (e.deltaY > 0 ? 1.1 : 0.9))); });
 addEventListener("keydown", e => {
   if(e.key === "Escape"){ picks = []; updateMeasure(); }
   if(e.key === "z"){ zebraOn = !zebraOn; gl.uniform1i(uZebra, zebraOn ? 1 : 0); draw(); }
 });
 
 // -- tabs ---------------------------------------------------------------------
+// ONE page, addressable: the active tab is a hash token (#checks, #review,
+// #drawing,#activity,#sheets), composable with the older tokens (#x=0.6,
+// #zebra) as "#checks,x=0.6". Switching tabs rewrites the hash; editing the
+// hash switches tabs.
 const tabsEl = document.getElementById("tabs");
-let activeTab = location.hash === "#sheets" ? "sheets"
-  : location.hash === "#checks" ? "checks" : "3d", sheetCount = 0;
+const TABS = ["3d", "sheets", "checks", "review", "drawing", "activity"];
+function hashTokens(){
+  return location.hash.replace(/^#/, "").split(",").filter(Boolean);
+}
+let activeTab = hashTokens().find(t => TABS.includes(t)) || "3d", sheetCount = 0;
+function writeTabHash(){
+  const rest = hashTokens().filter(t => !TABS.includes(t));
+  const toks = (activeTab === "3d" ? [] : [activeTab]).concat(rest);
+  history.replaceState(null, "",
+    toks.length ? "#" + toks.join(",") : location.pathname + location.search);
+}
+addEventListener("hashchange", () => {
+  const t = hashTokens().find(x => TABS.includes(x)) || "3d";
+  if(t !== activeTab){ activeTab = t; showTab(); renderTabs(); }
+});
 function renderTabs(){
   tabsEl.innerHTML = "";
   const mk = (id, label, cls) => {
@@ -476,7 +573,7 @@ function renderTabs(){
     t.textContent = label;
     t.onclick = () => {
       if(id === "measure"){ measureMode = !measureMode; if(!measureMode){ picks = []; } updateMeasure(); }
-      else { activeTab = id; showTab(); }
+      else { activeTab = id; writeTabHash(); showTab(); }
       renderTabs();
     };
     tabsEl.appendChild(t);
@@ -488,6 +585,7 @@ function renderTabs(){
   if(reviewState) mk("review",
     reviewState.gate_ok ? "review ✓" : `review (${reviewState.summary.introduced})`);
   if(drawingAvail) mk("drawing", "drawing");
+  mk("activity", "activity");
   if(activeTab === "3d") mk("measure", "measure", "tool");
 }
 function loadDrawing(){
@@ -502,7 +600,12 @@ function showTab(){
   document.getElementById("checks").style.display = activeTab === "checks" ? "block" : "none";
   document.getElementById("review").style.display = activeTab === "review" ? "block" : "none";
   document.getElementById("drawing").style.display = activeTab === "drawing" ? "block" : "none";
+  document.getElementById("activity").style.display = activeTab === "activity" ? "block" : "none";
   if(activeTab === "drawing") loadDrawing();
+  if(activeTab === "activity"){          // the tab replaces the rail, at once
+    renderActivity();
+    document.getElementById("live").style.display = "none";
+  }
   const three = activeTab === "3d";
   canvas.style.display = three ? "block" : "none";
   hud.style.display = three ? "block" : "none";
@@ -649,17 +752,29 @@ document.getElementById("explodeslider").addEventListener("input", e => {
 const liveEl = document.getElementById("live");
 const askEl = document.getElementById("ask");
 let liveSeq = 0, liveLog = [], answering = null;
+let lastActive = null, lastIdle = null;
 
 function ago(t){
   const s = Math.max(0, Date.now() / 1000 - t);
   return s < 60 ? `${s | 0}s` : s < 3600 ? `${s / 60 | 0}m` : `${s / 3600 | 0}h`;
 }
-function renderLive(active){
-  if(!liveLog.length){ liveEl.style.display = "none"; return; }
+function renderLive(active, idle){
+  // the activity tab IS the rail, expanded — no point showing both
+  if(!liveLog.length || activeTab === "activity"){
+    liveEl.style.display = "none"; return;
+  }
   liveEl.style.display = "flex";
+  // idle_s keeps the pulse honest: an agent that stopped narrating (crashed,
+  // or moved on) must not look busy forever
+  const stale = idle != null && idle > 120;
+  const fol = `<span id="follow" class="${follow ? "on" : ""}"` +
+              ` title="camera follows the part being worked on">follow</span>`;
   const head = active
-    ? `<div id="livehead"><span id="livedot"></span>working on ` +
-      `<b>${esc(active.instance || "the design")}</b></div>`
+    ? (stale
+       ? `<div id="livehead" class="idle">idle ${ago(Date.now() / 1000 - idle)}` +
+         ` — was on <b>${esc(active.instance || "the design")}</b>${fol}</div>`
+       : `<div id="livehead"><span id="livedot"></span>working on ` +
+         `<b>${esc(active.instance || "the design")}</b>${fol}</div>`)
     : "";
   liveEl.innerHTML = head + liveLog.slice(-9).map(e => {
     const cls = e.kind === "problem" ? "problem" : e.kind === "done" ? "done" : "";
@@ -668,6 +783,12 @@ function renderLive(active){
            `<span style="float:right;opacity:.6">${ago(e.t)}</span></div>`;
   }).join("");
 }
+liveEl.addEventListener("click", e => {
+  if(e.target.id !== "follow") return;
+  follow = !follow;
+  if(follow) focusActive(); else tween = null;
+  renderLive(lastActive, lastIdle);
+});
 function esc(s){
   return String(s == null ? "" : s).replace(/[&<>"]/g,
     c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -700,17 +821,62 @@ function renderAsk(q){
 }
 async function pollLive(){
   try {
+    // since=0 on the first poll: a viewer opened mid-build replays the whole
+    // session before tailing it — catching up is the same code as watching
     const s = await (await fetch("/api/activity?since=" + liveSeq)).json();
     if(s.events && s.events.length){
-      liveLog = liveLog.concat(s.events).slice(-60);
+      liveLog = liveLog.concat(s.events).slice(-1000);
       liveSeq = s.seq;
+      if(activeTab === "activity") renderActivity();
     }
+    lastActive = s.active; lastIdle = s.idle_s;
     setActive(s.active ? s.active.instance : null);
-    renderLive(s.active);
+    renderLive(s.active, s.idle_s);
     renderAsk(s.pending);
   } catch(e){ /* the log is optional; the viewer stands alone without it */ }
   setTimeout(pollLive, 500);
 }
+
+// -- the activity tab: the whole build story, scrubbable ----------------------
+// The rail shows the last few seconds; this tab is the full session — every
+// event, timestamped, newest at the bottom. Clicking an event that names an
+// assembly instance jumps to that part in 3D: point at a line of history and
+// see what it touched.
+const actEl = document.getElementById("activity");
+function actText(e){
+  if(e.kind === "answer") return "answered: " + (e.choice || "");
+  let t = e.text || e.kind;
+  if(e.kind === "question" && (e.options || []).length)
+    t += "  [" + e.options.join(" / ") + "]";
+  return t;
+}
+function renderActivity(){
+  if(!liveLog.length){
+    actEl.innerHTML = '<div id="actempty">no activity yet — narration lands ' +
+      'here while an agent works on this design</div>';
+    return;
+  }
+  const stick = actEl.scrollTop + actEl.clientHeight >= actEl.scrollHeight - 40;
+  actEl.innerHTML = liveLog.map(e => {
+    const cls = e.kind === "status" ? "" : esc(e.kind);
+    const canJump = e.instance && groups.some(g => g.name === e.instance);
+    const who = e.instance ? `<span class="who">${esc(e.instance)}</span>` : "";
+    const hms = new Date((e.t || 0) * 1000).toLocaleTimeString();
+    return `<div class="act ${cls}${canJump ? " click" : ""}"` +
+           `${e.instance ? ` data-inst="${esc(e.instance)}"` : ""}>` +
+           `<time>${hms}</time>${who}<span>${esc(actText(e))}</span></div>`;
+  }).join("");
+  if(stick) actEl.scrollTop = actEl.scrollHeight;
+}
+actEl.addEventListener("click", e => {
+  const row = e.target.closest(".act");
+  if(!row || !row.dataset.inst) return;
+  const idx = groups.findIndex(g => g.name === row.dataset.inst);
+  if(idx < 0) return;
+  activeTab = "3d"; writeTabHash(); showTab(); renderTabs();
+  applySelection(idx);
+  frameGroup(groups[idx]);
+});
 
 renderTabs();
 poll();

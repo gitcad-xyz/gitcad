@@ -1264,6 +1264,68 @@ def viewer_close(url: str = "", path: str = "") -> dict[str, Any]:
     return {"ok": True, "stopped": stopped}
 
 
+def _watched(path: str = ""):
+    """The design a live message should land on: an explicit ``path`` (a
+    viewer in ANOTHER process may be watching it — `gitcad view` is not in
+    this registry), else the most recently opened viewer here."""
+    from pathlib import Path
+
+    if path:
+        return Path(path)
+    if _VIEWERS:
+        return Path(next(reversed(_VIEWERS)))
+    raise ValueError("no viewer is open in this session — call viewer_open "
+                     "first, or pass path= to reach a viewer running in "
+                     "another process")
+
+
+@tool("viewer_note")
+def viewer_note(text: str, instance: str = "", kind: str = "status",
+                path: str = "") -> dict[str, Any]:
+    """Narrate one step onto the live rail of the open viewer, so the human
+    watching sees the work WHILE it happens. ``instance`` names the assembly
+    member being worked on — the page highlights it and the camera follows.
+    ``kind``: status (default), done (clears the working highlight), or
+    problem (rendered red). Use it around every meaningful edit: say what you
+    are about to do, mark done when you finish. Targets the most recently
+    opened viewer; ``path`` aims at another watched design."""
+    from gitcad.activity import Activity
+
+    if kind not in ("status", "done", "problem"):
+        raise ValueError("kind must be status, done, or problem")
+    act = Activity(_watched(path))
+    if kind == "done":
+        act.done(text or "done")
+    elif kind == "problem":
+        act.problem(text)
+    else:
+        act.status(text, instance=instance or None)
+    return {"ok": True, "log": str(act.path)}
+
+
+@tool("viewer_ask")
+def viewer_ask(question: str, options: list[str] | None = None,
+               timeout_s: float = 600.0, path: str = "") -> dict[str, Any]:
+    """Ask the human watching the viewer a question and BLOCK until they
+    answer in the page (or the timeout passes). Use it when a design decision
+    needs their input — a dimension, a material, which variant to pursue.
+    ``options`` renders as buttons; without options the page offers free
+    text. ``answered: false`` means nobody answered: that is a real answer
+    ("nobody was watching") — take the conservative path and say you did,
+    never treat silence as consent."""
+    from gitcad.activity import Activity
+
+    act = Activity(_watched(path))
+    timeout = min(max(timeout_s, 0.05), 3600.0)
+    choice = act.ask(question, list(options or []) or None,
+                     timeout=timeout, poll=0.2)
+    if choice is None:
+        return {"ok": True, "answered": False, "answer": None,
+                "hint": f"unanswered after {float(timeout):.0f}s — proceed "
+                        "conservatively and state the assumption"}
+    return {"ok": True, "answered": True, "answer": choice}
+
+
 # -- reporting to GitHub (consent-gated) + self-update ------------------------
 
 
