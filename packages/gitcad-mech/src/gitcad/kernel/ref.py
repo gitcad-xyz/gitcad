@@ -19,6 +19,7 @@ from gitcad.errors import FailureSignature, KernelError, ValidationReport
 _K2 = "arrives at K2 (quadrics)"
 _K3 = "arrives at K3 (NURBS/SSI)"
 _K5 = "arrives at K5 (blends)"
+_K7 = "K7 (booleans over freeform solids)"
 
 
 def _exact_volume(shape) -> float:
@@ -977,14 +978,100 @@ class RefKernel:
               if isinstance(s, (LoftSolid, SplinePrism, TubeSolid))]
         if ff:
             _nope(f"boolean.{op} on freeform operands ({', '.join(ff)})",
-                  "K7 (booleans over freeform solids)",
+                  _K7,
                   predicate="freeform_boolean_unbuilt",
-                  remedy="K7 brings this: SSI trim loops between the operand "
-                         "surfaces, certified point-membership classification "
-                         "of the face fragments, and a trimmed-patch shell "
-                         "whose volume is certified ± e (ADR-0019); until it "
-                         "lands, model the boolean against a planar or "
-                         "quadric representation instead")
+                  remedy="K7's boolean assembly works over PatchSolid "
+                         "operands today (SSI trim loops, certified "
+                         "point-membership classification, an audited "
+                         "trimmed-patch shell whose volume is certified ± e, "
+                         "ADR-0019); these representations still need their "
+                         "patch-skin converters — until those land, model "
+                         "the boolean against a planar, quadric, or "
+                         "PatchSolid representation instead")
+
+        # K7 gap 5 through the seam: PatchSolid × PatchSolid dispatches to
+        # forge's boolean_trimmed — per face-pair SSI, certified trim loops,
+        # certified fragment membership, principled orientation, full shell
+        # audit. Every forge refusal crosses the seam as a K7-staged
+        # KernelError carrying the guard's own predicate name; the only
+        # thing that never crosses is a wrong shell.
+        from forgekernel.bsolid import BooleanUnsupported, PatchSolid
+        from forgekernel.trimshell import (ShellAuditError,
+                                           ShellAuditUncertified,
+                                           TrimmedShell)
+
+        if isinstance(a, TrimmedShell) or isinstance(b, TrimmedShell):
+            _nope(f"boolean.{op} on a TrimmedShell operand", _K7,
+                  predicate="trimmed_shell_reboolean_unbuilt",
+                  remedy="a boolean RESULT cannot be an operand yet — "
+                         "re-trimming already-trimmed faces is the K7 "
+                         "follow-on; boolean the original patch solids "
+                         "instead")
+        if isinstance(a, PatchSolid) or isinstance(b, PatchSolid):
+            if not (isinstance(a, PatchSolid) and isinstance(b, PatchSolid)):
+                other = type(b if isinstance(a, PatchSolid) else a).__name__
+                _nope(f"boolean.{op} on PatchSolid × {other}", _K7,
+                      predicate="mixed_patchsolid_boolean_unbuilt",
+                      remedy="only PatchSolid × PatchSolid is assembled "
+                             "today; represent the other operand as an "
+                             "outward-oriented PatchSolid (e.g. "
+                             "forgekernel.bsolid.box_patches) first")
+            from forgekernel.bsolid import boolean_trimmed
+            from forgekernel.raycast import PointClassifyUncertified
+            from forgekernel.ssi import (SsiCellUncertified,
+                                         TrimLoopUnstitchable)
+            try:
+                return boolean_trimmed(op, a, b, depth=5)
+            except SsiCellUncertified as exc:
+                _nope(f"boolean.{op} (tangential or near-tangential "
+                      f"contact)", _K7,
+                      predicate="ssi_cell_uncertified",
+                      measured={"unresolved_cells": len(exc.cells),
+                                "depth": exc.depth},
+                      remedy="tangential contact has no transversal "
+                             "certificate; separate the surfaces or raise "
+                             "the depth only if the contact is believed "
+                             "transversal")
+            except TrimLoopUnstitchable as exc:
+                _nope(f"boolean.{op} ({exc})", _K7,
+                      predicate=f"trim_loop_unstitchable_{exc.reason}",
+                      remedy="the intersection curve could not be closed "
+                             "into a certified trim loop; raise the depth "
+                             "or reshape the overlap so curves close "
+                             "inside the faces")
+            except BooleanUnsupported as exc:
+                _nope(f"boolean.{op} ({exc})", _K7,
+                      predicate=exc.predicate,
+                      remedy="this operand/curve configuration is outside "
+                             "what the K7 assembly can certify today; see "
+                             "the predicate for which guard refused")
+            except PointClassifyUncertified as exc:
+                _nope(f"boolean.{op} (fragment membership uncertified)",
+                      _K7,
+                      predicate="point_classify_uncertified",
+                      measured={"rays_refused": len(exc.reasons)},
+                      remedy="no witness ray certified a fragment's "
+                             "membership — geometry may graze the other "
+                             "solid's boundary; raise the depth")
+            except ShellAuditUncertified as exc:
+                _nope(f"boolean.{op} (shell audit uncertified: {exc})",
+                      _K7,
+                      predicate="shell_audit_uncertified",
+                      remedy="the certified brackets are too wide to prove "
+                             "the shell at this depth; raise the depth")
+            except ShellAuditError as exc:
+                # a PROVEN-wrong shell is a kernel defect, not a modeling
+                # error — but a raw ValueError through the seam is a
+                # crash-class defect, so it crosses structured
+                raise KernelError(
+                    f"K7 boolean produced a shell that failed its own "
+                    f"audit — a kernel defect, not a modeling error: {exc}",
+                    FailureSignature(op=f"boolean.{op}",
+                                     diagnostic="ShellAuditFailed",
+                                     kernel="ref"),
+                    stage=_K7, predicate="shell_audit_failed",
+                    remedy="file this as a bug: the assembly and its own "
+                           "audit disagree") from exc
 
         # a sphere with a COAXIAL bore: exact in ℚ[√d][π] — the arc term lives
         # in forgekernel.surdrev and is proven there against closed forms.
@@ -1333,6 +1420,19 @@ class RefKernel:
             return _mp(v.to_float(), cx, cy, cz,
                        provenance=shape.provenance,
                        volume_halfwidth=float(v.width) / 2)
+        from forgekernel.trimshell import TrimmedShell
+        if isinstance(shape, TrimmedShell):
+            # a K7 boolean result: volume is a certified bracket through the
+            # SSI strips (depth 5 matches the boolean's default detection
+            # depth). No certified centroid machinery exists for trimmed
+            # shells yet, so the centroid is a FLAGGED non-answer (NaN, the
+            # empty-solid precedent) — never a fabricated location.
+            v = shape.volume(depth=5)
+            nan = float("nan")
+            return _mp(v.to_float(), nan, nan, nan,
+                       provenance=shape.provenance,
+                       volume_halfwidth=float(v.width) / 2,
+                       centroid_unavailable=True)
         # Measure the volume on the ORIGINAL shape, before the AxisStack wrap
         # below: a Sphere has a canonical body and an AxisStack does not, so
         # wrapping first would send it down the float-integrating path that
@@ -1405,6 +1505,16 @@ class RefKernel:
         from forgekernel.quadric import RoundedBox
         from forgekernel.loft import LoftSolid
         from forgekernel.profile2d import SplinePrism
+        from forgekernel.trimshell import TrimmedShell as _TShell
+        if isinstance(shape, _TShell):
+            # the control-net box of an UNTRIMMED face over-reports a
+            # trimmed one — a wrong number wearing coordinates. A
+            # strip-aware certified extent has not landed; refuse by name.
+            _nope("bbox on a TrimmedShell", _K7,
+                  predicate="trimmed_shell_extent_unbuilt",
+                  remedy="a certified extent must exclude the trimmed-away "
+                         "control net; until that lands, derive extents "
+                         "from the operands")
         if isinstance(shape, (TubeSolid, LoftSolid, SplinePrism)):
             return shape.bbox_f()
         if isinstance(shape, (Cone, Sphere)):
@@ -1550,6 +1660,36 @@ class RefKernel:
                 checks={"method": "certified-tube",
                         "provenance": shape.provenance},
                 violations=[])
+        from forgekernel.trimshell import (ShellAuditError,
+                                           ShellAuditUncertified)
+        from forgekernel.trimshell import TrimmedShell as _TShell
+        if isinstance(shape, _TShell):
+            # a K7 boolean result: re-run the full three-oracle audit (exact
+            # trim-edge pairing, Σ-flux orientation, certified volume sign).
+            # "uncertified" is reported as not-ok WITH the reason — the shell
+            # is unproven at this depth, which must never read as fine.
+            try:
+                report = shape.audit(depth=5)
+            except ShellAuditError as exc:
+                return ValidationReport(
+                    ok=False,
+                    checks={"method": "certified-shell-audit",
+                            "provenance": shape.provenance},
+                    violations=[str(exc)])
+            except ShellAuditUncertified as exc:
+                return ValidationReport(
+                    ok=False,
+                    checks={"method": "certified-shell-audit",
+                            "provenance": shape.provenance,
+                            "uncertified": True},
+                    violations=[str(exc)])
+            return ValidationReport(
+                ok=True,
+                checks={"method": "certified-shell-audit",
+                        "provenance": shape.provenance,
+                        "faces": report["faces"],
+                        "edges": report["edges"]},
+                violations=[])
         from forgekernel.quadric import FilletedBox as _FB
         from forgekernel.quadric import FilletedChamferedBox as _FCB
         from forgekernel.quadric import FilletedPrism as _FP
@@ -1617,6 +1757,18 @@ class RefKernel:
         from forgekernel import body as B
 
         deflection = _check_deflection("tessellate", deflection)
+        from forgekernel.trimshell import TrimmedShell as _TShell
+        if isinstance(shape, _TShell):
+            # the trim boundary is only known as a certified cell enclosure;
+            # a trimmed-patch mesher (the piece shared with K3.7 import) has
+            # not landed. Volume and audit stay certified without it — the
+            # FilletedPrism precedent: meshing refuses by name, nothing lies.
+            _nope("tessellate on a TrimmedShell (trimmed-patch "
+                  "tessellation)", _K7,
+                  predicate="trimmed_patch_tessellation_unbuilt",
+                  remedy="use mass_props (certified volume ± e) and "
+                         "validate (the shell audit) — the mesher for "
+                         "trimmed patches is the K7/K3.7 shared follow-on")
         if isinstance(shape, B.Body):
             try:
                 return B.tessellate(shape, deflection)

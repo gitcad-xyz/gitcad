@@ -117,6 +117,32 @@ machinery.
   Σ-areas == domain-area audit runs before returning. Handles interior
   loops (holes), nested loops, and border-touching stitched loops, and is
   independent of which side each stitched loop happened to enclose.
+- **✅ The boolean assembly** (done — the crown piece). `bsolid.
+  boolean_trimmed(op, A, B)`: per face-pair SSI → certified trim loops →
+  exact domain-partition audit → certified ray-parity membership of every
+  strip-free fragment (one raycast per connected component of the strip's
+  complement — membership is constant there by the enclosure property) →
+  stitch into an audited `TrimmedShell`. Orientation is PRINCIPLED, not
+  enumerated: operand faces are preflighted outward (Σ flux > 0 exact) and
+  the result's sense follows from membership monotonicity — union/
+  intersect keep every face's own outward normal, cut flips B's
+  (A ∩ ¬B is decreasing in B); a loop-role mistake provably cannot ship a
+  wrong shell (measures never read roles; pairing refuses a single flip
+  and a double flip is a no-op). Volume is a `CInterval` ("certified ± e"),
+  exact-width when nothing is trimmed. Verified end to end on
+  pillow∩box = the stage-1 cap (bracket contains 1.0794724554159, halving
+  per depth), union and cut with the conservation identities
+  vol(A)+vol(B) ∈ vol(∪)+vol(∩) and vol(A) ∈ vol(−)+vol(∩) in intervals,
+  and MC membership spot-checks with certified signs. Refuses BY NAME:
+  tangent contact, open/stitched branches (their border segments await
+  pairing with operand seam edges), rational/multi-span/inward operands,
+  unresolved regions, empty result. Seam: `RefKernel.boolean` dispatches
+  PatchSolid × PatchSolid; `mass_props` reports midpoint +
+  `volume_halfwidth`, provenance `"certified"`; `validate` re-runs the
+  three-oracle audit; tessellate/bbox/measure refuse by name until the
+  trimmed-patch mesher (shared with K3.7) lands. *Still open:* booleans of
+  already-trimmed results (re-trim), loft/prism/tube patch-skin
+  converters, open-branch assembly, rational operands end to end.
 
 ### K3.7 — the freeform import gap **[K]**
 - Freeform STEP **topology**: trimmed `ADVANCED_FACE` over B-spline
