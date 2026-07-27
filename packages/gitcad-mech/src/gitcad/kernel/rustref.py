@@ -180,6 +180,29 @@ class RustKernel:
             shape = self._as_ref_box(shape)
         return self._ref.fillet(shape, edges, radius)
 
+    # -- direct edits (#132): analytic re-parameterization lives in ref;
+    # a Rust PySolid's faces are enumerated without geometry (bare planes),
+    # so indices into them cannot drive an exact edit — honest refusal.
+
+    def _direct_edit_delegate(self, name, shape, *args, **kwargs):
+        if isinstance(shape, PySolid):
+            raise KernelError(
+                f"forge does not implement {name} on PySolid yet — "
+                "K1.3 (addressable faces)",
+                FailureSignature(op=name, diagnostic="NotYetImplemented",
+                                 kernel="forge"))
+        return getattr(self._ref, name)(shape, *args, **kwargs)
+
+    def move_face(self, shape, faces, translate):
+        return self._direct_edit_delegate("move_face", shape, faces, translate)
+
+    def offset_face(self, shape, faces, distance):
+        return self._direct_edit_delegate("offset_face", shape, faces, distance)
+
+    def delete_face(self, shape, faces, absorb=None):
+        return self._direct_edit_delegate("delete_face", shape, faces,
+                                          absorb=absorb)
+
     def helix(self, radius, pitch, turns, ccw=True):
         return self._ref.helix(radius, pitch, turns, ccw)
 

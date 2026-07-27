@@ -291,6 +291,7 @@ _SEAM_OPS = (
     "chamfer", "shell", "draft", "helix", "pipe", "hlr_project",
     "section_polys", "export_step", "export_stl", "export_brep",
     "import_step", "import_brep",
+    "move_face", "offset_face", "delete_face",
 )
 
 
@@ -432,6 +433,319 @@ def _face_centroid(frags) -> list[float]:
             acc[k] += c[k] * a
         tot += a
     return [acc[k] / tot for k in range(3)] if tot else [0.0, 0.0, 0.0]
+
+
+# -- direct edits (#132): shared exact helpers --------------------------------
+#
+# A direct edit (move_face / offset_face / delete_face) is a
+# RE-PARAMETERIZATION of the owning representation, never a boolean
+# (ADR-0022). The topology law every editor below enforces: the edit must be
+# a homeomorphism of the boundary graph — an edge collapsing, two faces
+# merging coplanar, a neighbour flipping its material side, or the target
+# face vanishing from the result is a REFUSAL carrying the measured distance
+# to the event, never a silently different solid.
+
+_K6 = "K6.1 (direct edits)"
+
+
+def _exact_in(op: str, v, what: str = "value") -> Fraction:
+    """An op input as an exact rational — same coercion the rest of the seam
+    uses (``Fraction(str(x))`` so 0.1 means 1/10, not the binary float)."""
+    if isinstance(v, Fraction):
+        return v
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise KernelError(
+            f"{op}: {what} must be a number, got {type(v).__name__} {v!r}",
+            FailureSignature(op=op, diagnostic="BadInput", kernel="ref"))
+    if isinstance(v, float) and not math.isfinite(v):
+        raise KernelError(
+            f"{op}: {what} must be finite, got {v!r}",
+            FailureSignature(op=op, diagnostic="BadInput", kernel="ref"))
+    return Fraction(v) if isinstance(v, int) else Fraction(str(v))
+
+
+def _det3(a, b, c):
+    from forgekernel.exact import cross, dot
+
+    return dot(a, cross(b, c))
+
+
+def _meet_three_planes(p1, p2, p3):
+    """Exact meet point of three planes, or None when their normals are
+    linearly dependent (Cramer over ℚ — ADR-0019: topology never floats)."""
+    from forgekernel.exact import add, cross, smul
+
+    d = _det3(p1.n, p2.n, p3.n)
+    if d == 0:
+        return None
+    v = add(add(smul(p1.d, cross(p2.n, p3.n)),
+                smul(p2.d, cross(p3.n, p1.n))),
+            smul(p3.d, cross(p1.n, p2.n)))
+    return (v[0] / d, v[1] / d, v[2] / d)
+
+
+def _newell(verts):
+    """Twice the area vector of a closed polygon — exact, orientation-aware."""
+    from forgekernel.exact import add, cross
+
+    acc = (Fraction(0), Fraction(0), Fraction(0))
+    n = len(verts)
+    for i in range(n):
+        acc = add(acc, cross(verts[i], verts[(i + 1) % n]))
+    return acc
+
+
+def _sign(x) -> int:
+    """Exact sign of any exact scalar (Fraction / SurdVal rich comparisons)."""
+    if x > 0:
+        return 1
+    if x < 0:
+        return -1
+    return 0
+
+
+def _cross2(ax, ay, bx, by):
+    return ax * by - ay * bx
+
+
+def _segs_cross(a, b, c, d) -> bool:
+    """Exact: do 2D segments ab and cd share a point? (Endpoint touches
+    count — a loop that TOUCHES itself is already a topology event.)"""
+    o1 = _sign(_cross2(b[0] - a[0], b[1] - a[1], c[0] - a[0], c[1] - a[1]))
+    o2 = _sign(_cross2(b[0] - a[0], b[1] - a[1], d[0] - a[0], d[1] - a[1]))
+    o3 = _sign(_cross2(d[0] - c[0], d[1] - c[1], a[0] - c[0], a[1] - c[1]))
+    o4 = _sign(_cross2(d[0] - c[0], d[1] - c[1], b[0] - c[0], b[1] - c[1]))
+    if o1 * o2 < 0 and o3 * o4 < 0:
+        return True
+
+    def on(p, q, r):                    # r collinear with pq and inside its box
+        if _sign(_cross2(q[0] - p[0], q[1] - p[1],
+                         r[0] - p[0], r[1] - p[1])) != 0:
+            return False
+        return (min(p[0], q[0]) <= r[0] <= max(p[0], q[0])
+                and min(p[1], q[1]) <= r[1] <= max(p[1], q[1]))
+
+    return on(a, b, c) or on(a, b, d) or on(c, d, a) or on(c, d, b)
+
+
+def _loop_is_simple(pts) -> bool:
+    """Exact simplicity of a closed 2D loop: no two non-adjacent segments
+    meet, adjacent ones meet only at their shared vertex."""
+    n = len(pts)
+    for i in range(n):
+        a, b = pts[i], pts[(i + 1) % n]
+        for j in range(i + 1, n):
+            if j == i or (j + 1) % n == i or (i + 1) % n == j:
+                continue
+            c, d = pts[j], pts[(j + 1) % n]
+            if _segs_cross(a, b, c, d):
+                return False
+    return True
+
+
+def _meet_lines2(p1, d1, p2, d2):
+    """Exact meet of two 2D lines (point+dir), or None when parallel. Works
+    over ℚ and over ℚ[√d] (SurdVal has full field arithmetic)."""
+    den = _cross2(d1[0], d1[1], d2[0], d2[1])
+    if den == 0:
+        return None
+    t = _cross2(p2[0] - p1[0], p2[1] - p1[1], d2[0], d2[1]) / den
+    return (p1[0] + t * d1[0], p1[1] + t * d1[1])
+
+
+def _bore_bands(cyls):
+    """Exact z-band decomposition of a coaxial bore stack: contiguous-equal
+    bands merged, each (lo, hi, r) with r the largest active radius."""
+    cuts = sorted({t for c in cyls for t in (c.z0, c.z1)})
+    bands = []
+    for lo, hi in zip(cuts, cuts[1:]):
+        rs = [c.r for c in cyls if c.z0 <= lo and hi <= c.z1]
+        if rs:
+            bands.append([lo, hi, max(rs)])
+    merged = []
+    for b in bands:
+        if merged and merged[-1][1] == b[0] and merged[-1][2] == b[2]:
+            merged[-1][1] = b[1]
+        else:
+            merged.append(b)
+    return [tuple(b) for b in merged]
+
+
+def _drilled_ring_meta(shape):
+    """The annular faces a bore stack carries besides its walls — exact.
+
+    One tuple per ring: ``(kind, (cx, cy), z, r_below, r_above)`` with kind in
+    {"shoulder", "floor", "ceiling"} and r_below/r_above the void radii on
+    each side of z (0 = solid material on that side). These are real faces of
+    the solid (the counterbore shoulder, the blind hole's floor) that
+    ``cylinder_faces`` never enumerated, so no direct edit could name them.
+
+    Multi-slab columns (a bore through a shelled base) are SKIPPED: their ring
+    faces border internal voids and a descriptor computed from the outer
+    z-extent would lie.
+    """
+    from collections import defaultdict
+
+    from forgekernel.quadric import _column_slabs
+
+    (_, _, bz0), (_, _, bz1) = shape.base.bbox()
+    groups: dict = defaultdict(list)
+    for c in shape.bores:
+        groups[(c.cx, c.cy)].append(c)
+    out = []
+    for key in sorted(groups):
+        cyls = groups[key]
+        if len(_column_slabs(shape.base, cyls[0])) != 1:
+            continue
+        bands = _bore_bands(cyls)
+        for i, (lo, hi, r) in enumerate(bands):
+            below = bands[i - 1] if i > 0 else None
+            if lo > bz0 and (below is None or below[1] < lo):
+                out.append(("floor", key, lo, Fraction(0), r))
+            if below is not None and below[1] < lo:
+                out.append(("ceiling", key, below[1], below[2], Fraction(0)))
+            if below is not None and below[1] == lo and below[2] != r:
+                out.append(("shoulder", key, lo, below[2], r))
+        if bands and bands[-1][1] < bz1:
+            out.append(("ceiling", key, bands[-1][1], bands[-1][2],
+                        Fraction(0)))
+    return out
+
+
+def _drilled_ring_faces(shape) -> list[dict]:
+    """Descriptor form of :func:`_drilled_ring_meta` for ``entities``."""
+    out = []
+    for kind, (cx, cy), z, r_below, r_above in _drilled_ring_meta(shape):
+        d = {"surface": "plane",
+             "lineage": "bore.shoulder" if kind == "shoulder" else "bore.floor",
+             "plane": [0.0, 0.0, 1.0], "z": float(z),
+             "centroid": [float(cx), float(cy), float(z)]}
+        if kind == "shoulder":
+            d["r_inner"] = float(min(r_below, r_above))
+            d["r_outer"] = float(max(r_below, r_above))
+        else:
+            d["radius"] = float(max(r_below, r_above))
+        out.append(d)
+    return out
+
+
+def _lathe_face_segments(loop) -> list[int]:
+    """Indices of the profile segments that are FACES of the revolved solid
+    (everything except the axis segments r==0 → r==0), in loop order."""
+    n = len(loop)
+    return [i for i in range(n)
+            if not (loop[i][0] == 0 and loop[(i + 1) % n][0] == 0)]
+
+
+def _lathe_seg_faces(shape) -> list[dict]:
+    """Per-segment face descriptors for a RevolveSolid — caps are planes,
+    vertical segments cylinders, slanted ones cones. This is what makes a
+    lathe's faces individually addressable (before, the whole solid was one
+    opaque descriptor no selector could distinguish)."""
+    cx, cy = float(shape.cx), float(shape.cy)
+    loop = shape.loop
+    n = len(loop)
+    out = []
+    for i in _lathe_face_segments(loop):
+        (r1, z1), (r2, z2) = loop[i], loop[(i + 1) % n]
+        mid_z = float(z1 + z2) / 2
+        if z1 == z2:
+            out.append({"surface": "plane", "lineage": f"lathe.seg{i}",
+                        "plane": [0.0, 0.0, 1.0], "z": float(z1),
+                        "r_lo": float(min(r1, r2)), "r_hi": float(max(r1, r2)),
+                        "centroid": [cx, cy, float(z1)]})
+        elif r1 == r2:
+            out.append({"surface": "cylinder", "lineage": f"lathe.seg{i}",
+                        "radius": float(r1), "axis_dir": [0.0, 0.0, 1.0],
+                        "axis_origin": [cx, cy, float(min(z1, z2))],
+                        "centroid": [cx, cy, mid_z]})
+        else:
+            out.append({"surface": "cone", "lineage": f"lathe.seg{i}",
+                        "r1": float(r1), "r2": float(r2),
+                        "z1": float(z1), "z2": float(z2),
+                        "axis_dir": [0.0, 0.0, 1.0],
+                        "axis_origin": [cx, cy, float(min(z1, z2))],
+                        "centroid": [cx, cy, mid_z]})
+    return out
+
+
+_ROUNDED_FLATS = (("bottom", 2, "min"), ("top", 2, "max"),
+                  ("front", 1, "min"), ("back", 1, "max"),
+                  ("right", 0, "max"), ("left", 0, "min"))
+
+
+def _rounded_face_meta(shape):
+    """(kind, *spec) per face of a RoundedBox, aligned 1:1 with
+    :func:`_rounded_faces`: 6 flats, 12 edge blends, 8 corner octants."""
+    out = [("flat", name, axis, side) for name, axis, side in _ROUNDED_FLATS]
+    for axis in range(3):
+        b, c = [o for o in range(3) if o != axis]
+        for sb in ("min", "max"):
+            for sc in ("min", "max"):
+                out.append(("edge", axis, (b, sb), (c, sc)))
+    for sx in ("min", "max"):
+        for sy in ("min", "max"):
+            for sz in ("min", "max"):
+                out.append(("corner", sx, sy, sz))
+    return out
+
+
+def _rounded_faces(shape) -> list[dict]:
+    """Full face enumeration of a RoundedBox (was one opaque descriptor —
+    nothing on it was addressable, so nothing on it was editable)."""
+    import math as _m
+
+    dims = (float(shape.a), float(shape.b), float(shape.c))
+    org = tuple(float(v) for v in shape.origin)
+    r = float(shape.r)
+    flats = tuple(d - 2 * r for d in dims)
+
+    def coord(axis, side, inset):
+        lo, hi = org[axis], org[axis] + dims[axis]
+        return lo + inset if side == "min" else hi - inset
+
+    out: list[dict] = []
+    for kind, *spec in _rounded_face_meta(shape):
+        if kind == "flat":
+            name, axis, side = spec
+            b, c = [o for o in range(3) if o != axis]
+            centroid = [0.0, 0.0, 0.0]
+            centroid[axis] = coord(axis, side, 0.0)
+            centroid[b] = org[b] + dims[b] / 2
+            centroid[c] = org[c] + dims[c] / 2
+            normal = [0.0, 0.0, 0.0]
+            normal[axis] = 1.0
+            out.append({"surface": "plane", "lineage": f"rounded.{name}",
+                        "plane": normal, "centroid": centroid,
+                        "area": flats[b] * flats[c]})
+        elif kind == "edge":
+            axis, (b, sb), (c, sc) = spec
+            origin = [0.0, 0.0, 0.0]
+            origin[axis] = coord(axis, "min", r)
+            origin[b] = coord(b, sb, r)
+            origin[c] = coord(c, sc, r)
+            axis_dir = [0.0, 0.0, 0.0]
+            axis_dir[axis] = 1.0
+            k = r / _m.sqrt(2)
+            centroid = list(origin)
+            centroid[axis] = org[axis] + dims[axis] / 2
+            centroid[b] += k if sb == "max" else -k
+            centroid[c] += k if sc == "max" else -k
+            names = "xyz"
+            out.append({"surface": "blend-cylinder",
+                        "lineage": f"rounded.edge.{names[axis]}.{sb}.{sc}",
+                        "radius": r, "axis_dir": axis_dir,
+                        "axis_origin": origin, "centroid": centroid})
+        else:
+            sides = spec
+            centre = [coord(axis, sides[axis], r) for axis in range(3)]
+            k = r / _m.sqrt(3)
+            centroid = [centre[axis] + (k if sides[axis] == "max" else -k)
+                        for axis in range(3)]
+            out.append({"surface": "blend-sphere",
+                        "lineage": f"rounded.corner.{'.'.join(sides)}",
+                        "radius": r, "center": centre, "centroid": centroid})
+    return out
 
 
 @_guard_seam
@@ -1111,7 +1425,13 @@ class RefKernel:
         if isinstance(shape, SphereOverlap):
             return [{"surface": "sphere-lens"}]
         if isinstance(shape, RoundedBox):
-            return [{"surface": "rounded-box"}]
+            # every face individually addressable (6 flats + 12 edge blends +
+            # 8 corner octants) — the precondition for direct edits (#132)
+            return _rounded_faces(shape)
+        if isinstance(shape, RevolveSolid):
+            # per-profile-segment faces (caps / cylinders / cones), not the
+            # single opaque descriptor the prims fallback used to emit
+            return _lathe_seg_faces(shape)
         from forgekernel.quadric import FilletedPrism as _FPr
         if isinstance(shape, _FPr):
             return [{"surface": "filleted-prism"}]
@@ -1129,13 +1449,27 @@ class RefKernel:
             prims = getattr(shape, "prims", [shape])
             return [{"surface": type(p).__name__.lower()} for p in prims]
         if isinstance(shape, Cyl):
+            import math as _m
+
+            cx, cy = float(shape.cx), float(shape.cy)
+            cap_area = _m.pi * float(shape.r) ** 2
             return [{"surface": "cylinder", "radius": float(shape.r),
                      "axis_dir": [0.0, 0.0, 1.0],
-                     "axis_origin": [float(shape.cx), float(shape.cy),
-                                     float(shape.z0)]}]
+                     "axis_origin": [cx, cy, float(shape.z0)]},
+                    {"surface": "plane", "lineage": "cyl.top",
+                     "plane": [0.0, 0.0, 1.0], "z": float(shape.z1),
+                     "radius": float(shape.r), "area": cap_area,
+                     "centroid": [cx, cy, float(shape.z1)]},
+                    {"surface": "plane", "lineage": "cyl.bottom",
+                     "plane": [0.0, 0.0, 1.0], "z": float(shape.z0),
+                     "radius": float(shape.r), "area": cap_area,
+                     "centroid": [cx, cy, float(shape.z0)]}]
         if isinstance(shape, DrilledSolid):
             base = self.entities(shape.base, "face")
-            return base + shape.cylinder_faces()
+            # walls, then the ring faces (counterbore shoulders, blind-hole
+            # floors) that were never enumerated — appended so existing
+            # indices stay stable
+            return base + shape.cylinder_faces() + _drilled_ring_faces(shape)
         out = []
         for (plane_key, source), frags in sorted(
                 shape.logical_faces().items(),
@@ -2975,6 +3309,1040 @@ class RefKernel:
         except ValueError as exc:
             raise KernelError(str(exc), FailureSignature(
                 op="draft", diagnostic="NotYetImplemented", kernel="ref"))
+
+    # -- direct edits (#132): move_face / offset_face / delete_face -----------
+    #
+    # SolidWorks-parity direct editing, feature-level per ADR-0022: the
+    # DOCUMENT records which face (lineage-stable id) and by how much; the
+    # kernel receives concrete indices into entities(shape, "face") and
+    # implements the edit by RE-PARAMETERIZING the owning representation.
+    # Sign convention shared by all editors: a positive offset moves the face
+    # along its OUTWARD material normal, i.e. adds material (so a bore wall
+    # offset by -1 ENLARGES the bore: its outward normal points at the axis).
+
+    def move_face(self, shape, faces, translate):
+        """Translate the named faces; every neighbour re-solves exactly.
+
+        For a planar face only the normal component of ``translate`` changes
+        the carrier plane (the in-plane part is the identity on it — that is
+        the mathematics, not a clamp); for a bore wall an in-plane translate
+        moves the hole and a z component refuses (move the cap or shoulder
+        instead)."""
+        t = tuple(_exact_in("move_face", v, "translate component")
+                  for v in translate)
+        if len(t) != 3:
+            raise KernelError(
+                "move_face: translate must be a 3-vector",
+                FailureSignature(op="move_face", diagnostic="BadInput",
+                                 kernel="ref"))
+        return self._direct_edit("move_face", shape, faces, ("move", t))
+
+    def offset_face(self, shape, faces, distance):
+        """Offset the named faces along their outward normals (+ adds
+        material); neighbours re-solve exactly, blends refuse by name."""
+        d = _exact_in("offset_face", distance, "distance")
+        return self._direct_edit("offset_face", shape, faces, ("offset", d))
+
+    def delete_face(self, shape, faces, absorb=None):
+        """Delete the named faces and HEAL the boundary. Two heal classes
+        exist (the derivation's taxonomy): generator-removal (un-drill,
+        sharpen, un-chamfer — exact, returns to the pre-feature field) and
+        neighbour-extension (re-solve the neighbours to their new meet).
+        Where TWO heals are valid (a counterbore shoulder) the op refuses
+        listing both and requires ``absorb=<face index>`` naming the
+        neighbour that grows."""
+        if absorb is not None and (isinstance(absorb, bool)
+                                   or not isinstance(absorb, int)):
+            raise KernelError(
+                f"delete_face: absorb must be a face index, got {absorb!r}",
+                FailureSignature(op="delete_face", diagnostic="BadInput",
+                                 kernel="ref"))
+        return self._direct_edit("delete_face", shape, faces,
+                                 ("delete", absorb))
+
+    def _face_indices(self, op, shape, faces) -> list[int]:
+        ents = self.entities(shape, "face")
+        try:
+            items = list(faces)
+        except TypeError:
+            items = None
+        if not items:
+            raise KernelError(
+                f"{op}: name at least one face index into "
+                "entities(shape, 'face')",
+                FailureSignature(op=op, diagnostic="BadInput", kernel="ref"))
+        idxs: list[int] = []
+        for idx in items:
+            if isinstance(idx, bool) or not isinstance(idx, int):
+                raise KernelError(
+                    f"{op}: faces must be integer indices into "
+                    f"entities(shape, 'face'), got {idx!r}",
+                    FailureSignature(op=op, diagnostic="BadInput",
+                                     kernel="ref"))
+            if idx < 0 or idx >= len(ents):
+                raise KernelError(
+                    f"{op}: face index {idx} out of range "
+                    f"(shape has {len(ents)} faces)",
+                    FailureSignature(op=op, diagnostic="FaceIndexOutOfRange",
+                                     kernel="ref"))
+            idxs.append(idx)
+        if len(set(idxs)) != len(idxs):
+            raise KernelError(
+                f"{op}: duplicate face index in {idxs}",
+                FailureSignature(op=op, diagnostic="BadInput", kernel="ref"))
+        return idxs
+
+    def _direct_edit(self, op, shape, faces, action):
+        from forgekernel.brep import Solid
+        from forgekernel.quadric import (Cyl, DisjointUnion, DrilledSolid,
+                                         RevolveSolid, RoundedBox)
+
+        idxs = self._face_indices(op, shape, faces)
+        if isinstance(shape, DisjointUnion):
+            return self._edit_disjoint(op, shape, idxs, action)
+        if isinstance(shape, DrilledSolid):
+            return self._edit_drilled(op, shape, idxs, action)
+        if isinstance(shape, Solid):
+            return self._edit_planar(op, shape, idxs, action)
+        if isinstance(shape, Cyl):
+            return self._edit_cyl(op, shape, idxs, action)
+        if isinstance(shape, RevolveSolid):
+            return self._edit_lathe(op, shape, idxs, action)
+        if isinstance(shape, RoundedBox):
+            return self._edit_rounded(op, shape, idxs, action)
+        _nope(f"{op}({type(shape).__name__})", _K6,
+              remedy="direct edits cover planar solids, drilled solids, "
+                     "cylinders, lathes and rounded boxes so far")
+
+    # -- planar solids: vertex re-solve under the topology law ---------------
+
+    def _edit_planar(self, op, shape, idxs, action):
+        ordered = sorted(shape.logical_faces().items(),
+                         key=lambda kv: (kv[0][1], kv[0][0]))
+        if action[0] == "delete":
+            return self._heal_prism(op, shape, ordered, idxs, action[1])
+        return self._planar_move(op, shape, ordered, idxs, action)
+
+    def _planar_move(self, op, shape, ordered, idxs, action):
+        """Move/offset selected planar faces by re-solving every incident
+        vertex from its (updated) incident planes — exact Cramer, with the
+        boundary graph REQUIRED unchanged (any edge collapse, face merge or
+        orientation flip refuses with the measured fraction to the event)."""
+        from forgekernel.brep import Polygon, Solid
+        from forgekernel.exact import Plane, dot, sub
+        from forgekernel.surd import exact_sqrt
+
+        kind, payload = action
+
+        def face_delta(pl):
+            """The exact d-shift for THIS polygon's plane object (scales with
+            its |n|, so fragments of one logical face stay coplanar)."""
+            if kind == "move":
+                return dot(pl.n, payload)
+            nn = dot(pl.n, pl.n)
+            ln = exact_sqrt(nn)
+            if not isinstance(ln, Fraction):
+                _nope(f"{op}(a face with a non-Pythagorean normal has no "
+                      "rational unit normal to offset along)", _K6,
+                      remedy="use move_face with a rational translate along "
+                             "the normal — that is exact for any plane")
+            return payload * ln
+
+        selected = {}                    # canonical -> set of sources
+        for idx in idxs:
+            (ckey, source), frags = ordered[idx]
+            selected.setdefault(ckey, set()).add(source)
+        # a coplanar sibling that is NOT selected would be torn off its plane
+        for (ckey, source), _f in ordered:
+            if ckey in selected and source not in selected[ckey]:
+                _nope(f"{op}(face shares its plane with unselected face "
+                      f"{source!r} — coplanar faces move together)", _K6,
+                      predicate="topology_event",
+                      remedy="select every face on the plane")
+
+        # representative plane + delta per selected canonical (orientation
+        # comes from an actual fragment, which is CCW around OUTWARD)
+        rep = {}
+        for (ckey, source), frags in ordered:
+            if ckey in selected and ckey not in rep:
+                pl = frags[0].plane
+                rep[ckey] = (pl, face_delta(pl))
+        if all(d == 0 for _pl, d in rep.values()):
+            return shape                 # exact identity (in-plane move)
+
+        # EVENT 1 — parallel-plane merge, caught BEFORE any construction
+        # (the exact-coplanar rebuild crashes 'collinear points'; past it a
+        # valid WRONG solid builds with a silently flipped face)
+        def canon_shift(ckey):
+            """How far the canonical d of this face travels (0 if unmoved)."""
+            if ckey not in rep:
+                return Fraction(0)
+            pl, delta = rep[ckey]
+            return Plane(pl.n, pl.d + delta).canonical()[3] - ckey[3]
+
+        for ckey in rep:
+            dc = canon_shift(ckey)
+            if dc == 0:
+                continue
+            for (okey, osrc), _frags in ordered:
+                if okey == ckey or okey[:3] != ckey[:3]:
+                    continue             # not parallel: can never merge
+                den = dc - canon_shift(okey)
+                if den == 0:
+                    continue             # moving in lockstep: gap constant
+                s = (okey[3] - ckey[3]) / den
+                if 0 <= s <= 1:
+                    _nope(f"{op}(face would merge with the parallel face "
+                          f"{osrc!r} — a topology event, not a bigger move)",
+                          _K6, predicate="topology_event",
+                          measured={"event": "faces_coplanar",
+                                    "fraction_to_event": float(s)},
+                          remedy=f"stop short of {float(s):.4g} of the "
+                                 "requested move, or model the merge "
+                                 "explicitly")
+
+        # vertex re-solve: every vertex on a selected plane moves to the
+        # meet of its incident planes with the selected ones shifted
+        incident: dict = {}
+        for p in shape.polys:
+            ck = p.plane.canonical()
+            for v in p.verts:
+                incident.setdefault(v, {}).setdefault(ck, p.plane)
+        moved: dict = {}
+        for v, planes in incident.items():
+            if not (set(planes) & set(selected)):
+                continue
+            if len(planes) < 3:
+                _nope(f"{op}(a boundary vertex lies on only {len(planes)} "
+                      "planes — a fragmented (T-junction) boundary cannot "
+                      "be re-solved)", "K6.2 (direct edits on booleans)",
+                      remedy="rebuild the feature instead of editing the "
+                             "boolean output directly")
+            plist = [Plane(pl.n, pl.d + face_delta(pl)) if ck in selected
+                     else pl for ck, pl in planes.items()]
+            from itertools import combinations
+
+            newv = None
+            for trio in combinations(plist, 3):
+                newv = _meet_three_planes(*trio)
+                if newv is not None:
+                    break
+            if newv is None:
+                _nope(f"{op}(a vertex's incident planes are degenerate "
+                      "after the edit)", _K6, predicate="topology_event")
+            if any(dot(pl.n, newv) != pl.d for pl in plist):
+                _nope(f"{op}(a vertex on more than three faces would SPLIT "
+                      "— its planes no longer meet in one point)", _K6,
+                      predicate="topology_event",
+                      measured={"event": "vertex_split",
+                                "planes": len(plist)},
+                      remedy="edit the generating feature instead; this "
+                             "vertex's faces are tied by construction")
+            moved[v] = newv
+
+        # EVENT 2 — edge collapse or reversal (exact, with the fraction of
+        # the requested move at which the edge dies: positions are affine in
+        # the move, so f(s) = e0·e(s) is linear)
+        newpolys = []
+        for p in shape.polys:
+            nv = [moved.get(v, v) for v in p.verts]
+            if nv == p.verts:
+                newpolys.append(p)
+                continue
+            n_ = len(nv)
+            for i in range(n_):
+                a0, b0 = p.verts[i], p.verts[(i + 1) % n_]
+                e0 = sub(b0, a0)
+                f0 = dot(e0, e0)
+                if f0 == 0:
+                    continue
+                e1 = sub(nv[(i + 1) % n_], nv[i])
+                f1 = dot(e0, e1)
+                if f1 <= 0:
+                    s = f0 / (f0 - f1) if f0 != f1 else Fraction(1)
+                    _nope(f"{op}(an edge of face {p.source!r} "
+                          f"{'collapses' if f1 == 0 else 'reverses'} — the "
+                          "face beyond it would flip its material side)",
+                          _K6, predicate="topology_event",
+                          measured={"event": "edge_collapse",
+                                    "fraction_to_event": float(s)},
+                          remedy=f"stop short of {float(s):.4g} of the "
+                                 "requested move")
+            nrm = _newell(nv)
+            if dot(nrm, p.plane.n) <= 0:
+                _nope(f"{op}(face {p.source!r} flips its material side)",
+                      _K6, predicate="topology_event",
+                      measured={"event": "face_flip"})
+            for i in range(n_):
+                ea = sub(nv[(i + 1) % n_], nv[i])
+                eb = sub(nv[(i + 2) % n_], nv[(i + 1) % n_])
+                from forgekernel.exact import cross
+
+                if dot(cross(ea, eb), nrm) < 0:
+                    _nope(f"{op}(face {p.source!r} would go non-convex — "
+                          "its re-solved loop self-intersects)", _K6,
+                          predicate="topology_event",
+                          measured={"event": "face_split"})
+            try:
+                newpolys.append(Polygon(nv, p.source))
+            except ValueError:
+                _nope(f"{op}(face {p.source!r} degenerates)", _K6,
+                      predicate="topology_event")
+        out = Solid(newpolys)
+
+        # POST-CHECKS: the edited faces still exist, the boundary is closed,
+        # the volume stayed positive — the silent-clamp trap, refused
+        new_faces = out.logical_faces()
+        for ckey, (pl, delta) in rep.items():
+            nk = Plane(pl.n, pl.d + delta).canonical()
+            for source in selected[ckey]:
+                frags = new_faces.get((nk, source))
+                if not frags or all(f.area2() == 0 for f in frags):
+                    _nope(f"{op}(face {source!r} is absent from the result "
+                          "— consumed by the edit)", _K6,
+                          predicate="face_absent_after_edit")
+        bad = out.watertight_violations()
+        if bad:
+            _nope(f"{op}(the re-solved boundary is not closed: {bad[0]})",
+                  _K6, predicate="topology_event",
+                  measured={"violations": len(bad)})
+        if out.volume() <= 0:
+            _nope(f"{op}(the edit turns the solid inside out)", _K6,
+                  predicate="topology_event",
+                  measured={"volume": float(out.volume())})
+        return out
+
+    def _heal_prism(self, op, shape, ordered, idxs, absorb):
+        """delete_face on a planar solid — the neighbour-extension heal,
+        implemented where it is exact: a right z-prism's side wall (its two
+        neighbour walls extend to their sharp meet — the un-chamfer). Caps
+        refuse with a boundedness PROOF (the walls are parallel to the cap
+        normal and never close)."""
+        from forgekernel.brep import Polygon, Solid, _ear_clip, _loop_area2
+        from forgekernel.exact import vec
+
+        if absorb is not None:
+            raise KernelError(
+                f"{op}: absorb applies to drilled-solid heals, not planar "
+                "walls (the neighbour-extension heal is unique)",
+                FailureSignature(op=op, diagnostic="BadInput", kernel="ref"))
+        if len(idxs) != 1:
+            _nope(f"{op}(several planar faces at once)", _K6,
+                  remedy="delete one wall per edit")
+        horiz = [(key, frags) for key, frags in ordered
+                 if key[0][0] == 0 and key[0][1] == 0]
+        sides = [(key, frags) for key, frags in ordered
+                 if key[0][2] == 0]
+        if len(horiz) != 2 or len(horiz) + len(sides) != len(ordered):
+            _nope(f"{op}(planar solid that is not a right z-prism)",
+                  "K6.2 (direct edits on booleans)",
+                  remedy="direct heals cover prisms; rebuild the feature "
+                         "otherwise")
+        (k_lo, f_lo), (k_hi, f_hi) = sorted(horiz, key=lambda kf: kf[0][0][3])
+        z0, z1 = k_lo[0][3], k_hi[0][3]
+        src_lo, src_hi = k_lo[1], k_hi[1]
+        target_key = ordered[idxs[0]][0]
+        if target_key in (k_lo, k_hi):
+            _nope(f"{op}(a prism cap has no bounded heal: every wall is "
+                  "parallel to its normal, so the extensions never close)",
+                  _K6, predicate="heal_unbounded",
+                  remedy="delete a side wall, or remove the feature that "
+                         "made the cap")
+        # side walls -> footprint segments, oriented so outward is right
+        segs = []
+        for (ck, src), frags in sides:
+            if len(frags) != 1 or len(frags[0].verts) != 4:
+                _nope(f"{op}(fragmented side wall {src!r})",
+                      "K6.2 (direct edits on booleans)",
+                      remedy="rebuild the feature instead of editing the "
+                             "boolean output directly")
+            quad = frags[0]
+            foot = sorted({(v[0], v[1]) for v in quad.verts
+                           if v[2] == z0})
+            if len(foot) != 2:
+                _nope(f"{op}(side wall {src!r} is not a prism wall)",
+                      "K6.2 (direct edits on booleans)")
+            a, b = foot
+            nx, ny = quad.plane.n[0], quad.plane.n[1]
+            # CCW loop: outward normal of edge a->b is (dy, -dx)
+            if _sign((b[1] - a[1]) * nx - (b[0] - a[0]) * ny) < 0:
+                a, b = b, a
+            segs.append((a, b, (ck, src)))
+        # chain into the footprint loop
+        by_start = {a: (b, key) for a, b, key in segs}
+        if len(by_start) != len(segs):
+            _nope(f"{op}(footprint does not chain into one loop)",
+                  "K6.2 (direct edits on booleans)")
+        start = segs[0][0]
+        loop = []
+        cur = start
+        for _ in range(len(segs)):
+            nxt, key = by_start[cur]
+            loop.append((cur, nxt, key))
+            cur = nxt
+        if cur != start or len(loop) != len(segs):
+            _nope(f"{op}(footprint does not chain into one loop)",
+                  "K6.2 (direct edits on booleans)")
+        pos = next(i for i, (_a, _b, key) in enumerate(loop)
+                   if key == target_key)
+        n = len(loop)
+        pa, pb, pkey = loop[(pos - 1) % n]
+        na, nb, nkey = loop[(pos + 1) % n]
+        dprev = (pb[0] - pa[0], pb[1] - pa[1])
+        dnext = (nb[0] - na[0], nb[1] - na[1])
+        meet = _meet_lines2(pa, dprev, na, dnext)
+        if meet is None:
+            _nope(f"{op}(the neighbour walls are parallel — their "
+                  "extensions never meet, so no bounded heal exists)", _K6,
+                  predicate="heal_unbounded",
+                  measured={"neighbours": [pkey[1], nkey[1]]},
+                  remedy="delete a wall whose neighbours converge, or "
+                         "remove the generating feature")
+        # extensions must EXTEND (same direction), not fold back
+        if (_sign((meet[0] - pa[0]) * dprev[0]
+                  + (meet[1] - pa[1]) * dprev[1]) <= 0
+                or _sign((nb[0] - meet[0]) * dnext[0]
+                         + (nb[1] - meet[1]) * dnext[1]) <= 0):
+            _nope(f"{op}(the neighbour walls meet BEHIND themselves — the "
+                  "heal would fold the boundary)", _K6,
+                  predicate="topology_event",
+                  measured={"event": "heal_folds"})
+        newloop = []
+        for i, (a, b, key) in enumerate(loop):
+            if i == pos:
+                continue
+            aa = meet if key == nkey else a
+            bb = meet if key == pkey else b
+            newloop.append((aa, bb, key))
+        pts = [a for a, _b, _k in newloop]
+        if len(pts) < 3 or not _loop_is_simple(pts):
+            _nope(f"{op}(the healed footprint self-intersects)", _K6,
+                  predicate="topology_event",
+                  measured={"event": "loop_self_intersection"})
+        area2 = _loop_area2(pts)
+        if area2 <= 0:
+            _nope(f"{op}(the healed footprint has no interior)", _K6,
+                  predicate="topology_event")
+        # rebuild with the surviving faces keeping their lineage sources
+        polys = []
+        for a, b, (_ck, src) in newloop:
+            polys.append(Polygon(
+                [vec(a[0], a[1], z0), vec(b[0], b[1], z0),
+                 vec(b[0], b[1], z1), vec(a[0], a[1], z1)], src))
+        for t0, t1, t2 in _ear_clip(pts):
+            polys.append(Polygon([vec(*t0, z0), vec(*t2, z0), vec(*t1, z0)],
+                                 src_lo))
+            polys.append(Polygon([vec(*t0, z1), vec(*t1, z1), vec(*t2, z1)],
+                                 src_hi))
+        out = Solid(polys)
+        bad = out.watertight_violations()
+        if bad:
+            _nope(f"{op}(the healed boundary is not closed: {bad[0]})", _K6,
+                  predicate="topology_event")
+        return out
+
+    # -- drilled solids: bores, shoulders, floors -----------------------------
+
+    def _redrill(self, op, base, pieces):
+        """Rebuild a DrilledSolid from an edited piece list, REPLAYING every
+        clearance guard, then verify each requested piece survived VERBATIM.
+
+        The post-check is the whole point (the derivation's silent-clamp
+        trap): ``cut`` clamps tools to the base z-extent, so a shoulder
+        pushed past the bottom face would come back as a wider through bore
+        with no error — a valid, wrong solid."""
+        from forgekernel.quadric import DrilledSolid
+
+        if not pieces:
+            return base
+        dr = DrilledSolid(base, [])
+        for c in pieces:
+            try:
+                dr = dr.cut(c)
+            except ValueError as exc:
+                raise KernelError(str(exc), FailureSignature(
+                    op=op, diagnostic="NotYetImplemented", kernel="ref"))
+        got = sorted((c.cx, c.cy, c.r, c.z0, c.z1) for c in dr.bores)
+        want = sorted((c.cx, c.cy, c.r, c.z0, c.z1) for c in pieces)
+        if got != want:
+            _nope(f"{op}(an edited bore does not survive the rebuild "
+                  "verbatim — an endpoint was clamped or a face consumed)",
+                  _K6, predicate="face_absent_after_edit",
+                  measured={"requested_bores": len(want),
+                            "rebuilt_bores": len(got)})
+        return dr
+
+    def _drilled_group(self, shape, cx, cy):
+        return [c for c in shape.bores if c.cx == cx and c.cy == cy]
+
+    def _drilled_boundary_guard(self, op, shape, group_key, old_z, new_z,
+                                skip=()):
+        """Moving a z-boundary of a bore stack must not cross or touch any
+        OTHER boundary of the stack or the base caps — crossing is a
+        topology event, touching is a merge (tangency counts too)."""
+        (_, _, bz0), (_, _, bz1) = shape.base.bbox()
+        cx, cy = group_key
+        bounds = {bz0, bz1}
+        for c in self._drilled_group(shape, cx, cy):
+            bounds.update((c.z0, c.z1))
+        for b in bounds:
+            if b == old_z or b in skip:
+                continue
+            if (b - old_z) * (b - new_z) < 0 or b == new_z:
+                s = ((b - old_z) / (new_z - old_z)) if new_z != old_z else 1
+                _nope(f"{op}(the face would "
+                      f"{'meet' if b == new_z else 'cross'} another "
+                      f"boundary of the stack at z={float(b):g} — a "
+                      "topology event, not a deeper cut)", _K6,
+                      predicate="topology_event",
+                      measured={"event": "boundary_crossing",
+                                "at_z": float(b),
+                                "fraction_to_event": float(s)},
+                      remedy="stop short of that boundary, or delete the "
+                             "face and name the heal")
+
+    def _edit_drilled(self, op, shape, idxs, action):
+        kind = action[0]
+        nb = len(self.entities(shape.base, "face"))
+        nw = len(shape.bores)
+        rings = _drilled_ring_meta(shape)
+        base_idx = [i for i in idxs if i < nb]
+        wall_idx = [i - nb for i in idxs if nb <= i < nb + nw]
+        ring_idx = [i - nb - nw for i in idxs if i >= nb + nw]
+        if sum(1 for g in (base_idx, wall_idx, ring_idx) if g) != 1:
+            _nope(f"{op}(mixing base faces, bore walls and ring faces in "
+                  "one edit)", _K6,
+                  remedy="edit each face family in its own step")
+        if base_idx:
+            return self._edit_drilled_base(op, shape, base_idx, action)
+        if wall_idx:
+            if kind == "delete":
+                return self._delete_bore_walls(op, shape, wall_idx,
+                                               action[1])
+            return self._edit_bore_walls(op, shape, wall_idx, action)
+        if len(ring_idx) != 1:
+            _nope(f"{op}(several ring faces at once)", _K6,
+                  remedy="edit one shoulder or floor per step")
+        return self._edit_bore_ring(op, shape, rings[ring_idx[0]], action)
+
+    def _edit_drilled_base(self, op, shape, idxs, action):
+        from forgekernel.quadric import Cyl
+
+        if action[0] == "delete":
+            _nope(f"{op}(a drilled solid's base face: healing it must "
+                  "re-solve the bores too)",
+                  "K6.2 (direct edits on booleans)",
+                  remedy="un-drill first (delete the bore walls), then "
+                         "delete the base face")
+        base = shape.base
+        ordered = sorted(base.logical_faces().items(),
+                         key=lambda kv: (kv[0][1], kv[0][0]))
+        obz0, obz1 = base.bbox()[0][2], base.bbox()[1][2]
+        new_base = self._planar_move(op, base, ordered, idxs, action)
+        nbz0, nbz1 = new_base.bbox()[0][2], new_base.bbox()[1][2]
+        pieces = []
+        for c in shape.bores:
+            z0 = nbz0 if c.z0 == obz0 else c.z0
+            z1 = nbz1 if c.z1 == obz1 else c.z1
+            if (z0, z1) != (c.z0, c.z1):
+                # adjacency extension: a bore ending ON the moved cap rides
+                # it (a through hole STAYS through — the executed A3 cell),
+                # but must not cross an interior boundary of its own stack
+                if z1 != c.z1:
+                    self._drilled_boundary_guard(
+                        op, shape, (c.cx, c.cy), c.z1, z1,
+                        skip={obz0, obz1, nbz0, nbz1})
+                if z0 != c.z0:
+                    self._drilled_boundary_guard(
+                        op, shape, (c.cx, c.cy), c.z0, z0,
+                        skip={obz0, obz1, nbz0, nbz1})
+                if z1 <= z0:
+                    _nope(f"{op}(the cap move consumes a bore)", _K6,
+                          predicate="face_absent_after_edit",
+                          measured={"bore_span": [float(z0), float(z1)]})
+            pieces.append(Cyl(c.cx, c.cy, c.r, z0, z1))
+        return self._redrill(op, new_base, pieces)
+
+    def _edit_bore_walls(self, op, shape, wall_idx, action):
+        from forgekernel.quadric import Cyl
+
+        kind, payload = action
+        pieces = list(shape.bores)
+        sel = set(wall_idx)
+        if kind == "offset":
+            new = []
+            for i, c in enumerate(pieces):
+                if i not in sel:
+                    new.append(c)
+                    continue
+                # the wall's outward material normal points AT the axis, so
+                # +d (add material) SHRINKS the bore
+                r = c.r - payload
+                if r <= 0:
+                    _nope(f"{op}(the bore's wall would cross its own "
+                          "axis)", _K6, predicate="topology_event",
+                          measured={"radius_after": float(r),
+                                    "fraction_to_event": float(c.r / payload)
+                                    if payload > c.r else 1.0},
+                          remedy=f"offset by less than {float(c.r):g}")
+                new.append(Cyl(c.cx, c.cy, r, c.z0, c.z1))
+            self._guard_stack_order(op, pieces, new)
+            return self._redrill(op, shape.base, new)
+        # move: in-plane translates the hole; z refuses (the wall's carrier
+        # is invariant along its own axis — the honest edit is on the caps)
+        dx, dy, dz = payload
+        if dz != 0:
+            _nope(f"{op}(a bore wall along its own axis)", _K6,
+                  remedy="move the shoulder, floor or cap instead — the "
+                         "wall slides in its own carrier")
+        if dx == 0 and dy == 0:
+            return shape
+        groups = {(c.cx, c.cy) for i, c in enumerate(pieces) if i in sel}
+        for gx, gy in groups:
+            members = [i for i, c in enumerate(pieces)
+                       if (c.cx, c.cy) == (gx, gy)]
+            if not set(members) <= sel:
+                _nope(f"{op}(moving one wall of a coaxial stack breaks "
+                      "the stack's shared axis)", _K6,
+                      predicate="topology_event",
+                      measured={"stack_walls": len(members)},
+                      remedy="select every wall of the stack — the hole "
+                             "moves as one feature")
+        new = [Cyl(c.cx + dx, c.cy + dy, c.r, c.z0, c.z1) if i in sel else c
+               for i, c in enumerate(pieces)]
+        # a moved hole landing on ANOTHER hole's axis would silently fuse
+        # the two stacks into one (coaxial cuts are legal, so no guard
+        # downstream would fire) — a topology event, refused here
+        for i, c in enumerate(new):
+            for j, o in enumerate(new):
+                if j <= i or (pieces[i].cx, pieces[i].cy) == \
+                        (pieces[j].cx, pieces[j].cy):
+                    continue
+                if (c.cx, c.cy) == (o.cx, o.cy):
+                    _nope(f"{op}(the moved hole lands on another hole's "
+                          "axis — two stacks would fuse into one)", _K6,
+                          predicate="topology_event",
+                          measured={"axis": [float(c.cx), float(c.cy)]},
+                          remedy="move somewhere else, or delete one hole "
+                                 "first")
+        return self._redrill(op, shape.base, new)
+
+    def _guard_stack_order(self, op, old, new):
+        """Within a coaxial stack the strict radius ordering of overlapping
+        pieces IS the face topology (which wall is exposed where): a radius
+        edit that reorders or ties it inverts or merges a shoulder."""
+        for i in range(len(old)):
+            for j in range(i + 1, len(old)):
+                a, b = old[i], old[j]
+                if (a.cx, a.cy) != (b.cx, b.cy):
+                    continue
+                if min(a.z1, b.z1) < max(a.z0, b.z0):
+                    continue                  # no shared z: independent
+                s0 = _sign(a.r - b.r)
+                s1 = _sign(new[i].r - new[j].r)
+                if s1 != s0 or s1 == 0:
+                    _nope(f"{op}(the stack's shoulder would "
+                          f"{'vanish' if s1 == 0 else 'invert'})", _K6,
+                          predicate="topology_event",
+                          measured={"radii": [float(new[i].r),
+                                              float(new[j].r)]},
+                          remedy="keep the counterbore wider than its "
+                                 "pilot, or delete the shoulder naming "
+                                 "the heal")
+
+    def _delete_bore_walls(self, op, shape, wall_idx, absorb):
+        if absorb is not None:
+            raise KernelError(
+                f"{op}: absorb names a shoulder's surviving wall — "
+                "deleting a wall IS the un-drill heal and is unique",
+                FailureSignature(op=op, diagnostic="BadInput", kernel="ref"))
+        keep = [c for i, c in enumerate(shape.bores)
+                if i not in set(wall_idx)]
+        if not keep:
+            return shape.base
+        return self._redrill(op, shape.base, keep)
+
+    def _edit_bore_ring(self, op, shape, ring, action):
+        from forgekernel.quadric import Cyl
+
+        kind, payload = action
+        rkind, key, z, r_below, r_above = ring
+        if kind == "delete":
+            return self._delete_bore_ring(op, shape, ring, payload)
+        if kind == "move":
+            dz = payload[2]              # the in-plane part is the identity
+        else:
+            # outward material normal: +z when the void sits above the ring
+            dz = payload if r_above > r_below else -payload
+        if dz == 0:
+            return shape
+        new_z = z + dz
+        self._drilled_boundary_guard(op, shape, key, z, new_z)
+        pieces = []
+        for c in shape.bores:
+            if (c.cx, c.cy) == key and (c.z0 == z or c.z1 == z):
+                pieces.append(Cyl(c.cx, c.cy, c.r,
+                                  new_z if c.z0 == z else c.z0,
+                                  new_z if c.z1 == z else c.z1))
+            else:
+                pieces.append(c)
+        out = self._redrill(op, shape.base, pieces)
+        if (rkind, key, new_z, r_below, r_above) not in _drilled_ring_meta(out):
+            _nope(f"{op}(the {rkind} is absent from the result)", _K6,
+                  predicate="face_absent_after_edit")
+        return out
+
+    def _delete_bore_ring(self, op, shape, ring, absorb):
+        from forgekernel.quadric import Cyl
+
+        rkind, key, z, r_below, r_above = ring
+        cx, cy = key
+        (_, _, bz0), (_, _, bz1) = shape.base.bbox()
+        nb = len(self.entities(shape.base, "face"))
+        group = self._drilled_group(shape, cx, cy)
+
+        def wall_face(piece):
+            return nb + shape.bores.index(piece)
+
+        def rebuilt_volume(pieces):
+            try:
+                return float(self._redrill(op, shape.base, pieces).volume())
+            except KernelError:
+                return None
+
+        if rkind == "shoulder":
+            def heal(radius):
+                """Both bands adjacent to z take ``radius``; the rest of the
+                stack is untouched. Exact by construction."""
+                bands = _bore_bands(group)
+                i = next(i for i in range(len(bands) - 1)
+                         if bands[i][1] == z)
+                pieces = [Cyl(cx, cy, radius, bands[i][0], bands[i + 1][1])]
+                for j, (blo, bhi, br) in enumerate(bands):
+                    if j not in (i, i + 1):
+                        pieces.append(Cyl(cx, cy, br, blo, bhi))
+                others = [c for c in shape.bores if (c.cx, c.cy) != key]
+                return others + pieces
+
+            if absorb is None:
+                cands = []
+                for r in (r_below, r_above):
+                    v = rebuilt_volume(heal(r))
+                    cands.append({"radius": float(r),
+                                  "volume": v if v is not None
+                                  else "refused"})
+                _nope(f"{op}(the shoulder has TWO valid heals — the wide "
+                      "wall extends or the narrow one does — and picking "
+                      "one silently is a wrong answer)", _K6,
+                      predicate="heal_ambiguous",
+                      measured={"candidates": cands},
+                      remedy="pass absorb=<face index of the wall to "
+                             "extend> to name the heal")
+            adjacent = {}
+            for c in group:
+                if (c.z1 == z and c.r == r_below) \
+                        or (c.z0 == z and c.r == r_above) \
+                        or (c.z0 < z < c.z1 and c.r in (r_below, r_above)):
+                    adjacent[wall_face(c)] = c.r
+            if absorb not in adjacent:
+                raise KernelError(
+                    f"{op}: absorb={absorb} is not a wall adjacent to "
+                    f"this shoulder (adjacent walls: {sorted(adjacent)})",
+                    FailureSignature(op=op, diagnostic="BadInput",
+                                     kernel="ref"))
+            return self._redrill(op, shape.base, heal(adjacent[absorb]))
+
+        # floor / ceiling: absorb=wall deepens the bore through to the cap;
+        # the OTHER heal (un-drill) is delete_face on the wall itself
+        r = max(r_below, r_above)
+        piece = next(c for c in group
+                     if (c.z0 == z if rkind == "floor" else c.z1 == z)
+                     and c.r == r)
+        cap = bz0 if rkind == "floor" else bz1
+        through = [c for c in shape.bores if c is not piece] + [
+            Cyl(cx, cy, r,
+                cap if rkind == "floor" else piece.z0,
+                piece.z1 if rkind == "floor" else cap)]
+        if absorb is None:
+            undrill = [c for c in shape.bores if c is not piece]
+            v_th = rebuilt_volume(through)
+            v_un = (rebuilt_volume(undrill) if undrill
+                    else float(shape.base.volume()))
+            _nope(f"{op}(the {rkind} has two heals: drill THROUGH "
+                  "(absorb= the wall) or UN-drill (delete the wall face "
+                  "instead))", _K6, predicate="heal_ambiguous",
+                  measured={"candidates": [
+                      {"action": "absorb the wall, drill through",
+                       "volume": v_th if v_th is not None else "refused"},
+                      {"action": "delete the wall face to un-drill",
+                       "volume": v_un if v_un is not None else "refused"}]},
+                  remedy="pass absorb=<the wall's face index> to drill "
+                         "through, or delete the wall face to un-drill")
+        if absorb != wall_face(piece):
+            raise KernelError(
+                f"{op}: absorb={absorb} is not the wall of this {rkind} "
+                f"(that is face {wall_face(piece)})",
+                FailureSignature(op=op, diagnostic="BadInput", kernel="ref"))
+        self._drilled_boundary_guard(op, shape, key, z, cap, skip={cap})
+        return self._redrill(op, shape.base, through)
+
+    # -- cylinders, lathes, rounded boxes, composites -------------------------
+
+    def _edit_cyl(self, op, shape, idxs, action):
+        from forgekernel.quadric import Cyl
+
+        kind, payload = action
+        if len(idxs) != 1:
+            _nope(f"{op}(several cylinder faces at once)", _K6,
+                  remedy="one face per edit on a cylinder")
+        idx = idxs[0]
+        height = shape.z1 - shape.z0
+        if idx == 0:                                   # the lateral wall
+            if kind == "delete":
+                _nope(f"{op}(the cylinder's only lateral face — nothing "
+                      "bounded remains)", _K6, predicate="heal_unbounded")
+            if kind == "offset":
+                r = shape.r + payload          # outward = away from the axis
+                if r <= 0:
+                    _nope(f"{op}(the wall would cross its own axis)", _K6,
+                          predicate="topology_event",
+                          measured={"radius_after": float(r)},
+                          remedy=f"offset by more than {float(-shape.r):g}")
+                return Cyl(shape.cx, shape.cy, r, shape.z0, shape.z1)
+            dx, dy, dz = payload
+            if dz != 0:
+                _nope(f"{op}(a cylinder wall along its own axis)", _K6,
+                      remedy="move a cap instead — the wall slides in its "
+                             "own carrier")
+            return Cyl(shape.cx + dx, shape.cy + dy, shape.r,
+                       shape.z0, shape.z1)
+        top = idx == 1
+        if kind == "delete":
+            _nope(f"{op}(a cylinder cap: the wall is parallel to the axis "
+                  "and never closes)", _K6, predicate="heal_unbounded")
+        if kind == "move":
+            dz = payload[2]                            # in-plane = identity
+        else:
+            dz = payload if top else -payload          # outward is +z / -z
+        z0 = shape.z0 if top else shape.z0 + dz
+        z1 = shape.z1 + dz if top else shape.z1
+        if z1 <= z0:
+            _nope(f"{op}(the caps would meet — the solid vanishes)", _K6,
+                  predicate="topology_event",
+                  measured={"height_after": float(z1 - z0),
+                            "fraction_to_event": float(height / abs(dz))
+                            if dz != 0 and abs(dz) > height else 1.0})
+        return Cyl(shape.cx, shape.cy, shape.r, z0, z1)
+
+    def _edit_lathe(self, op, shape, idxs, action):
+        from forgekernel.quadric import RevolveSolid
+        from forgekernel.surd import exact_sqrt
+
+        kind, payload = action
+        if len(idxs) != 1:
+            _nope(f"{op}(several lathe faces at once)", _K6,
+                  remedy="one profile face per edit")
+        loop = list(shape.loop)
+        n = len(loop)
+        seg = _lathe_face_segments(loop)[idxs[0]]
+        prv, nxt = (seg - 1) % n, (seg + 1) % n
+        a, b = loop[seg], loop[(seg + 1) % n]
+        d_seg = (b[0] - a[0], b[1] - a[1])
+        area2 = sum(loop[i][0] * loop[(i + 1) % n][1]
+                    - loop[(i + 1) % n][0] * loop[i][1] for i in range(n))
+        if area2 == 0:
+            _nope(f"{op}(degenerate lathe profile)", _K6)
+
+        def carrier(i):
+            p, q = loop[i], loop[(i + 1) % n]
+            return p, (q[0] - p[0], q[1] - p[1])
+
+        try:
+            if kind == "delete":
+                if payload is not None:
+                    raise KernelError(
+                        f"{op}: absorb applies to drilled-solid heals",
+                        FailureSignature(op=op, diagnostic="BadInput",
+                                         kernel="ref"))
+                if n - 1 < 3:
+                    _nope(f"{op}(nothing bounded remains)", _K6,
+                          predicate="heal_unbounded")
+                meet = _meet_lines2(*carrier(prv), *carrier(nxt))
+                if meet is None:
+                    _nope(f"{op}(the neighbour faces are parallel — their "
+                          "extensions never meet, so no bounded heal "
+                          "exists)", _K6, predicate="heal_unbounded",
+                          remedy="delete a face whose neighbours converge, "
+                                 "or remove the generating feature")
+                if meet[0] < 0:
+                    _nope(f"{op}(the healed profile crosses the axis)",
+                          _K6, predicate="topology_event",
+                          measured={"r_at_meet": float(meet[0])})
+                newloop = [meet if i == (seg + 1) % n else loop[i]
+                           for i in range(n) if i != seg]
+                changed = [(prv, loop[prv], meet),
+                           (nxt, meet, loop[(nxt + 1) % n])]
+            else:
+                if kind == "move":
+                    if (payload[0] != 0 or payload[1] != 0) and a[1] != b[1]:
+                        _nope(f"{op}(an off-axis move of a lathe face is "
+                              "elliptic — outside every exact field)", _K6,
+                              remedy="offset the wall, move a cap along z, "
+                                     "or transform the whole body")
+                    dz = payload[2]
+                    if dz == 0:
+                        return shape
+                    shift = (Fraction(0), dz)
+                else:
+                    nn = d_seg[0] * d_seg[0] + d_seg[1] * d_seg[1]
+                    ln = exact_sqrt(nn)
+                    s = 1 if area2 > 0 else -1
+                    # outward normal of a CCW (r,z) loop is (dz, -dr)/|d|
+                    shift = (payload * d_seg[1] * s / ln,
+                             -payload * d_seg[0] * s / ln)
+                na = (a[0] + shift[0], a[1] + shift[1])
+                p1 = _meet_lines2(*carrier(prv), na, d_seg)
+                p2 = _meet_lines2(na, d_seg, *carrier(nxt))
+                if p1 is None or p2 is None:
+                    _nope(f"{op}(a neighbour face is parallel to the "
+                          "moved face — they merge instead of meeting)",
+                          _K6, predicate="topology_event",
+                          measured={"event": "faces_merge"})
+                newloop = list(loop)
+                newloop[seg] = p1
+                newloop[(seg + 1) % n] = p2
+                changed = [(prv, loop[prv], p1), (seg, p1, p2),
+                           (nxt, p2, loop[(nxt + 1) % n])]
+                for i, (r, _z) in enumerate(newloop):
+                    if r == 0 and loop[i][0] != 0:
+                        _nope(f"{op}(the profile touches the axis — "
+                              "tangency is a topology event)", _K6,
+                              predicate="topology_event")
+            for i, pa, pb in changed:
+                qa, qb = loop[i], loop[(i + 1) % n]
+                od = (qb[0] - qa[0], qb[1] - qa[1])
+                nd = (pb[0] - pa[0], pb[1] - pa[1])
+                if _sign(od[0] * nd[0] + od[1] * nd[1]) <= 0:
+                    _nope(f"{op}(profile segment {i} collapses or "
+                          "reverses — a topology event, not a bigger "
+                          "edit)", _K6, predicate="topology_event",
+                          measured={"event": "segment_collapse",
+                                    "segment": i})
+            for r, _z in newloop:
+                if r < 0:
+                    _nope(f"{op}(the profile crosses the revolution "
+                          "axis)", _K6, predicate="topology_event",
+                          measured={"r": float(r)})
+            if not _loop_is_simple(newloop):
+                _nope(f"{op}(the edited profile self-intersects)", _K6,
+                      predicate="topology_event",
+                      measured={"event": "loop_self_intersection"})
+            m = len(newloop)
+            v3 = sum((newloop[(i + 1) % m][1] - newloop[i][1])
+                     * (newloop[i][0] * newloop[i][0]
+                        + newloop[i][0] * newloop[(i + 1) % m][0]
+                        + newloop[(i + 1) % m][0] * newloop[(i + 1) % m][0])
+                     for i in range(m))
+            if _sign(v3) <= 0:
+                _nope(f"{op}(the edit turns the solid inside out)", _K6,
+                      predicate="topology_event")
+            return RevolveSolid(newloop, shape.cx, shape.cy)
+        except TypeError:
+            _nope(f"{op}(the edit needs a second radical — one radical "
+                  "per profile)", _K6, predicate="one_radical_per_profile",
+                  remedy="keep the profile's slants in one quadratic field")
+
+    def _edit_rounded(self, op, shape, idxs, action):
+        from forgekernel.brep import Solid
+        from forgekernel.quadric import RoundedBox
+
+        kind, payload = action
+        meta = _rounded_face_meta(shape)
+        blends = {i for i, m in enumerate(meta) if m[0] != "flat"}
+        if kind == "delete":
+            if payload is not None:
+                raise KernelError(
+                    f"{op}: absorb applies to drilled-solid heals",
+                    FailureSignature(op=op, diagnostic="BadInput",
+                                     kernel="ref"))
+            if set(idxs) == blends:
+                # generator removal: sharpen back to the exact box
+                return Solid.box(shape.a, shape.b, shape.c,
+                                 "box").translated(shape.origin)
+            if any(i in blends for i in idxs):
+                _nope(f"{op}(a subset of the blend family: sharpening one "
+                      "edge of a rounded box needs the selected-edge "
+                      "fillet family)", "K5.2 (general blends)",
+                      remedy="select all blend faces to sharpen, or "
+                             "remodel with fillet on selected edges")
+            _nope(f"{op}(a rounded box's flat face has no bounded heal — "
+                  "its neighbours are tangent blends)", _K6,
+                  predicate="heal_unbounded",
+                  remedy="move the flat with move_face, or delete all 20 "
+                         "blend faces to sharpen first")
+        if any(i in blends for i in idxs):
+            _nope(f"{op}(a blend face: its offset is tangent to NEITHER "
+                  "neighbour, so no exact same-topology answer exists)",
+                  _K6, predicate="blend_face_tangency",
+                  remedy="re-value the fillet radius on the generating "
+                         "feature instead")
+        dims = [shape.a, shape.b, shape.c]
+        org = list(shape.origin)
+        for i in idxs:
+            _kind, _name, axis, side = meta[i]
+            delta = (payload[axis] * (1 if side == "max" else -1)
+                     if kind == "move" else payload)
+            dims[axis] += delta
+            if side == "min":
+                org[axis] -= delta
+        r = shape.r
+        old_dims = (shape.a, shape.b, shape.c)
+        for axis in range(3):
+            if dims[axis] <= 2 * r:
+                _nope(f"{op}(the {'xyz'[axis]}-axis flats are consumed at "
+                      "2r — the cap blends go tangent)", _K6,
+                      predicate="topology_event",
+                      measured={"flat_width_after":
+                                float(dims[axis] - 2 * r),
+                                "max_shrink":
+                                float(old_dims[axis] - 2 * r)},
+                      remedy=f"keep the {'xyz'[axis]} dimension above "
+                             f"{float(2 * r):g} (2r)")
+        try:
+            return RoundedBox(dims[0], dims[1], dims[2], r, tuple(org))
+        except ValueError as exc:
+            raise KernelError(str(exc), FailureSignature(
+                op=op, diagnostic="NotYetImplemented", kernel="ref"))
+
+    def _edit_disjoint(self, op, shape, idxs, action):
+        from forgekernel.quadric import DisjointUnion
+
+        lens = [len(self.entities(m, "face")) for m in shape.members]
+        owner = None
+        local = []
+        for idx in idxs:
+            off = 0
+            for mi, ln in enumerate(lens):
+                if idx < off + ln:
+                    if owner is None:
+                        owner = mi
+                    elif owner != mi:
+                        _nope(f"{op}(faces from different members of a "
+                              "composite)", _K6,
+                              remedy="edit one member per step")
+                    local.append(idx - off)
+                    break
+                off += ln
+        edited = self._direct_edit(op, shape.members[owner], local, action)
+        members = list(shape.members)
+        members[owner] = edited
+        try:
+            return DisjointUnion(members)
+        except (ValueError, TypeError) as exc:
+            _nope(f"{op}(the edited member no longer stays clear of its "
+                  f"neighbours: {exc})", _K6, predicate="topology_event",
+                  remedy="stop the edit before the members touch, or "
+                         "model the fused result explicitly")
 
     def helix(self, radius, pitch, turns, ccw=True):
         # K3.0: the first transcendental curve — carried as certified

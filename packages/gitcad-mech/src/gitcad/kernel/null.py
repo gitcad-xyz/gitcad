@@ -185,6 +185,25 @@ class NullKernel:
         _require_positive(thickness=thickness)
         return NullShape("shell", {"faces": list(remove_faces), "thickness": thickness}, (shape,))
 
+    # Direct edits (#132) tracked symbolically, like every other modifier —
+    # volume is honestly unknown (None) because the null backend has no
+    # geometry to re-solve.
+
+    def move_face(self, shape: Shape, faces: list[int],
+                  translate: tuple[float, float, float]) -> Shape:
+        return NullShape("move_face", {"faces": list(faces),
+                                       "translate": list(translate)}, (shape,))
+
+    def offset_face(self, shape: Shape, faces: list[int],
+                    distance: float) -> Shape:
+        return NullShape("offset_face", {"faces": list(faces),
+                                         "distance": distance}, (shape,))
+
+    def delete_face(self, shape: Shape, faces: list[int],
+                    absorb: int | None = None) -> Shape:
+        return NullShape("delete_face", {"faces": list(faces),
+                                         "absorb": absorb}, (shape,))
+
     def entities(self, shape: Shape, kind: str) -> list[dict[str, Any]]:
         """Deterministic synthetic topology so identity assignment is testable.
         A box gets 6 faces / 12 edges / 8 vertices with stable descriptors that

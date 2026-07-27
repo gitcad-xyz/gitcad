@@ -411,7 +411,8 @@ _REQUIRED_INPUTS = {"boolean": 2, "fillet": 1, "chamfer": 1, "shell": 1,
                     "pattern_linear": 1, "pattern_circular": 1,
                     "pattern_table": 1,
                     "scale": 1, "draft": 1, "split": 1, "rib": 1,
-                    "engrave": 1}
+                    "engrave": 1,
+                    "move_face": 1, "offset_face": 1, "delete_face": 1}
 
 _AXIS_ROTATION = {"z": None, "y": ((1, 0, 0), -90.0), "x": ((0, 1, 0), 90.0)}
 
@@ -518,6 +519,33 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
     if f.op == "shell":
         face_indices = _resolve_entity_indices(p.get("faces", []), f.inputs[0], result, kind="face")
         return kernel.shell(ins[0], face_indices, p["thickness"])
+    if f.op in ("move_face", "offset_face", "delete_face"):
+        # Direct edits (ADR-0022): the feature records WHICH face (stable
+        # lineage id) and BY HOW MUCH — never the rebuilt geometry — so the
+        # edit REPLAYS when upstream parameters change (identity re-binds
+        # the face by fingerprint, the kernel re-parameterizes).
+        face_ids = p.get("faces") or ([p["face"]] if p.get("face") else [])
+        if not face_ids:
+            raise GitcadError(
+                f"{f.op} needs params.faces = [<face entity id>, ...] "
+                f"(feature {f.id})")
+        idxs = _resolve_entity_indices(face_ids, f.inputs[0], result,
+                                       kind="face")
+        if f.op == "move_face":
+            return kernel.move_face(ins[0], idxs, tuple(p["translate"]))
+        if f.op == "offset_face":
+            return kernel.offset_face(ins[0], idxs, p["distance"])
+        heal = p.get("heal", "auto")
+        absorb = None
+        if isinstance(heal, dict) and set(heal) == {"absorb"}:
+            [absorb] = _resolve_entity_indices([heal["absorb"]],
+                                               f.inputs[0], result,
+                                               kind="face")
+        elif heal != "auto":
+            raise GitcadError(
+                f"delete_face heal must be \"auto\" or "
+                f"{{\"absorb\": <face entity id>}} (feature {f.id})")
+        return kernel.delete_face(ins[0], idxs, absorb=absorb)
     if f.op == "pattern_linear":
         # Composition, not a kernel primitive: union of translated copies.
         out = ins[0]
