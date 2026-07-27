@@ -81,6 +81,25 @@ _PALETTE = [(0.35, 0.62, 0.85), (0.85, 0.55, 0.35), (0.45, 0.78, 0.55),
             (0.65, 0.50, 0.85), (0.60, 0.60, 0.60)]
 
 
+def _sibling_parts_by_id(manifest_path: Path) -> dict:
+    """Part id -> (manifest, file) for every part under the assembly's tree —
+    the lookup table behind the ONE resolution rule."""
+    from gitcad.part import PartManifest
+
+    root = manifest_path.parent
+    by_id: dict[str, tuple] = {}
+    for pj in sorted(list(root.rglob("*part.json")) + list(root.rglob("*.part"))
+                     + list(root.rglob("*.pcba"))):
+        if pj == manifest_path:
+            continue
+        try:
+            m = PartManifest.loads(pj.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        by_id.setdefault(m.id, (m, pj))
+    return by_id
+
+
 def resolve_assembly_shapes(manifest_path: Path, kernel: Kernel
                             ) -> dict[str, tuple]:
     """Instance name -> (unplaced Shape, translate, rotate_z_deg, part_name).
@@ -93,18 +112,7 @@ def resolve_assembly_shapes(manifest_path: Path, kernel: Kernel
     from gitcad.part import PartManifest
 
     manifest = PartManifest.loads(manifest_path.read_text(encoding="utf-8"))
-    root = manifest_path.parent
-
-    by_id: dict[str, tuple[PartManifest, Path]] = {}
-    for pj in sorted(list(root.rglob("*part.json")) + list(root.rglob("*.part"))
-                     + list(root.rglob("*.pcba"))):
-        if pj == manifest_path:
-            continue
-        try:
-            m = PartManifest.loads(pj.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        by_id.setdefault(m.id, (m, pj))
+    by_id = _sibling_parts_by_id(manifest_path)
 
     out: dict[str, tuple] = {}
     for name, inst in sorted(manifest.body.get("instances", {}).items()):
@@ -249,8 +257,7 @@ def view_dependencies(path: Path, text: str, kind: str) -> list[Path]:
     out: list[Path] = []
     try:
         if kind == "assembly":
-            for _name, (_s, _t, _r, part) in _assembly_part_files(path).items():
-                out.append(part)
+            out.extend(_assembly_part_files(path))
         elif kind == "pcba":
             from gitcad.pcba import pcba_sources
 
@@ -268,21 +275,30 @@ def view_dependencies(path: Path, text: str, kind: str) -> list[Path]:
     return [p for p in out if p != path]
 
 
-def _assembly_part_files(manifest_path: Path) -> dict:
-    """Instance -> the part file backing it, without building any geometry."""
-    from gitcad.part import Assembly
+def _assembly_part_files(manifest_path: Path) -> list[Path]:
+    """Every file an assembly view is built FROM, without building geometry:
+    each instance's part manifest AND the model/board it points at — the
+    file an agent actually edits. Same resolution rule as the mesh.
 
-    asm = Assembly.loads(manifest_path.read_text(encoding="utf-8"))
-    root = manifest_path.parent
-    out = {}
-    for inst in asm.instances:
-        for pat in (f"{inst.part}.part", f"{inst.part}.pcba",
-                    f"{inst.part}/part.json"):
-            for cand in root.rglob(pat):
-                out[inst.name] = (None, None, None, cand)
-                break
-            if inst.name in out:
-                break
+    (Its first incarnation called the nonexistent ``Assembly.loads``; the
+    AttributeError vanished into view_dependencies' broad catch, so every
+    assembly digest covered only the manifest and the viewer never reloaded
+    on a member edit. A helper the caller ONLY uses inside a try/except
+    needs its own test — now in test_viewer.py.)"""
+    from gitcad.part import PartManifest
+
+    manifest = PartManifest.loads(manifest_path.read_text(encoding="utf-8"))
+    by_id = _sibling_parts_by_id(manifest_path)
+    out: list[Path] = []
+    for _name, inst in sorted(manifest.body.get("instances", {}).items()):
+        entry = by_id.get(inst.get("part"))
+        if entry is None:
+            continue
+        part, pj = entry
+        out.append(pj)
+        src = part.body.get("model") or part.body.get("board")
+        if src:
+            out.append(pj.parent / src)
     return out
 
 
