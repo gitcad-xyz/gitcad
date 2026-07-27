@@ -51,8 +51,14 @@ def test_shelling_a_drilled_plate_builds_the_bore_a_collar(k, t) -> None:
 
     "Shell the base, then re-drill" built no such tube, and was not refusing: a
     30x30x10 plate with a blind Ø4 bore in its top wall, shelled t=2, reported
-    4918.867 against a true 5088.81 +- 6.69 (4M-sample Monte Carlo) — 170 mm3
-    of collar simply absent, in a shape the kernel called good.
+    4918.867 where the erosion-doctrine truth is 5000.23 (adjudicated by a
+    pooled 600M-sample Monte Carlo, 5000.174 ± 0.612 at 3σ) — the absent
+    collar is exactly 40π/3 + 4π² ≈ 81.37 mm³. (An earlier filing said
+    "5088.81 ± 6.69"; that number came from a wrong membership test, not
+    sampling noise — do not calibrate against it.) NOTE: 5000.23 assumes the
+    EROSION doctrine for the reentrant floor rim; the sharp-inset doctrine
+    gives a different exact value, and which doctrine the kernel commits to
+    is an open ADR decision (the blind-bore path refuses at K4.2 today).
 
     With every bore going straight through, the void is the inset base MINUS
     the enlarged cylinders: an intersection of two eroded sets, so its corners
