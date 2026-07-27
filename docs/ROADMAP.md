@@ -95,6 +95,28 @@ machinery.
   trimmed faces into the result shell), and — the honest caveat — the flux
   is exact for the given *polygon*, so a curved SSI trim carries the
   boundary's polyline-discretization error, not a rounding one.
+- **✅ SSI branches → trim loops on BOTH parameter domains** (done).
+  `ssi.ssi_trim_loops`: closed branches become loops directly; OPEN
+  branches are stitched — each chain end extended to a residual-certified
+  domain-border crossing (constrained Newton with the border value pinned
+  exactly in ℚ), then closed with border segments and the patch corners
+  passed on a CCW border walk. The loops read the SAME certified chain in
+  A's (u,v) and B's (s,t), so both describe one 3D curve. A branch that
+  cannot be stitched (endpoint strictly interior to either domain, or an
+  uncertifiable border crossing) refuses by name (`TrimLoopUnstitchable`)
+  — never a guessed loop. Verified on the dome∩half-space closed loop
+  (cap volume converging second-order to the 1.079472 reference) and an
+  open ridge×plane pair whose assembled volume hits the closed form
+  16√3/9 to 4e-15.
+- **✅ Exact partition of a face's parameter domain by trim loops**
+  (done). `trim.split_trim_region`: the domain border and loop edges are
+  split at all incident vertices into an exact planar subdivision and the
+  faces traced with exact orientation predicates (half-plane + cross-sign
+  angular order — no floats). Returns polygon-with-holes regions in the
+  `TrimmedPatch` convention; crossing loops refuse by name; an exact
+  Σ-areas == domain-area audit runs before returning. Handles interior
+  loops (holes), nested loops, and border-touching stitched loops, and is
+  independent of which side each stitched loop happened to enclose.
 
 ### K3.7 — the freeform import gap **[K]**
 - Freeform STEP **topology**: trimmed `ADVANCED_FACE` over B-spline
