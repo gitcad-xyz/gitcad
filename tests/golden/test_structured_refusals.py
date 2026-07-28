@@ -23,7 +23,8 @@ import pytest
 pytest.importorskip("forgekernel")
 
 from forgekernel.brep import Solid
-from forgekernel.quadric import Cone, Cyl, DrilledSolid, RoundedBox
+from forgekernel.quadric import (AxisStack, Cone, Cyl, DrilledSolid,
+                                 RevolveSolid, RoundedBox)
 from gitcad.errors import KernelError
 from gitcad.kernel.ref import RefKernel
 
@@ -249,3 +250,54 @@ def test_shell_with_a_negative_face_index_refuses_instead_of_wrapping(k) -> None
     ordinal accident, not an answer (ADR-0003 forbids ordinal identity)."""
     err = _refusal(lambda: k.shell(Solid.box(10, 10, 10), [-1], 2))
     assert "out of range" in str(err)
+
+
+def _flanged_pipe():
+    """A Ø25-bore, Ø40-OD pipe run with a Ø70 x 12 flange at each end, as a
+    RevolveSolid — what `cylinder -> hole -> boss -> boss` builds today."""
+    F_ = Fraction
+    return RevolveSolid([(F_(25, 2), F_(0)), (F_(35), F_(0)), (F_(35), F_(12)),
+                         (F_(20), F_(12)), (F_(20), F_(138)), (F_(35), F_(138)),
+                         (F_(35), F_(150)), (F_(25, 2), F_(150))])
+
+
+def test_a_bolt_circle_in_a_lathe_says_how_far_off_axis_it_is(k) -> None:
+    """Every flange has one, and it is off-axis by definition.
+
+    The refusal used to be `remedy: null`, which reads as "keep guessing":
+    nothing said the guard was about COAXIALITY rather than, say, the bore
+    diameter or the wall thickness.
+    """
+    err = _refusal(lambda: k.boolean("cut", _flanged_pipe(),
+                                     Cyl(Fraction(55, 2), 0, Fraction(9, 2),
+                                         0, Fraction(12))))
+    assert err.stage == "K2.2"
+    assert err.predicate == "bore_is_coaxial_with_the_lathe"
+    assert err.measured["bore_offset_mm"] == pytest.approx(27.5)
+    assert err.measured["bore_diameter_mm"] == pytest.approx(9.0)
+    assert "27.500" in err.remedy and "coaxial" in err.remedy.lower()
+
+
+def test_re_boring_a_collared_lathe_names_the_ordering_that_works(k) -> None:
+    """`cylinder -> boss -> hole` refuses; `cylinder -> hole -> boss` builds.
+
+    The refusal is correct — an AxisStack has no bore path — but the useful
+    fact is that the caller does not need a different design, only a different
+    order.
+    """
+    stack = AxisStack(0, 0, [Cyl(0, 0, Fraction(20), 0, Fraction(150)),
+                             Cyl(0, 0, Fraction(35), 0, Fraction(12))])
+    err = _refusal(lambda: k.boolean("cut", stack,
+                                     Cyl(0, 0, Fraction(25, 2), 0, Fraction(150))))
+    assert err.stage == "K2.2"
+    assert err.predicate == "base_accepts_a_bore"
+    assert err.measured["bore_diameter_mm"] == pytest.approx(25.0)
+    assert "order" in err.remedy.lower()
+
+
+def test_a_quadric_pair_with_no_specialised_path_still_says_something(k) -> None:
+    """The fallback must stay actionable rather than reverting to null."""
+    err = _refusal(lambda: k.boolean("cut", Cone.make(10, 4, 20), Cone.make(3, 3, 40)))
+    assert err.stage == "K2.2"
+    assert err.predicate == "operand_pair_has_an_exact_path"
+    assert err.remedy and "prism" in err.remedy
