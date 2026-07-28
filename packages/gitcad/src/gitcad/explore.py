@@ -11,6 +11,7 @@ because their files cannot branch.
 from __future__ import annotations
 
 import subprocess
+from gitcad import proc as _proc
 import tempfile
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from gitcad.review import review_range
 
 
 def _git(repo: str, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", repo, *args],
+    return _proc.run(["git", "-C", repo, *args],
                           capture_output=True, text=True)
 
 

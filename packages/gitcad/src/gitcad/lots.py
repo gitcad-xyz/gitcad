@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from gitcad import proc as _proc
 from pathlib import Path
 
 from gitcad.canonical import canonical_json
@@ -34,7 +35,7 @@ def _sha(path: Path) -> str:
 
 
 def _head_commit(repo: Path) -> str:
-    proc = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+    proc = _proc.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
                           capture_output=True, text=True)
     if proc.returncode != 0:
         raise GitcadError("lot records need a git repo — provenance IS the point")
@@ -42,7 +43,7 @@ def _head_commit(repo: Path) -> str:
 
 
 def _dirty(repo: Path) -> bool:
-    proc = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
+    proc = _proc.run(["git", "-C", str(repo), "status", "--porcelain"],
                           capture_output=True, text=True)
     return bool(proc.stdout.strip())
 

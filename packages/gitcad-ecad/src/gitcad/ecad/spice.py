@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from gitcad import proc as _proc
 import tempfile
 from pathlib import Path
 
@@ -137,7 +138,7 @@ def sim_check(sch: Schematic, checks: list[dict]) -> ValidationReport:
     with tempfile.TemporaryDirectory() as td:
         cir = Path(td) / "check.cir"
         cir.write_text(text, encoding="utf-8")
-        proc = subprocess.run([exe, "-b", str(cir)], capture_output=True,
+        proc = _proc.run([exe, "-b", str(cir)], capture_output=True,
                               text=True, timeout=60)
     got: dict[str, float] = {}
     for m in re.finditer(r"v\(([\w+-]+)\)\s*=\s*([-+0-9.eE]+)", proc.stdout):

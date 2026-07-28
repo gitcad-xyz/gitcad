@@ -16,13 +16,14 @@ make it a ~300-line module. Emit markdown for a PR comment via
 from __future__ import annotations
 
 import subprocess
+from gitcad import proc as _proc
 from pathlib import Path
 
 from gitcad.release import _kind, semantic_diff
 
 
 def _git_show(repo: Path, ref: str, relpath: str) -> str | None:
-    proc = subprocess.run(["git", "-C", str(repo), "show", f"{ref}:{relpath}"],
+    proc = _proc.run(["git", "-C", str(repo), "show", f"{ref}:{relpath}"],
                           capture_output=True, text=True)
     return proc.stdout if proc.returncode == 0 else None
 
@@ -35,7 +36,7 @@ DESIGN_EXTENSIONS = (".json", ".gitcad", ".model", ".sch", ".board", ".part",
 
 
 def _changed_files(repo: Path, base: str, head: str) -> list[str]:
-    proc = subprocess.run(
+    proc = _proc.run(
         ["git", "-C", str(repo), "diff", "--name-only", f"{base}...{head}"],
         capture_output=True, text=True, check=True)
     return [ln.strip().replace("\\", "/") for ln in proc.stdout.splitlines()

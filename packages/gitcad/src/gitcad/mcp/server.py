@@ -1682,7 +1682,7 @@ def github_report(repo: str, title: str, body: str, kind: str = "issue",
                         "re-invoke with confirm=true."}
     import shutil
     import subprocess
-
+    from gitcad import proc as _proc
     if shutil.which("gh") is None:
         return {"ok": False, "error": {"type": "NoGitHubCLI", "message":
                 "the GitHub CLI 'gh' is not installed or not on PATH"}}
@@ -1692,7 +1692,7 @@ def github_report(repo: str, title: str, body: str, kind: str = "issue",
             cmd += ["-l", lab]
     else:
         cmd = ["gh", "pr", "create", "-R", repo, "-t", title, "-b", body]
-    p = subprocess.run(cmd, capture_output=True, text=True)
+    p = _proc.run(cmd, capture_output=True, text=True)
     if p.returncode != 0:
         return {"ok": False, "error": {"type": "GitHubError",
                 "message": (p.stderr or p.stdout).strip()[:500]}}
@@ -1734,9 +1734,10 @@ def update_apply(confirm: bool = False) -> dict[str, Any]:
         return {"ok": True, "preview": True, "from": chk["current"], "to": chk["latest"],
                 "note": "Ask the user to approve, then re-invoke with confirm=true."}
     import subprocess
+    from gitcad import proc as _proc
     import sys
 
-    p = subprocess.run([sys.executable, "-m", "pip", "install", "-U", "gitcad"],
+    p = _proc.run([sys.executable, "-m", "pip", "install", "-U", "gitcad"],
                        capture_output=True, text=True)
     if p.returncode != 0:
         return {"ok": False, "error": {"type": "PipError",

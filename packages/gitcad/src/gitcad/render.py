@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from gitcad import proc as _proc
 import time
 from pathlib import Path
 
@@ -81,7 +82,7 @@ def _png_from_svg(svg: str, out: Path, browser: str, width: int, height: int) ->
 
 
 def _shoot(browser: str, url: str, out: Path, width: int, height: int) -> None:
-    proc = subprocess.run(
+    proc = _proc.run(
         [browser, "--headless", "--disable-gpu",
          f"--screenshot={out}", f"--window-size={width},{height}",
          "--virtual-time-budget=10000", url],

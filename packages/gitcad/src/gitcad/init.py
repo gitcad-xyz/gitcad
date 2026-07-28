@@ -19,6 +19,7 @@ accepted everywhere, forever.
 from __future__ import annotations
 
 import subprocess
+from gitcad import proc as _proc
 from pathlib import Path
 
 from gitcad.canonical import canonical_json
@@ -124,12 +125,12 @@ def init_project(path: str, *, name: str | None = None) -> list[str]:
         written.append(rel)
 
     if not (root / ".git").exists():
-        subprocess.run(["git", "-C", str(root), "init", "-q"], check=True)
+        _proc.run(["git", "-C", str(root), "init", "-q"], check=True)
     # Wire the merge driver into this clone's config (gitattributes names it;
     # config supplies the command — both halves are needed).
-    subprocess.run(["git", "-C", str(root), "config",
+    _proc.run(["git", "-C", str(root), "config",
                     "merge.gitcad.name", "gitcad semantic merge"], check=True)
-    subprocess.run(["git", "-C", str(root), "config",
+    _proc.run(["git", "-C", str(root), "config",
                     "merge.gitcad.driver", "gitcad-merge %O %A %B"], check=True)
     return written
 

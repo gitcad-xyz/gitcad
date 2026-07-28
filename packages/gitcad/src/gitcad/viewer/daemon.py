@@ -76,13 +76,33 @@ def probe(state: dict | None, timeout: float = 3.0) -> dict | None:
     return h
 
 
+def _daemon_python() -> str:
+    """The interpreter to run the viewer under.
+
+    ``sys.executable`` on Windows is ``python.exe``, a CONSOLE-subsystem
+    binary: Windows gives it a console whether or not anyone wants one.
+    ``pythonw.exe`` is the same interpreter built for the windows subsystem
+    and never gets one. Belt and braces with CREATE_NO_WINDOW below — either
+    alone leaves a case uncovered (pythonw is missing in some embeddable
+    installs; CREATE_NO_WINDOW is ignored if the parent hands over a console
+    some other way).
+
+    Falls back to ``sys.executable`` when pythonw is absent, so a stripped
+    install still starts a viewer rather than failing outright.
+    """
+    if os.name != "nt":
+        return sys.executable
+    cand = Path(sys.executable).with_name("pythonw.exe")
+    return str(cand) if cand.exists() else sys.executable
+
+
 def _spawn(root: Path, port: int, review_base: str | None) -> subprocess.Popen:
     """Start the daemon truly detached. stdio is NOT inherited: stdin/stdout go
     to devnull and stderr to ``.gitcad/viewer.log`` — a stdio-MCP parent's
     JSON-RPC pipes stay untouched, and the parent's exit is invisible here."""
     log = _gitcad_dir(root) / "viewer.log"
     log.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [sys.executable, "-m", "gitcad.viewer.daemon", str(root),
+    cmd = [_daemon_python(), "-m", "gitcad.viewer.daemon", str(root),
            "--port", str(port)]
     if review_base:
         cmd += ["--review", review_base]
@@ -91,8 +111,15 @@ def _spawn(root: Path, port: int, review_base: str | None) -> subprocess.Popen:
     with open(log, "ab") as logf:
         kwargs["stderr"] = logf
         if os.name == "nt":
+            # CREATE_NO_WINDOW as well as detaching: DETACHED_PROCESS only
+            # means "don't inherit the parent's console", so the child still
+            # ALLOCATES one of its own and a black window sits on the desktop
+            # for as long as the viewer lives. Reported by the repo owner
+            # twice. The viewer must survive the agent session (viewer
+            # contract) AND be invisible; these are independent flags.
             flags = (subprocess.DETACHED_PROCESS
-                     | subprocess.CREATE_NEW_PROCESS_GROUP)
+                     | subprocess.CREATE_NEW_PROCESS_GROUP
+                     | 0x08000000)                        # CREATE_NO_WINDOW
             try:
                 # breakaway too, when allowed: a host that wraps the MCP server
                 # in a kill-on-close job object must not reap the viewer

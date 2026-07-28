@@ -16,13 +16,21 @@ take WHAT op, carries the stage that brings it, and offers a remedy — and
 never quotes a Python exception at the caller (CLAUDE.md: refuse *by name*).
 
 Both repros go through the same door: tilting a quadric routes it into the
-canonical B-rep (a ``Body``, ADR-0021), which the planar boolean and the exact
-STEP writer cannot take yet.
+canonical B-rep (a ``Body``, ADR-0021).
+
+Since then the two halves have diverged, and the file records both outcomes
+rather than pretending they are still one story. The STEP half was never a
+missing capability — only a missing NUMERAL: ``Fraction(x)`` cannot hold a
+ℚ[√3] coordinate, and that TypeError was being reported as an unsupported
+representation. A tilted cylinder now exports as a real CYLINDRICAL_SURFACE.
+The BOOLEAN half is a genuine gap (a general-axis quadric boolean) and still
+refuses by name.
 """
 
 from __future__ import annotations
 
 import math
+import re
 
 import pytest
 
@@ -45,9 +53,10 @@ def k() -> RefKernel:
 
 @pytest.fixture()
 def tilted(k):
-    """A cylinder tilted 30° about x: exact (ℚ[√3] rotation), but the result
-    lives in the canonical B-rep — the representation neither the planar
-    boolean nor the exact STEP writer reaches yet."""
+    """A cylinder tilted 30° about x: exact (ℚ[√3] rotation), living in the
+    canonical B-rep. The planar boolean still cannot take it; the exact STEP
+    writer now can, since the wall there was a missing numeral rather than a
+    missing capability."""
     t = k.transform(k.cylinder(5, 40), rotate_axis=(1, 0, 0), rotate_deg=30)
     assert type(t).__name__ == "Body", (
         "precondition: a tilted quadric converts to the canonical B-rep; if "
@@ -181,16 +190,54 @@ def test_feature_add_answers_for_a_side_plane_drill(tmp_path) -> None:
     assert out["feature_id"]
 
 
-def test_export_step_on_a_transformed_body_names_the_mismatch(
+def test_export_step_on_a_transformed_body_now_writes_the_quadric(
         k, tilted, tmp_path) -> None:
+    """A tilted cylinder EXPORTS, and exports as a real quadric.
+
+    This asserted a refusal, and the refusal was honest at the time: the STEP
+    writer's coordinate helper was ``Fraction(x)``, which raises on the ℚ[√3]
+    coordinates a 30° tilt produces, and ``_via_body`` reported that as
+    "export_step on Body yet — K3.7". The capability was there; only the
+    NUMERAL was missing. ``stepio.export_rational`` now supplies it, by exact
+    comparison rather than a float cast.
+
+    Checked against the exact geometry rather than against the writer, since
+    the writer is what changed: forge's own importer cannot read an analytic
+    CYLINDRICAL_SURFACE back on the freeform path (a separate, honestly
+    refused gap), so a round-trip would prove nothing here.
+    """
     out = tmp_path / "tilted.step"
+    k.export_step(tilted, str(out))
+    text = out.read_text()
+
+    assert text.startswith("ISO-10303-21;")
+    assert "MANIFOLD_SOLID_BREP" in text
+    # a cylinder must survive as a cylinder, not be faceted into a prism
+    radii = re.findall(r"CYLINDRICAL_SURFACE\('',#\d+,([-0-9.E+]+)\)", text)
+    assert radii and all(float(r) == pytest.approx(5.0, abs=1e-12)
+                         for r in radii), radii
+
+    # the axis of a 30° tilt about x is exactly (0, -1/2, √3/2)
+    dirs = {tuple(float(c) for c in d)
+            for d in re.findall(
+                r"DIRECTION\('',\(([-0-9.E+]+),([-0-9.E+]+),([-0-9.E+]+)\)\)",
+                text)}
+    want = (0.0, -0.5, math.sqrt(3) / 2)
+    best = min(dirs, key=lambda d: sum((a - b) ** 2 for a, b in zip(d, want)))
+    assert math.dist(best, want) < 1e-12, f"axis {best} != exact {want}"
+
+    # and the far cap sits at exactly 40·cos30°
+    zs = {round(float(z), 9) for _, _, z in re.findall(
+        r"CARTESIAN_POINT\('',\(([-0-9.E+]+),([-0-9.E+]+),([-0-9.E+]+)\)\)",
+        text)}
+    assert any(abs(z - 40 * math.sqrt(3) / 2) < 1e-8 for z in zs), sorted(zs)
+
+
+def test_a_boolean_on_a_transformed_body_still_refuses_honestly(k, tilted):
+    """The export half is fixed; the BOOLEAN half is not, and must keep
+    saying so. This is the 43-cell family the capability grid still reports —
+    a general-axis quadric boolean, which is real ADR-0021 work rather than
+    the numeral bug the export turned out to be."""
     with pytest.raises(KernelError) as ei:
-        k.export_step(tilted, str(out))
-    err = ei.value
-    msg = str(err)
-    for leak in RAW_LEAKS:
-        assert leak not in msg, f"raw Python diagnostic leaked: {leak!r} in {msg!r}"
-    assert "export_step" in msg and "Body" in msg, msg
-    assert err.stage and "K3.7" in err.stage, err.stage
-    assert err.remedy, "a refusal an agent can act on carries a remedy"
-    assert not out.exists(), "refusal must not leave a partial file behind"
+        k.boolean("cut", k.box(20, 20, 20), tilted)
+    assert "Body" in str(ei.value)

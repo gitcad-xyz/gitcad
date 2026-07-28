@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+from gitcad import proc as _proc
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -52,7 +53,7 @@ def _git(args: list[str], cwd: str | None) -> str:
     """Run git; any failure at all (no git, no repo, untracked file) is an
     empty string — blank fields, never a lie."""
     try:
-        r = subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+        r = _proc.run(["git", *args], cwd=cwd, capture_output=True,
                            text=True, timeout=10)
         return r.stdout.strip() if r.returncode == 0 else ""
     except (OSError, subprocess.SubprocessError):

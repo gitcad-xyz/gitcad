@@ -48,18 +48,19 @@ class Workspace:
         """
         import hashlib
         import subprocess
+        from gitcad import proc as _proc
         import tempfile
 
         key = hashlib.blake2b(f"{url}#{ref}".encode(), digest_size=8).hexdigest()
         dest = Path(cache_dir) if cache_dir else Path(tempfile.gettempdir()) / "gitcad-registry" / key
         if (dest / ".git").exists():
-            subprocess.run(["git", "-C", str(dest), "fetch", "--depth", "1", "origin", ref],
+            _proc.run(["git", "-C", str(dest), "fetch", "--depth", "1", "origin", ref],
                            check=True, capture_output=True)
-            subprocess.run(["git", "-C", str(dest), "checkout", "-q", "FETCH_HEAD"],
+            _proc.run(["git", "-C", str(dest), "checkout", "-q", "FETCH_HEAD"],
                            check=True, capture_output=True)
         else:
             dest.parent.mkdir(parents=True, exist_ok=True)
-            subprocess.run(["git", "clone", "--depth", "1", "--branch", ref, url, str(dest)],
+            _proc.run(["git", "clone", "--depth", "1", "--branch", ref, url, str(dest)],
                            check=True, capture_output=True)
         return cls.scan(str(dest))
 
