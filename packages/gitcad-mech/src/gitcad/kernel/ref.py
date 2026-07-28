@@ -319,6 +319,105 @@ def _quadric_pair_reason(op: str, a, b) -> dict:
 _DEFLECTION_FLOOR = 1e-9
 
 
+def _exact_pairs(values) -> tuple:
+    """Exact rationals as (numerator, denominator) ints — the only form a
+    fingerprint may be built from. A float here would make identity depend on
+    a rounding, which is precisely what ADR-0019 forbids and what ADR-0003's
+    ``_round_geo`` exists to paper over for representations that have no
+    exact form. A trimmed shell HAS one, so it does not need the paper."""
+    from fractions import Fraction as Q
+
+    out = []
+    for v in values:
+        q = v if isinstance(v, Q) else Q(v)
+        out.append((q.numerator, q.denominator))
+    return tuple(out)
+
+
+def _trimmed_face_descriptor(face) -> dict:
+    """An identifying descriptor for one face of a certified TrimmedShell.
+
+    #87. Every face used to report ``{"surface": "trimmed-bspline", "sense":
+    1, "loops": 1}`` — no geometry at all — so N faces of a shell minted ONE
+    id and no selector could name a single one of them. ADR-0003 requires
+    ids to be "collision-resistant" and derived from "construction lineage +
+    a rounded geometric fingerprint"; a descriptor with no fingerprint never
+    met that bar.
+
+    What is hashed, and why each part is safe:
+
+    * the exact control net (``cp``/``w``) and its ``nu``/``nv`` extent —
+      Fractions, hashed as (numerator, denominator) pairs. Exact, so stable
+      across processes and machines with no tolerance anywhere.
+    * ``sense``.
+    * every trim loop, as the exact (u, v) each vertex binds for THIS face
+      via the public ``TrimVertex.uv(face)``. This is what separates two
+      fragments of the SAME surface — exactly what a boolean produces — which
+      a control-net hash alone would collide.
+
+    Two canonicalisations keep the id stable under harmless re-enumeration:
+    a loop is rotated to its lexicographically smallest start (a loop is a
+    CYCLE; where the walk begins is not geometry), and the per-loop digests
+    are sorted (which hole is listed first is not geometry either).
+
+    Deliberately NOT hashed: the certified area or volume. Those are
+    *brackets*, and rounding a bracket endpoint to make it hashable would
+    reintroduce a float deciding identity — the exact failure ADR-0019
+    forbids. The control net plus the trim loops already determine the face.
+
+    Falls back to the old geometry-free descriptor if the surface is not a
+    control-net type; that case then refuses honestly at
+    ``_resolve_entity_indices`` rather than binding to the wrong face.
+    """
+    import hashlib
+
+    base = {"surface": "trimmed-bspline", "sense": face.sense,
+            "loops": len(face.loops)}
+    surf = face.surface
+    if not all(hasattr(surf, a) for a in ("cp", "w", "nu", "nv")):
+        return base
+
+    h = hashlib.blake2b(digest_size=16)
+
+    def feed(label: str, items) -> None:
+        h.update(label.encode())
+        h.update(repr(items).encode())
+
+    feed("extent", (surf.nu, surf.nv))
+    feed("sense", face.sense)
+    for row in surf.cp:
+        for pt in row:
+            feed("cp", _exact_pairs(pt))
+    for row in surf.w:
+        feed("w", _exact_pairs(row))
+
+    loop_digests = []
+    for loop in face.loops:
+        uvs = []
+        for tv in loop:
+            try:
+                uvs.append(_exact_pairs(tv.uv(face)))
+            except Exception:                # noqa: BLE001
+                uvs = None                   # unbound vertex: no honest hash
+                break
+        if uvs is None:
+            return base
+        # a loop is a CYCLE — rotate to its smallest start so a rebuild that
+        # walks it from a different vertex still lands on the same id
+        if uvs:
+            k = min(range(len(uvs)), key=lambda i: uvs[i:] + uvs[:i])
+            uvs = uvs[k:] + uvs[:k]
+        loop_digests.append(hashlib.blake2b(
+            repr(uvs).encode(), digest_size=16).hexdigest())
+    for d in sorted(loop_digests):            # hole ORDER is not geometry
+        feed("loop", d)
+
+    base["trim_vertices"] = sum(len(lp) for lp in face.loops)
+    base["net"] = [surf.nu, surf.nv]
+    base["fingerprint"] = h.hexdigest()
+    return base
+
+
 def _open_edge_count(mesh: dict) -> int:
     """Edges used by exactly one triangle — the mesh's own witness that it
     does not bound a solid. Counted on the winding, so it is a topological
@@ -2007,8 +2106,7 @@ class RefKernel:
             # trim edges live in parameter space, and inventing 3D edge
             # descriptors for them would be a wrong number wearing
             # coordinates)
-            return [{"surface": "trimmed-bspline", "sense": f.sense,
-                     "loops": len(f.loops)} for f in shape.faces]
+            return [_trimmed_face_descriptor(f) for f in shape.faces]
         if isinstance(shape, TubeSolid):
             # swept lateral surface + two round end caps
             return [{"surface": "swept-tube"}, {"surface": "plane"},

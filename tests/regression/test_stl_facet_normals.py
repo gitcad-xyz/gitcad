@@ -14,6 +14,13 @@ import math
 
 import pytest
 
+# The base suite runs with NO KERNEL INSTALLED (CLAUDE.md) — every test here
+# builds real geometry through RefKernel, so without this the null-kernel run
+# fails with ModuleNotFoundError instead of skipping. Caught by the gate on
+# merge; the constitution's central claim is that this suite stays green
+# kernel-free.
+pytest.importorskip("forgekernel")
+
 
 def _facets(path):
     """(normal, (v0, v1, v2)) per facet from an ASCII STL."""

@@ -22,6 +22,8 @@ STEP writer cannot take yet.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 # The base suite runs with NO KERNEL INSTALLED (CLAUDE.md). Everything below
@@ -89,24 +91,50 @@ def side_plane_prism(k):
     return p
 
 
-def test_exact_scalar_arithmetic_refuses_instead_of_crashing(
-        k, side_plane_prism) -> None:
-    """#49: drilling that body used to raise a bare
-    ``TypeError: unsupported operand type(s) for ** or pow(): 'SurdVal' and
-    'int'`` from inside forge, which is neither a KernelError nor anything
-    ``feature_add`` catches — the MCP tool died with a traceback and the
-    caller got no refusal, no fingerprint and no model back."""
+def test_the_side_plane_drill_now_succeeds_exactly(k, side_plane_prism) -> None:
+    """#49's own case is no longer a refusal — it is an exact answer.
+
+    This test asserted a structured refusal, which was right when the only
+    fix available was to convert forge's bare ``TypeError: unsupported
+    operand type(s) for ** or pow(): 'SurdVal' and 'int'`` into one. The
+    TypeError was then fixed AT SOURCE instead: ``SurdVal`` gained an exact
+    ``__pow__`` (square-and-multiply, exact reciprocal for negative
+    exponents), so the drill computes rather than declines. Refusing here now
+    would be pinning the worse of two behaviours.
+
+    The guard this file is really about is still exercised — see the test
+    below, which drives it directly rather than through a case that has since
+    been made to work."""
     tool = k.transform(k.cylinder(5, 61), translate=(0, 0, -30))
-    with pytest.raises(KernelError) as ei:
-        k.boolean("cut", side_plane_prism, tool)
-    err = ei.value
-    msg = str(err)
-    for leak in RAW_LEAKS:
-        assert leak not in msg, f"raw Python diagnostic leaked: {leak!r} in {msg!r}"
-    assert "boolean" in msg and "SurdVal" in msg, msg
-    assert err.stage and "K3.1" in err.stage, err.stage
-    assert err.predicate == "coordinates_are_rational", err.predicate
-    assert err.remedy, "a refusal an agent can act on carries a remedy"
+    out = k.boolean("cut", side_plane_prism, tool)
+    vol = k.mass_props(out)["volume"]
+    # closed form: the 60x60 profile extruded 40 is 144000; the Ø10 tool runs
+    # clean through 60 mm of it, so it removes pi*5^2*60 = 1500pi. Derived
+    # from the fixture, not read off the implementation.
+    assert vol == pytest.approx(144000 - 1500 * math.pi, rel=1e-12)
+
+
+def test_an_exact_scalar_typeerror_still_becomes_a_refusal(k) -> None:
+    """The mechanism, driven directly.
+
+    Fixing #49 at source removed the one caller that reached this guard, but
+    the guard is the general answer: ANY predicate written for ℚ that meets a
+    ℚ[√d]/ℚ[π] coordinate raises this shape of TypeError, and it must cross
+    the seam as a refusal rather than a traceback. Exercised on the seam's own
+    classifier so it cannot silently rot once its original case works."""
+    from gitcad.kernel.ref import _exact_scalar_mismatch
+
+    for msg, expected in [
+        ("unsupported operand type(s) for ** or pow(): 'SurdVal' and 'int'",
+         "SurdVal"),
+        ("'<' not supported between instances of 'PiVal' and 'Fraction'",
+         "PiVal"),
+        ("unsupported operand type(s) for +: 'BiSurd' and 'int'", "BiSurd"),
+        # an ordinary bad argument must NOT be claimed by the guard
+        ("can only concatenate str (not \"int\") to str", None),
+        ("unsupported operand type(s) for +: 'dict' and 'int'", None),
+    ]:
+        assert _exact_scalar_mismatch(TypeError(msg)) == expected, msg
 
 
 @pytest.mark.parametrize("call, expected", [
@@ -125,8 +153,13 @@ def test_an_ordinary_bad_argument_keeps_its_own_meaning(k, call, expected) -> No
         f"bad argument was converted into a capability refusal: {ei.value}")
 
 
-def test_feature_add_returns_a_refusal_for_a_side_plane_drill(tmp_path) -> None:
-    """End to end: the MCP tool answers, rather than raising (#49, #12)."""
+def test_feature_add_answers_for_a_side_plane_drill(tmp_path) -> None:
+    """End to end: the MCP tool ANSWERS rather than raising (#49, #12).
+
+    Originally asserted a refusal payload. Since the underlying TypeError was
+    fixed at source (exact ``SurdVal.__pow__``), the honest end-to-end claim is
+    the stronger one: the feature is added and the model comes back. What must
+    never happen — a bare traceback out of the tool — is what is pinned."""
     from gitcad.mcp.server import REGISTRY
 
     prof = {"start": [-30, -30],
@@ -142,10 +175,10 @@ def test_feature_add_returns_a_refusal_for_a_side_plane_drill(tmp_path) -> None:
     out = REGISTRY["feature_add"](
         model=model, op="hole", inputs=[fid],
         params={"x": 0, "y": 0, "top_z": 20, "depth": 41, "diameter": 10.0})
-    assert out["ok"] is False and out["buildable"] is False
-    assert out["refusal"]["predicate"] == "coordinates_are_rational"
-    assert out["model"] == model, "a refused feature must not be added"
-    assert out["fingerprint"].startswith("fp_")
+    assert "traceback" not in repr(out).lower()
+    assert out.get("ok", True) is not False, out
+    assert out["model"] != model, "the drill succeeds, so the model advances"
+    assert out["feature_id"]
 
 
 def test_export_step_on_a_transformed_body_names_the_mismatch(
