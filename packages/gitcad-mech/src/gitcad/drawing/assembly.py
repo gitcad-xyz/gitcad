@@ -10,8 +10,8 @@ hidden-style) so every balloon still points at something real.
 from __future__ import annotations
 
 from gitcad.drawing import hlr
-from gitcad.drawing.sheet import (GAP, MARGIN, SHEETS, STANDARD_SCALES,
-                                  Callout, Drawing, PlacedView, _transform)
+from gitcad.drawing.sheet import (GAP, STANDARD_SCALES, Callout, Drawing,
+                                  PlacedView, _transform)
 from gitcad.part.assembly import Assembly
 from gitcad.part.bought import assembly_bom
 
@@ -20,7 +20,8 @@ Point = tuple[float, float]
 
 def assembly_drawing(asm: Assembly, kernel=None, *,
                      models: dict | None = None, exploded=None,
-                     title: str | None = None, sheet: str = "A3") -> Drawing:
+                     title: str | None = None, sheet: str = "A3",
+                     settings: dict | None = None) -> Drawing:
     """``models`` maps instance name -> built Document for instances with
     geometry (part.json's body.model is a file reference — the caller owns
     resolution, same split as the viewer). Instances without a document fall
@@ -61,16 +62,27 @@ def assembly_drawing(asm: Assembly, kernel=None, *,
     b = hlr.bounds(all_polys)
     size = (b[2] - b[0], b[3] - b[1])
 
-    w, h = SHEETS[sheet]
+    from gitcad.drawing.formats import FORMATS, TITLE_BLOCK_H
+
+    fmt = FORMATS[sheet]
+    w, h = fmt.width, fmt.height
+    fx0, fy0, fx1, fy1 = fmt.frame
     table_w = 96.0
-    avail_w = w - 2 * MARGIN - table_w - GAP
-    avail_h = h - 2 * MARGIN - 30
+    # view above the title block, leaving the right column for the BOM table
+    ox, oy = fx0 + 12.0, fy0 + TITLE_BLOCK_H + 14.0
+    avail_w = fx1 - ox - table_w - GAP
+    avail_h = fy1 - oy - 8.0
     scale = next((s for s in STANDARD_SCALES
                   if size[0] * s <= avail_w and size[1] * s <= avail_h), 0.01)
-    ox, oy = MARGIN + 10, MARGIN + 18
 
     d = Drawing(sheet=sheet, width=w, height=h, scale=scale,
                 title=title or f"{asm.name} - assembly")
+    from gitcad.drawing.formats import scale_text
+    from gitcad.drawing.titleblock import resolve_title_block
+
+    d.block = resolve_title_block(title=d.title, scale=scale_text(scale),
+                                  sheet_name=sheet, settings=settings,
+                                  part_name=asm.name)
     d.views.append(PlacedView(
         name="top",
         visible=_transform(proj["visible"], scale, ox, oy, (b[0], b[1])),
@@ -89,8 +101,8 @@ def assembly_drawing(asm: Assembly, kernel=None, *,
                                       f"({item_no})"))
 
     # BOM table, top-right: ITEM | QTY | NAME/MPN — same lines, same order.
-    tx = w - MARGIN - table_w
-    ty = h - MARGIN - 6
+    tx = fx1 - table_w
+    ty = fy1 - 8
     d.notes.append((tx, ty, "ITEM  QTY  PART"))
     for item_no, line in enumerate(lines, start=1):
         if line["type"] == "bought":

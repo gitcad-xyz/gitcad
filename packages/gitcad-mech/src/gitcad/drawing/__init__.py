@@ -9,6 +9,9 @@ standard sheet, with overall width/height dimensions per orthographic view.
 Associative feature-level dimensions (anchored to stable entity ids) follow.
 """
 
+from gitcad.drawing.formats import FORMATS, STANDARD_SCALES
 from gitcad.drawing.sheet import make_drawing
+from gitcad.drawing.titleblock import TitleBlock, resolve_title_block
 
-__all__ = ["make_drawing"]
+__all__ = ["FORMATS", "STANDARD_SCALES", "TitleBlock", "make_drawing",
+           "resolve_title_block"]

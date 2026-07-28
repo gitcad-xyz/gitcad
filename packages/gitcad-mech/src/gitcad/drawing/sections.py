@@ -14,8 +14,8 @@ from __future__ import annotations
 import math
 
 from gitcad.drawing import hlr
-from gitcad.drawing.sheet import (MARGIN, SHEETS, STANDARD_SCALES, Drawing,
-                                  PlacedView, _fmt, _transform)
+from gitcad.drawing.sheet import (STANDARD_SCALES, Drawing, PlacedView, _fmt,
+                                  _transform)
 from gitcad.errors import GitcadError
 
 Point = tuple[float, float]
@@ -81,11 +81,13 @@ def _hatch_loops(loops: list[list[Point]], spacing: float) -> list[list[Point]]:
 
 def make_section_drawing(shape, kernel=None, *, axis: str = "x",
                          offset: float = 0.0, title: str = "part",
-                         sheet: str = "A4") -> Drawing:
+                         sheet: str = "A4",
+                         settings: dict | None = None) -> Drawing:
     """One-view section drawing: SECTION A-A at ``axis = offset``.
 
     Material on the viewer side of the plane is removed; the cut surface is
-    hatched. The view direction looks along -axis (the drafting arrows)."""
+    hatched. The view direction looks along -axis (the drafting arrows).
+    ``settings`` feeds the ISO 7200 title block (see :func:`.make_drawing`)."""
     if kernel is None:
         from gitcad.kernel import get_kernel
 
@@ -125,14 +127,25 @@ def make_section_drawing(shape, kernel=None, *, axis: str = "x",
     b = hlr.bounds(all_polys)
     size = (b[2] - b[0], b[3] - b[1])
 
-    w, h = SHEETS[sheet]
-    avail_w, avail_h = w - 2 * MARGIN - 20, h - 2 * MARGIN - 30
+    from gitcad.drawing.formats import FORMATS, TITLE_BLOCK_H
+
+    fmt = FORMATS[sheet]
+    w, h = fmt.width, fmt.height
+    fx0, fy0, fx1, fy1 = fmt.frame
+    # the view starts above the ISO 7200 title block, inside the frame
+    ox, oy = fx0 + 12.0, fy0 + TITLE_BLOCK_H + 14.0
+    avail_w, avail_h = fx1 - ox - 4.0, fy1 - oy - 8.0
     scale = next((s for s in STANDARD_SCALES
                   if size[0] * s <= avail_w and size[1] * s <= avail_h), 0.01)
-    ox, oy = MARGIN + 10, MARGIN + 18
 
     d = Drawing(sheet=sheet, width=w, height=h, scale=scale,
                 title=f"{title} - SECTION A-A ({axis.upper()}={_fmt(offset)})")
+    from gitcad.drawing.formats import scale_text
+    from gitcad.drawing.titleblock import resolve_title_block
+
+    d.block = resolve_title_block(title=d.title, scale=scale_text(scale),
+                                  sheet_name=sheet, settings=settings,
+                                  part_name=title)
     d.views.append(PlacedView(
         name="section",
         visible=_transform(proj["visible"], scale, ox, oy, (b[0], b[1])),

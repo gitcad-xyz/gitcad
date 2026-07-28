@@ -313,12 +313,20 @@ def model_export(model: str, path: str, fmt: str = "step") -> dict[str, Any]:
 @tool("model_drawing")
 def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3",
                   details: list[dict[str, Any]] | None = None,
-                  bom: bool = True) -> dict[str, Any]:
+                  bom: bool = True,
+                  settings: dict[str, Any] | None = None) -> dict[str, Any]:
     """Build the model and emit a dimensioned 2D drawing (SVG or PDF by file
     extension) of the final feature — front/top/right/iso, third angle. By
     default the sheet carries a BOM table (derived from the model's union tree)
     with numbered part balloons on the front view; ``bom=False`` suppresses it
-    (e.g. a one-piece sheet-metal solid)."""
+    (e.g. a one-piece sheet-metal solid).
+
+    ``sheet`` is an ISO 5457 name ("A4".."A0"), an ANSI Y14.1 name
+    ("ANSI A".."ANSI E"), or "auto"/"auto:ansi" to pick from the series.
+    ``settings`` overrides title-block fields (owner, drawing_number,
+    revision, date, author, approved_by, units, sheet_no, sheet_count) and
+    may carry ``source_path`` to derive author/date/revision from the git
+    log of the part file — absent data renders blank, never invented."""
     from gitcad.drawing import make_drawing
 
     doc = Document.loads(model)
@@ -359,7 +367,7 @@ def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3",
             bom_lines = None
     d = make_drawing(built.final(doc), title=title, sheet=sheet,
                      thread_specs=threads, notes=doc.tolerance_notes(),
-                     details=details, bom=bom_lines)
+                     details=details, bom=bom_lines, settings=settings)
     svg = d.to_svg()
     if path.lower().endswith(".pdf"):
         with open(path, "wb") as f:
