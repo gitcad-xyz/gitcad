@@ -34,7 +34,8 @@ def _sch(value="10k") -> str:
 def test_init_scaffolds_everything(tmp_path):
     written = init_project(str(tmp_path / "widget"), name="widget")
     root = tmp_path / "widget"
-    assert set(written) == {".gitattributes", ".github/workflows/gitcad.yml",
+    assert set(written) == {".gitattributes", ".gitignore",
+                            ".github/workflows/gitcad.yml",
                             "README.md", "widget.gitcad", "requirements.reqs"}
     assert "*.gitcad merge=gitcad" in (root / ".gitattributes").read_text()
     assert "gitcad-verify requirements.reqs" in \
@@ -43,6 +44,19 @@ def test_init_scaffolds_everything(tmp_path):
                              "merge.gitcad.driver"],
                             capture_output=True, text=True)
     assert driver.stdout.strip() == "gitcad-merge %O %A %B"
+
+
+def test_init_ignores_geometry_build_artifacts(tmp_path):
+    # ADR-0004: text is source, geometry is a build artifact. The scaffold
+    # must carry that rule to the USER's repo — without a .gitignore the
+    # obvious first workflow (model_export into the project, git add -A)
+    # commits a STEP/STL and violates the constitution silently
+    # (0.9.9 dogfood field find, gitcad-xyz/gitcad#29).
+    init_project(str(tmp_path / "widget"), name="widget")
+    ignore = (tmp_path / "widget" / ".gitignore").read_text()
+    for pattern in ("*.step", "*.stl", "*.brep"):
+        assert pattern in ignore
+    assert "ADR-0004" in ignore
 
 
 def test_project_root_is_an_assembly_of_parts(tmp_path):
