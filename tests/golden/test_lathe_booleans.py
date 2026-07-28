@@ -158,11 +158,19 @@ def test_a_prism_reaching_the_wall_refuses(k) -> None:
         k.boolean("cut", Cyl(0, 0, 5, 0, 12), tool)
 
 
-def test_a_prism_open_at_both_ends_refuses(k) -> None:
-    """It would split the lathe into two solids, not pocket one."""
+def test_a_prism_open_at_both_ends_is_a_through_slot_not_a_split(k) -> None:
+    """This used to refuse with "a prism open at both ends splits the lathe".
+    It does not: the tool's corner is at r=1.414 and the wall is at r=5, so
+    the material runs all the way round the slot and the result is one solid
+    — the same reading `_pocket_solid` already applies to general bodies
+    ("Open at BOTH ends is a HOLE, not a split"). What decides is the wall
+    guard, not the z extent (#48)."""
     tool = k.transform(k.box(2, 2, 100), translate=(0, 0, -40))
-    with pytest.raises(Exception, match="both ends"):
-        k.boolean("cut", Cyl(0, 0, 5, 0, 12), tool)
+    out = k.boolean("cut", Cyl(0, 0, 5, 0, 12), tool)
+    assert k.mass_props(out)["volume"] == pytest.approx(
+        math.pi * 25 * 12 - 2 * 2 * 12, rel=1e-12)
+    assert k.validate(out).ok
+    assert k.bbox(out) == ((-5.0, -5.0, 0.0), (5.0, 5.0, 12.0))
 
 
 def test_the_wall_guard_walks_edges_not_just_vertices(k) -> None:
