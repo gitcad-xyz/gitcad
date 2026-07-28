@@ -21,6 +21,12 @@ import pytest
 
 from gitcad.kernel.null import NullKernel
 
+# viewer_open launches the user's browser by design (the field bug was the
+# opposite — a GUI nobody ever saw). The suite must not pop windows: the
+# daemon honors this env kill-switch, and the launch itself is proven by a
+# monkeypatched test instead (tests/test_viewer_project.py).
+os.environ.setdefault("GITCAD_NO_BROWSER", "1")
+
 
 @pytest.fixture
 def kernel() -> NullKernel:

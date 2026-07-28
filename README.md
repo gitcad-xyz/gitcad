@@ -45,7 +45,7 @@ configured. Roles are detected by file content.
 |---|---|
 | `gitcad-init` | create a new project |
 | `gitcad-mcp` | run the MCP server |
-| `gitcad-view` | live viewer: 3D, exploded views, cross-probe, schematics, checks; `--review BASE` for in-app review |
+| `gitcad-view` | ONE live viewer per project (top assembly first; parts in-page via `#part=`): 3D, exploded views, cross-probe, schematics, checks; `--review BASE` for in-app review; `--stop` ends a detached viewer |
 | `gitcad-render` | render PNG/SVG from a design file |
 | `gitcad-review` | semantic, check-delta, and visual diff between git refs |
 | `gitcad-merge` | git merge driver: semantic 3-way per kind |

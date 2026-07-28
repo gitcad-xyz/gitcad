@@ -82,17 +82,27 @@ def get_started(cwd: str = ".") -> dict[str, Any]:
     except OSError:
         pass
 
-    gui = ("The GUI is a local web app (viewer_open returns a http://127.0.0.1 "
-           "URL). Most MCP hosts can open it, or the user opens it in a browser. "
-           "It has tabs for the 3D model, 2D drawings (PDF/SVG), checks/DRC, the "
-           "schematic, and PR review — the human-facing side of the headless kernel.")
+    gui = ("The GUI is ONE persistent local web app per project: "
+           "viewer_open(path='<project dir>') starts (or rejoins) a detached "
+           "server, opens the user's browser, and returns the http://127.0.0.1 "
+           "URL — always relay that URL. The page opens on the TOP ASSEMBLY; "
+           "every individual part is a sub-interface inside the same page "
+           "(parts menu / #part=<file> deep link) — never a second server or "
+           "port. It has tabs for the 3D model, 2D drawings (PDF/SVG), "
+           "checks/DRC, the schematic, and PR review, and it live-reloads as "
+           "files change. It OUTLIVES this session by design: leave it "
+           "running when your work is done; only the user's explicit request "
+           "stops it (viewer_stop).")
 
     if found:
         steps = [
-            f"Found {len(found)} design(s) here. Open one in the GUI: "
-            "viewer_open(path='<one of designs_found>').",
+            f"Found {len(found)} design(s) here. Open THE project viewer now: "
+            "viewer_open(path='.') — one viewer for the whole project, "
+            "top assembly first; navigate to any part in-page.",
             "Then iterate: add features / edit, and the GUI live-reloads.",
             "Verify with the check tools and export (STEP/STL/drawings/Gerbers).",
+            "When you finish, LEAVE THE VIEWER RUNNING — it is the user's "
+            "window; stopping it needs their explicit ask (viewer_stop).",
         ]
     else:
         steps = [
@@ -102,13 +112,15 @@ def get_started(cwd: str = ".") -> dict[str, Any]:
             "Electronics: author a schematic/board, or board_import / schematic_import "
             "an existing KiCad design.",
             "Import existing CAD: model_import a STEP file (planar solids come in exact).",
-            "Whatever you make, call viewer_open early so the user watches it take shape.",
+            "Whatever you make, call viewer_open early — one persistent viewer "
+            "per project — so the user watches it take shape, and leave it up.",
         ]
     return {"has_project": bool(found), "designs_found": found,
             "recommended_next_steps": steps, "open_the_gui": gui,
             "starter_model": Document().dumps(),
-            "tip": "Proactively offer to initialize a project and open the GUI — "
-                   "do not wait to be asked."}
+            "tip": "Proactively initialize a project and open the GUI early — "
+                   "do not wait to be asked, and do not shut the viewer down "
+                   "when you finish."}
 
 
 @tool("sheetmetal_author")
@@ -1201,79 +1213,164 @@ def visualize(design: str, explode: float = 0.0, three: bool = False,
             "image": {"png_base64": png, "mime": "image/png"}}
 
 
-_VIEWERS: dict[str, dict[str, Any]] = {}
+# Projects whose viewer THIS session opened (root -> last known state). The
+# viewers themselves are detached processes registered in each project's
+# .gitcad/viewer.json — this dict is only session context (viewer_note/_ask
+# targeting, viewer_list), never the viewer's lifetime.
+_OPENED: dict[str, dict[str, Any]] = {}
 
 
 @tool("viewer_open")
-def viewer_open(design: str = "", path: str = "", review_base: str = "",
-                port: int = 0) -> dict[str, Any]:
-    """Start the local gitcad web viewer for a design and return its URL, to
-    open in a browser (or an embedded webview) for interactive 3D, exploded
-    views, cross-probing, schematics, and live checks. Pass ``design`` text OR
-    an existing ``path``. ``review_base`` (a git ref) adds the in-app review
-    tab. The server runs in the background for the rest of the session; list or
-    stop servers with viewer_list / viewer_close."""
+def viewer_open(path: str = ".", design: str = "", review_base: str = "",
+                port: int = 0, open_browser: bool = True) -> dict[str, Any]:
+    """Open (or rejoin) THE project viewer — one persistent local web GUI for
+    the WHOLE project. Call it EARLY, once per project, and leave it running.
+
+    The page opens on the project's TOP ASSEMBLY by default; every individual
+    part is a sub-interface INSIDE the same page (the parts menu, or the
+    ``#part=<file>`` deep link returned here) — never open a second viewer or
+    another port to "look at" a part. ``path`` is the project directory or any
+    design file in it; ``design`` text serves an unsaved document instead.
+
+    The viewer is a DETACHED process: it survives the end of this MCP session,
+    live-reloads as files change on disk, and re-invoking viewer_open later
+    (any session) finds and reuses it — same URL. It also launches the user's
+    browser (``open_browser=false`` to skip). ALWAYS relay the returned URL to
+    the user. NEVER stop the viewer because your task is done — it is the
+    user's window, not yours; only an explicit user request stops it, via
+    viewer_stop."""
     import tempfile
-    import threading
     from pathlib import Path
 
-    from gitcad.viewer.server import detect_kind, serve
+    from gitcad.viewer.daemon import ensure_viewer, launch_browser
+    from gitcad.viewer.project import find_project_root
+    from gitcad.viewer.server import detect_kind
 
-    if not design and not path:
-        raise ValueError("viewer_open: pass a design string or a file path")
-    if path:
-        served = str(Path(path).resolve())
-        kind = None
-    else:
-        kind = detect_kind(design)
+    if design:
+        kind = detect_kind(design)     # refuse garbage before spawning
         ext = {"schematic": ".sch", "board": ".board", "pcba": ".pcba",
-               "assembly": ".gitcad"}.get(kind, ".model")
-        served = str(Path(tempfile.gettempdir())
-                     / f"gitcad_view_{abs(hash(design)) & 0xffffffff:08x}{ext}")
-        Path(served).write_text(design, encoding="utf-8")
-    if served in _VIEWERS:
-        v = _VIEWERS[served]
-        return {"ok": True, "url": v["url"], "port": v["port"], "reused": True}
-    httpd = serve(served, port=port, review_base=review_base or None)
-    bound = httpd.server_address[1]
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    url = f"http://127.0.0.1:{bound}/"
-    _VIEWERS[served] = {"httpd": httpd, "port": bound, "url": url}
-    return {"ok": True, "url": url, "port": bound, "kind": kind,
-            "hint": "Open this URL in a browser to interact with the design."}
+               "assembly": ".gitcad.json"}.get(kind, ".model")
+        import hashlib as _h
+
+        tag = _h.sha256(design.encode()).hexdigest()[:8]
+        root = Path(tempfile.gettempdir()) / f"gitcad_view_{tag}"
+        root.mkdir(parents=True, exist_ok=True)
+        (root / f"design{ext}").write_text(design, encoding="utf-8")
+    else:
+        root = find_project_root(path)
+    state, reused = ensure_viewer(root, port=port,
+                                  review_base=review_base or None)
+    url = state["url"]
+    opened = launch_browser(url) if open_browser else False
+    parts = _project_parts(url)
+    _OPENED[str(root)] = state
+    return {
+        "ok": True, "url": url, "port": state["port"], "pid": state.get("pid"),
+        "project_root": str(root), "default_view": state.get("default"),
+        "reused": reused, "browser_opened": opened, "parts": parts,
+        "message": (
+            f"PROJECT VIEWER RUNNING AT {url} — give this URL to the user"
+            + (" (their browser was also opened on it)" if opened else "") +
+            ". It shows the top assembly; every part is in-page via the parts "
+            "menu or its deep link above. The viewer is a detached process: "
+            "it stays up after this session, live-reloads on file edits, and "
+            "viewer_open reuses it. Do NOT stop it when you finish working — "
+            "only the user asks for viewer_stop."),
+    }
+
+
+def _project_parts(url: str, limit: int = 40) -> list[dict[str, Any]]:
+    """The in-page navigation map for the tool result: every design in the
+    project with its deep link — 'look at the lid' is a link, not a server."""
+    import json as _json
+    import urllib.request
+    from urllib.parse import quote
+
+    try:
+        with urllib.request.urlopen(url + "api/parts", timeout=10) as r:
+            data = _json.load(r)
+    except Exception:                  # noqa: BLE001 - navigation is optional
+        return []
+    return [{"name": d["name"], "file": d["file"], "kind": d["kind"],
+             "url": url + "#part=" + quote(d["file"], safe="")}
+            for d in data.get("designs", [])[:limit]]
 
 
 @tool("viewer_list")
 def viewer_list() -> dict[str, Any]:
-    """List the viewer servers running in this session (path, URL, port)."""
-    return {"viewers": [{"path": p, "url": v["url"], "port": v["port"]}
-                        for p, v in _VIEWERS.items()]}
+    """List project viewers: every project this session opened plus the
+    current directory's, each probed for liveness (they are detached
+    processes, so they may well be running from an earlier session)."""
+    import os
+    from gitcad.viewer.daemon import probe, read_state
+    from gitcad.viewer.project import find_project_root
+
+    roots = dict.fromkeys([*(_OPENED), str(find_project_root(os.getcwd()))])
+    out = []
+    for r in roots:
+        st = read_state(r) or _OPENED.get(r)
+        if not st:
+            continue
+        out.append({"project_root": r, "url": st.get("url"),
+                    "port": st.get("port"), "default": st.get("default"),
+                    "alive": probe(st) is not None})
+    return {"viewers": out}
+
+
+@tool("viewer_stop")
+def viewer_stop(path: str = ".", url: str = "") -> dict[str, Any]:
+    """Stop a project's detached viewer — ONLY when the user explicitly asks.
+    Finishing your work is never a reason: the viewer is the user's window on
+    the project and is designed to stay up between sessions. ``path``: the
+    project (default: the current directory); ``url`` targets one opened this
+    session by its URL. Returns how many were stopped; viewer_open afterwards
+    starts fresh."""
+    from gitcad.viewer.daemon import stop_viewer
+
+    roots: list[str]
+    if url:
+        roots = [r for r, st in _OPENED.items() if st.get("url") == url]
+        if not roots:
+            return {"ok": True, "stopped": 0,
+                    "reason": f"no viewer known at {url}"}
+    else:
+        from gitcad.viewer.project import find_project_root
+
+        roots = [str(find_project_root(path))]
+    stopped = 0
+    for r in roots:
+        if stop_viewer(r)["stopped"]:
+            stopped += 1
+        _OPENED.pop(r, None)
+    return {"ok": True, "stopped": stopped}
 
 
 @tool("viewer_close")
 def viewer_close(url: str = "", path: str = "") -> dict[str, Any]:
-    """Stop a running viewer server by its URL or served path (empty closes
-    all). Returns the number of servers stopped."""
+    """Deprecated alias of viewer_stop (same explicit-user-request-only
+    contract). Empty arguments stop every viewer this session opened."""
+    from gitcad.viewer.daemon import stop_viewer
+
+    if url or path:
+        return viewer_stop(path=path or ".", url=url)
     stopped = 0
-    for p in list(_VIEWERS):
-        v = _VIEWERS[p]
-        if not url and not path or v["url"] == url or p == str(path):
-            v["httpd"].shutdown()
-            del _VIEWERS[p]
+    for r in list(_OPENED):
+        if stop_viewer(r)["stopped"]:
             stopped += 1
+        _OPENED.pop(r, None)
     return {"ok": True, "stopped": stopped}
 
 
 def _watched(path: str = ""):
-    """The design a live message should land on: an explicit ``path`` (a
-    viewer in ANOTHER process may be watching it — `gitcad view` is not in
-    this registry), else the most recently opened viewer here."""
+    """The project a live message should land on: an explicit ``path`` (a
+    viewer in ANOTHER process may be watching it — `gitcad-view` is not in
+    this session's registry), else the project most recently opened here."""
     from pathlib import Path
 
     if path:
         return Path(path)
-    if _VIEWERS:
-        return Path(next(reversed(_VIEWERS)))
+    if _OPENED:
+        return Path(next(reversed(_OPENED)))
     raise ValueError("no viewer is open in this session — call viewer_open "
                      "first, or pass path= to reach a viewer running in "
                      "another process")
@@ -1488,13 +1585,24 @@ _SERVER_INSTRUCTIONS = (
     "verify/render loop, all as plain text you can commit.\n\n"
     "START HERE every session: call the `get_started` tool first. It scans the "
     "working directory for existing designs and returns the next steps. Then "
-    "PROACTIVELY — without waiting to be asked — offer to (1) initialize a project "
+    "PROACTIVELY — without waiting to be asked — (1) initialize a project "
     "(model_new for mechanical; a board/schematic or *_import for electronics) and "
-    "(2) open the interactive GUI with `viewer_open`, sharing the returned "
-    "http://127.0.0.1 URL (most MCP hosts can open it; otherwise the user opens it "
-    "in a browser). Call viewer_open early and keep it open so the user watches "
-    "the design take shape — the GUI has tabs for the 3D model, 2D drawings, "
-    "checks/DRC, schematic, and PR review, and it live-reloads as you edit.\n\n"
+    "(2) open the GUI with `viewer_open`.\n\n"
+    "THE VIEWER CONTRACT — get this right:\n"
+    "* ONE viewer per PROJECT, not per part file. viewer_open serves the whole "
+    "project on one port; the page opens on the TOP ASSEMBLY, and every part is "
+    "a sub-interface inside that page (its parts menu, or the #part=<file> deep "
+    "links viewer_open returns). 'Show the lid' is a click or a link — NEVER a "
+    "second server or another port.\n"
+    "* Open it EARLY — as soon as there is a project — and ALWAYS give the "
+    "returned http://127.0.0.1 URL to the user (viewer_open also opens their "
+    "browser). The page live-reloads as you edit files, so the user watches the "
+    "design take shape; narrate with viewer_note as you go.\n"
+    "* The viewer is a DETACHED process that OUTLIVES your session. NEVER shut "
+    "it down because your work is over — an idle viewer is the user still "
+    "looking at their design. Only the user's explicit request stops it "
+    "(viewer_stop). Re-running viewer_open later rejoins the same server and "
+    "URL.\n\n"
     "Everything is verifiable: build, then check (interference, DRC/ERC, "
     "requirements) and export (STEP/STL/drawings/Gerbers). Prefer showing results "
     "in the GUI over describing them."
