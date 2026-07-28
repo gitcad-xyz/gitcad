@@ -25,6 +25,31 @@ def test_interference_tolerance_and_matrix(tmp_path):
     assert budget.checks["overlaps_mm3"]["a<->b"] == pytest.approx(10.0)  # still shown
 
 
+def test_interference_says_where_the_overlap_is(tmp_path):
+    """A volume alone is not actionable — the report must localize the clash.
+
+    Two 10 mm cubes overlapping by a 0.1 mm slab: the answer a user needs is
+    'a thin wall at x 9.9..10', which the bbox says and the float 10.0 does
+    not. The common solid is built anyway to measure it; this reads it.
+    """
+    from gitcad.kernel.ref import RefKernel
+    from gitcad.part.interference import check_interference
+
+    k = RefKernel()
+    inst = {"a": (k.box(10, 10, 10), (0.0, 0.0, 0.0), 0.0),
+            "b": (k.box(10, 10, 10), (9.9, 0.0, 0.0), 0.0)}
+    rep = check_interference(k, inst)
+    w = rep.checks["overlap_where"]["a<->b"]
+    assert w["bbox"] == [[9.9, 0.0, 0.0], [10.0, 10.0, 10.0]]
+    assert w["size"] == [pytest.approx(0.1), 10.0, 10.0]
+    assert w["centroid"] == [pytest.approx(9.95), 5.0, 5.0]
+    # a clear pair contributes nothing: no phantom entries
+    clear = check_interference(
+        k, {"a": (k.box(10, 10, 10), (0.0, 0.0, 0.0), 0.0),
+            "b": (k.box(10, 10, 10), (50.0, 0.0, 0.0), 0.0)})
+    assert clear.ok and clear.checks["overlap_where"] == {}
+
+
 def _sch_file(tmp_path) -> Path:
     from gitcad.ecad.schematic import Pin, SchComponent, Schematic
 
