@@ -250,6 +250,69 @@ def _nope(op: str, stage: str, *, predicate: str | None = None,
         stage=stage, predicate=predicate, measured=measured, remedy=remedy)
 
 
+def _quadric_pair_reason(op: str, a, b) -> dict:
+    """Say what to DO about a K2.2 quadric-pair refusal.
+
+    The pair a mechanical design actually hits is "z-axisymmetric body minus a
+    cylinder", and it arrives as two different walls that want two different
+    answers:
+
+    * the base is an ``AxisStack`` — a lathe that has already had a coaxial
+      collar unioned onto it. There is no bore path for that, but the SAME two
+      features in the other order build exactly (bore, then union the collar),
+      so the remedy is an ordering, not a redesign.
+    * the base is a ``RevolveSolid`` and the tool is off its axis. That is
+      every bolt circle ever drawn, and no ordering rescues it — the remedy is
+      to say so, with the measured offset, and name the representation that
+      does take an off-axis hole.
+
+    Both used to arrive as ``remedy: null``, which reads as "give up" for the
+    first case and as "keep guessing" for the second.
+    """
+    generic = {
+        "predicate": "operand_pair_has_an_exact_path",
+        "remedy": (f"K2.2 implements specific quadric pairs; "
+                   f"{type(a).__name__} x {type(b).__name__} is not one of "
+                   f"them for boolean.{op} yet — build the feature from "
+                   f"planar prisms if it has to exist today"),
+    }
+    try:
+        from forgekernel.quadric import AxisStack, Cyl, RevolveSolid
+
+        if op != "cut" or not isinstance(b, Cyl):
+            return generic
+        if isinstance(a, AxisStack):
+            return {
+                "predicate": "base_accepts_a_bore",
+                "measured": {"bore_diameter_mm": float(b.r) * 2.0},
+                "remedy": ("an AxisStack is a solid of revolution that already "
+                           "has a coaxial collar/boss unioned onto it, and it "
+                           "has no bore path — but the same two features in "
+                           "the OTHER ORDER build exactly: bore the solid of "
+                           "revolution first, then union the collar onto the "
+                           "bored body"),
+            }
+        # Coaxiality is decided EXACTLY, on the stored rationals; the float
+        # offset below is only ever rendered into the message (ADR-0019).
+        if isinstance(a, RevolveSolid) and (b.cx, b.cy) != (a.cx, a.cy):
+            off = math.hypot(float(b.cx) - float(a.cx), float(b.cy) - float(a.cy))
+            return {
+                "predicate": "bore_is_coaxial_with_the_lathe",
+                "measured": {"bore_offset_mm": off,
+                             "bore_diameter_mm": float(b.r) * 2.0,
+                             "lathe_axis_xy": [float(a.cx), float(a.cy)]},
+                "remedy": (f"a solid of revolution takes COAXIAL bores only, "
+                           f"and this tool's axis is {float(off):.3f} mm off "
+                           f"the lathe axis — move it onto the axis, or, for "
+                           f"a bolt circle (off-axis by definition), build "
+                           f"the flange as a planar prism, where a hole at "
+                           f"any (x, y) is exact"),
+            }
+    except Exception:                       # noqa: BLE001 - diagnostics only
+        return generic
+    return generic
+
+
 # A mesh tolerance below this is a request no mesher here can honour without
 # unbounded subdivision — the refusal names the floor instead of exhausting
 # memory trying (docket R7).
@@ -1584,7 +1647,8 @@ class RefKernel:
         # 'polys'") as the kernel's diagnostic instead of naming the stage.
         if isinstance(a, curved) or isinstance(b, curved):
             _nope(f"boolean.{op} on quadric operands "
-                  f"({type(a).__name__} × {type(b).__name__})", "K2.2")
+                  f"({type(a).__name__} × {type(b).__name__})", "K2.2",
+                  **_quadric_pair_reason(op, a, b))
         try:
             # cost signal on the live rail (#11): exact BSP arithmetic grows
             # with facet count, and a dense operand (a lofted hull) can take
