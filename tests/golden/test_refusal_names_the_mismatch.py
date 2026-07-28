@@ -68,6 +68,86 @@ def test_boolean_on_a_transformed_body_names_the_mismatch(k, tilted) -> None:
     assert err.remedy, "a refusal an agent can act on carries a remedy"
 
 
+@pytest.fixture()
+def side_plane_prism(k):
+    """The body a ``plane={"normal": "y"}`` sketch produces (#49).
+
+    ``document._dispatch`` implements the side sketch planes as a 120/240
+    degree rotation about (1,1,1). That is exact, and the result is still a
+    planar ``Solid`` — but its vertex coordinates now live in a wider exact
+    field (``SurdVal``), which the rational drill predicates cannot read.
+    """
+    prof = {"start": [-30, -30],
+            "segments": [{"kind": "line", "to": [30, -30]},
+                         {"kind": "line", "to": [30, 30]},
+                         {"kind": "line", "to": [-30, 30]}]}
+    p = k.transform(k.extrude(prof, 40.0), rotate_axis=(1, 1, 1),
+                    rotate_deg=240.0, translate=(0, -20, 0))
+    assert type(p).__name__ == "Solid", (
+        "precondition: a side-plane sketch is still a planar Solid; only its "
+        "coordinates left the rationals")
+    return p
+
+
+def test_exact_scalar_arithmetic_refuses_instead_of_crashing(
+        k, side_plane_prism) -> None:
+    """#49: drilling that body used to raise a bare
+    ``TypeError: unsupported operand type(s) for ** or pow(): 'SurdVal' and
+    'int'`` from inside forge, which is neither a KernelError nor anything
+    ``feature_add`` catches — the MCP tool died with a traceback and the
+    caller got no refusal, no fingerprint and no model back."""
+    tool = k.transform(k.cylinder(5, 61), translate=(0, 0, -30))
+    with pytest.raises(KernelError) as ei:
+        k.boolean("cut", side_plane_prism, tool)
+    err = ei.value
+    msg = str(err)
+    for leak in RAW_LEAKS:
+        assert leak not in msg, f"raw Python diagnostic leaked: {leak!r} in {msg!r}"
+    assert "boolean" in msg and "SurdVal" in msg, msg
+    assert err.stage and "K3.1" in err.stage, err.stage
+    assert err.predicate == "coordinates_are_rational", err.predicate
+    assert err.remedy, "a refusal an agent can act on carries a remedy"
+
+
+@pytest.mark.parametrize("call, expected", [
+    (lambda k: k.box("a", 2, 3), (ValueError, TypeError)),
+    (lambda k: k.cylinder(5, None), (ValueError, TypeError)),
+    (lambda k: k.transform(k.box(1, 1, 1), translate="xyz"), (ValueError, TypeError)),
+])
+def test_an_ordinary_bad_argument_keeps_its_own_meaning(k, call, expected) -> None:
+    """The exact-scalar guard must not become a catch-all: a caller passing a
+    string where a length belongs is a bad argument, not a missing capability,
+    and mislabelling it "NotYetImplemented" would send the agent to fix the
+    kernel instead of its own call."""
+    with pytest.raises(expected) as ei:
+        call(k)
+    assert not isinstance(ei.value, KernelError), (
+        f"bad argument was converted into a capability refusal: {ei.value}")
+
+
+def test_feature_add_returns_a_refusal_for_a_side_plane_drill(tmp_path) -> None:
+    """End to end: the MCP tool answers, rather than raising (#49, #12)."""
+    from gitcad.mcp.server import REGISTRY
+
+    prof = {"start": [-30, -30],
+            "segments": [{"kind": "line", "to": [30, -30]},
+                         {"kind": "line", "to": [30, 30]},
+                         {"kind": "line", "to": [-30, 30]}]}
+    model = REGISTRY["model_new"]()["model"]
+    out = REGISTRY["feature_add"](
+        model=model, op="extrude",
+        params={"profile": prof, "height": 40.0,
+                "plane": {"normal": "y", "offset": -20.0}})
+    model, fid = out["model"], out["feature_id"]
+    out = REGISTRY["feature_add"](
+        model=model, op="hole", inputs=[fid],
+        params={"x": 0, "y": 0, "top_z": 20, "depth": 41, "diameter": 10.0})
+    assert out["ok"] is False and out["buildable"] is False
+    assert out["refusal"]["predicate"] == "coordinates_are_rational"
+    assert out["model"] == model, "a refused feature must not be added"
+    assert out["fingerprint"].startswith("fp_")
+
+
 def test_export_step_on_a_transformed_body_names_the_mismatch(
         k, tilted, tmp_path) -> None:
     out = tmp_path / "tilted.step"
