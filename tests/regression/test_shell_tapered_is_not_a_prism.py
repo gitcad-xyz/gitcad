@@ -77,15 +77,19 @@ def test_the_solid_itself_is_the_frustum_we_derived_against(k):
     assert k.bbox(_frustum(k)) == ((0.0, 0.0, 0.0), (10.0, 10.0, 12.0))
 
 
-def test_a_tapered_solid_refuses_rather_than_returning_206(k):
-    with pytest.raises(KernelError) as exc:
-        k.shell(_frustum(k), [], 1)
-    assert "taper" in str(exc.value).lower() or "prism" in str(exc.value).lower()
+def test_a_tapered_solid_now_shells_to_the_derived_truth(k):
+    """It refused for one commit, which was the right answer while the only
+    alternative was a wrong number. It now COMPUTES: forge's
+    ``offset_solid_inward`` erodes each face along its own unit normal, which
+    keeps the normal rational and moves only the offset into ℚ[√37]."""
+    v = k.mass_props(k.shell(_frustum(k), [], 1))["volume"]
+    assert v == pytest.approx(TRUE_SHELL, rel=1e-6)
+    assert k.validate(k.shell(_frustum(k), [], 1)).ok
 
 
 def test_it_must_never_return_the_old_wrong_number(k):
-    """Pins the DEFECT, not the refusal: if a future tapered-shell lands, it
-    must not reproduce 206.04 (or its mirror image 624.0)."""
+    """Pins the DEFECT itself, so neither the original error nor its mirror
+    image can come back through some future path."""
     try:
         v = k.mass_props(k.shell(_frustum(k), [], 1))["volume"]
     except KernelError:

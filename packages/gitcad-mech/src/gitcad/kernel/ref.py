@@ -4600,8 +4600,30 @@ class RefKernel:
             try:
                 return self._prism_shell(shape, Fraction(thickness))
             except ValueError as exc:
-                raise KernelError(str(exc), FailureSignature(
-                    op="shell", diagnostic="NotYetImplemented", kernel="ref"))
+                # K4.2: a TAPERED solid is not a right prism, and insetting
+                # its cap outline in xy is not its offset — that returned
+                # 206.04 for a frustum whose true shell is 418.04. The real
+                # construction erodes every face along its OWN unit normal,
+                # which keeps the normal rational and moves only the offset
+                # into ℚ[√d] (|n| = √37 for that frustum). forge does it
+                # exactly; faces in different quadratic fields refuse there
+                # by name (K3.1) rather than rounding.
+                if "taper" not in str(exc):
+                    raise KernelError(str(exc), FailureSignature(
+                        op="shell", diagnostic="NotYetImplemented",
+                        kernel="ref"))
+                from forgekernel.brep import offset_solid_inward
+
+                try:
+                    void = offset_solid_inward(shape, Fraction(thickness))
+                    return _audited(self._fk.boolean("cut", shape, void),
+                                    "shell(tapered solid)")
+                except ValueError as exc2:
+                    raise KernelError(
+                        f"shell(tapered base: {exc2})",
+                        FailureSignature(op="shell",
+                                         diagnostic="NotYetImplemented",
+                                         kernel="ref"))
         # K4: OPEN shell on a box — the void is the inward-inset box
         # EXTENDED through each removed face to the outer surface, then
         # one exact boolean cut. Face indices are indices into THIS
