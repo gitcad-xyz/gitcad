@@ -404,6 +404,25 @@ _SEAM_OPS = (
 )
 
 
+#: forge's exact scalar types (``is_exact_scalar = True``). A ``TypeError``
+#: naming one of these is an arithmetic-FIELD mismatch — a predicate written
+#: for ℚ handed a ℚ[√d]/ℚ[π] coordinate — which is a representation mismatch
+#: exactly like the AttributeError case below, and must not reach a caller as
+#: a Python traceback (#49).
+_EXACT_SCALARS = ("SurdVal", "BiSurd", "PiVal", "PiPoly")
+
+
+def _exact_scalar_mismatch(exc: TypeError) -> str | None:
+    """The exact-scalar type named by an operand-mismatch ``TypeError``, or
+    ``None`` when this is an ordinary bad-argument TypeError that must keep
+    its own meaning (a caller passing a string where a length belongs)."""
+    msg = str(exc)
+    if ("unsupported operand type(s)" not in msg
+            and "not supported between instances of" not in msg):
+        return None
+    return next((s for s in _EXACT_SCALARS if f"'{s}'" in msg), None)
+
+
 def _guard_seam(cls):
     """Turn a representation mismatch into an HONEST REFUSAL at the seam.
 
@@ -417,6 +436,15 @@ def _guard_seam(cls):
     so an unsupported combination is reported the same way a deliberate
     ``_nope`` is.
 
+    The same is true one level down, in the arithmetic: a predicate written
+    for rational coordinates raises a bare ``TypeError`` when the operands
+    landed in a wider exact field (``SurdVal``/``BiSurd``/``PiVal``/``PiPoly``
+    — #49). That is the representation mismatch again, spelled in scalars
+    instead of shapes, so it is converted the same way. Only the CPython
+    operand-mismatch phrasings that NAME an exact scalar are caught; every
+    other ``TypeError`` (a caller passing a string where a length belongs)
+    keeps its own meaning and propagates.
+
     It deliberately does NOT swallow anything else: KernelError, ValueError and
     ArithmeticError keep their existing meanings, so real precondition failures
     and closure violations still surface untouched.
@@ -428,6 +456,26 @@ def _guard_seam(cls):
         def inner(self, *args, **kwargs):
             try:
                 return fn(self, *args, **kwargs)
+            except TypeError as exc:
+                scalar = _exact_scalar_mismatch(exc)
+                if scalar is None:
+                    raise
+                kinds = ", ".join(sorted(
+                    {type(a).__name__ for a in args if hasattr(a, "volume")})
+                ) or "shape"
+                stage = "K3.1 (wider exact field)"
+                raise KernelError(
+                    f"ref kernel does not implement {name} on {kinds} whose "
+                    f"coordinates are not rational yet — an operand carries "
+                    f"{scalar} (an exact number beyond the rationals) and this "
+                    f"path is written for rational coordinates — {stage}",
+                    FailureSignature(op=name, diagnostic="NotYetImplemented",
+                                     kernel="ref"),
+                    stage=stage, predicate="coordinates_are_rational",
+                    remedy=("build the operand so its coordinates stay "
+                            "rational — an axis-aligned placement or an exact "
+                            "quarter turn does, a 120/240 degree frame "
+                            "rotation (the normal=x|y sketch plane) does not"))
             except AttributeError as exc:
                 # Issue #9: `exc` itself ('Body' object has no attribute
                 # 'polys') is an internal of the implementation, not a fact
