@@ -19,30 +19,46 @@ from gitcad.kernel import get_kernel
 Handler = Callable[..., dict[str, Any]]
 REGISTRY: dict[str, Handler] = {}
 
+# 11: a tool result that took real wall-clock time says so. Exact arithmetic
+# on a dense operand is minutes, and an agent cannot decide "coarsen this
+# loft" without a cost model — the elapsed time IS the minimal honest one.
+# Results faster than this stay clean, so the signal marks expense.
+SLOW_TOOL_S = 1.0
+
 
 def tool(name: str) -> Callable[[Handler], Handler]:
     """Register a handler, wrapped in the structured-error contract: an agent
     NEVER sees a raw traceback — failures return machine-actionable
     ``{"ok": false, "error": {...}}``, with the dedup fingerprint attached
-    when the failure is a kernel/geometry error (feeds the report pipeline)."""
+    when the failure is a kernel/geometry error (feeds the report pipeline).
+    Any result (success or refusal) that took longer than ``SLOW_TOOL_S``
+    carries ``elapsed_s`` — the cost signal of #11."""
 
     def deco(fn: Handler) -> Handler:
         import functools
         import json as _json
+        import time as _time
 
         from gitcad.errors import GitcadError, KernelError
         from gitcad.report.fingerprint import fingerprint
 
         @functools.wraps(fn)
         def wrapped(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            t0 = _time.perf_counter()
             try:
-                return fn(*args, **kwargs)
+                out = fn(*args, **kwargs)
             except KernelError as exc:
-                return {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)},
-                        "fingerprint": fingerprint(exc.signature)}
+                out = {"ok": False,
+                       "error": {"type": type(exc).__name__, "message": str(exc)},
+                       "fingerprint": fingerprint(exc.signature)}
             except (GitcadError, ValueError, KeyError, FileNotFoundError,
                     _json.JSONDecodeError, NotImplementedError) as exc:
-                return {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}}
+                out = {"ok": False,
+                       "error": {"type": type(exc).__name__, "message": str(exc)}}
+            elapsed = _time.perf_counter() - t0
+            if isinstance(out, dict) and elapsed >= SLOW_TOOL_S:
+                out.setdefault("elapsed_s", round(elapsed, 2))
+            return out
 
         REGISTRY[name] = wrapped
         return wrapped

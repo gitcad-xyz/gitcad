@@ -1519,6 +1519,17 @@ class RefKernel:
             _nope(f"boolean.{op} on quadric operands "
                   f"({type(a).__name__} × {type(b).__name__})", "K2.2")
         try:
+            # cost signal on the live rail (#11): exact BSP arithmetic grows
+            # with facet count, and a dense operand (a lofted hull) can take
+            # minutes — say so BEFORE starting, so the watcher and the agent
+            # both know what the elapsed seconds are being spent on.
+            npa = len(getattr(a, "polys", ()))
+            npb = len(getattr(b, "polys", ()))
+            if npa + npb >= 200:
+                from gitcad import activity
+                activity.note(text=f"boolean.{op}: {npa} × {npb} facets — "
+                                   "exact BSP arithmetic; cost grows "
+                                   "quadratically with facet count")
             return self._fk.boolean(op, a, b)
         except ArithmeticError as exc:
             raise KernelError(
@@ -2096,9 +2107,31 @@ class RefKernel:
         counts = {len(lp) for lp, _ in loops}
         if len(counts) != 1:
             _nope("loft(unequal section vertex counts)", "K3.7")
+        from gitcad import activity
         try:
+            if len(loops) > 2:
+                # Fast path (#11): a ruled stack's interface caps cancel
+                # exactly, so the shell is buildable directly — same point
+                # set as the BSP fold (tests/test_ruled_stack.py proves
+                # exact volume/centroid equality against the fold), at
+                # O(sections) instead of O(n²) splits. The watertight audit
+                # is the same one kernel.boolean applies to the fold's
+                # result; any violation falls back to the fold (the spec).
+                from forgekernel.brep import ruled_stack
+                try:
+                    fast = ruled_stack(loops)
+                    if not fast.watertight_violations():
+                        return fast
+                except ValueError:
+                    pass  # non-monotonic z / mixed orientation → the fold
             out = None
-            for (la, za), (lb, zb) in zip(loops, loops[1:]):
+            n_pieces = len(loops) - 1
+            for i, ((la, za), (lb, zb)) in enumerate(zip(loops, loops[1:])):
+                if n_pieces > 1:
+                    # narrate long fused lofts on the live rail (#11): the
+                    # watcher sees progress, not just an elapsed counter
+                    activity.note(text=f"loft: fusing section {i + 1}/"
+                                       f"{n_pieces} (exact BSP union)")
                 piece = prismatoid(la, za, lb, zb)
                 out = piece if out is None else self._fk.boolean(
                     "union", out, piece)
@@ -2449,6 +2482,15 @@ class RefKernel:
                 # fillet ran without it until #134. Closed bboxes are the
                 # same conservative separation witness shell uses.
                 boxes = [_exact_bbox(m) for m in shape.members]
+                if any(b is None for b in boxes):
+                    # _exact_bbox's None is a documented, legitimate answer
+                    # ("cannot give bounds without leaving ℚ") — but the
+                    # separation argument NEEDS the witness, so without it
+                    # the honest answer is a refusal, not the TypeError this
+                    # unpack used to raise (#10 composed census).
+                    _nope("fillet(disjoint union: a member has no exact "
+                          "bbox witness, so separation cannot be certified)",
+                          "K5.4 (face blends)")
                 for i in range(len(boxes)):
                     for j in range(i + 1, len(boxes)):
                         (alo, ahi), (blo, bhi) = boxes[i], boxes[j]
@@ -4023,6 +4065,14 @@ class RefKernel:
                 # heavy before the composite path above). Closed bboxes are a
                 # conservative witness for separation.
                 boxes = [_exact_bbox(m) for m in shape.members]
+                if any(b is None for b in boxes):
+                    # same contract as fillet's separation witness above:
+                    # None is _exact_bbox's honest "no bounds in ℚ" answer,
+                    # and without the witness the refusal is the answer —
+                    # never the TypeError this unpack used to raise (#10).
+                    _nope("shell(disjoint union: a member has no exact bbox "
+                          "witness, so separation cannot be certified)",
+                          "K4.2 (offset surfaces)")
                 for i in range(len(boxes)):
                     for j in range(i + 1, len(boxes)):
                         (alo, ahi), (blo, bhi) = boxes[i], boxes[j]

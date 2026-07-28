@@ -19,6 +19,18 @@ Four outcomes, and the distinction is the point:
 The matrix is the roadmap: ``refused`` cells are the capability backlog in
 priority order, and ``CRASH`` cells are bugs to fix now. Run it with
 ``python -m gitcad.bench.capability`` (add ``--md`` for the markdown table).
+
+There are TWO tiers, and the public number is their PAIR (#10):
+
+* **single-op** — every seam operation against a freshly built solid;
+* **composed** — every operation CHAIN (rotate-then-boolean, boolean-result
+  reuse, cutting with a transformed tool, export of a transformed solid)
+  against the same representations.
+
+The single-op grid alone overstates real coverage: it scored ``rotate 90``
+✅ while the rotated solid could no longer be a boolean operand or a STEP
+export, so a first real model contradicted the headline within minutes.
+``headline()`` prints the pair; neither number travels without the other.
 """
 
 from __future__ import annotations
@@ -139,6 +151,76 @@ def _far(k, s):
     return (float(hi[0]) + 10, float(lo[1]), float(lo[2]))
 
 
+def composed_operations(k, tmpdir: str) -> dict[str, Any]:
+    """Tier 2 — the COMPOSED grid: every column is a CHAIN of seam
+    operations, probing whether the RESULT of one operation is still a
+    usable operand for the next (#10).
+
+    The single-op grid scores ``rotate 90`` ✅ if ``transform`` returns and
+    metrics still work on it; it never asks whether the rotated solid can
+    still be a boolean operand or a STEP export — which is where a real
+    modelling session actually fails. These chains are the ten-minutes-of-
+    real-use cases: transform-then-boolean (tool orientation), boolean
+    where the TOOL was transformed, boolean-result reuse (cut → cut,
+    cut → shell), and export/tessellate of a transformed or cut solid.
+    """
+    import os
+
+    def out(name):
+        return os.path.join(tmpdir, name)
+
+    def rot(s, deg, axis=(0, 0, 1)):
+        return k.transform(s, rotate_axis=axis, rotate_deg=deg)
+
+    def cutbox(s):
+        return k.boolean("cut", s,
+                         k.transform(k.box(2, 2, 100), translate=_mid(k, s)))
+
+    def loft_tool(s):
+        """A skewed ruled loft — the crankbait lip-slot tool shape (#11)."""
+        return k.transform(k.loft([
+            ({"start": [0, 0], "segments": [{"kind": "line", "to": [4, 0]},
+                                            {"kind": "line", "to": [4, 4]},
+                                            {"kind": "line", "to": [0, 4]},
+                                            {"kind": "line", "to": [0, 0]}]},
+             -50.0),
+            ({"start": [3, 3], "segments": [{"kind": "line", "to": [7, 3]},
+                                            {"kind": "line", "to": [7, 7]},
+                                            {"kind": "line", "to": [3, 7]},
+                                            {"kind": "line", "to": [3, 3]}]},
+             50.0)], ruled=True), translate=_mid(k, s))
+
+    return {
+        "rot90 then cut": lambda s: cutbox(rot(s, 90)),
+        "rot45 then cut": lambda s: cutbox(rot(s, 45)),
+        "rot90x then cut": lambda s: cutbox(rot(s, 90, (1, 0, 0))),
+        "translate then cut": lambda s: cutbox(
+            k.transform(s, translate=(3, 5, 7))),
+        "mirror then cut": lambda s: cutbox(k.mirror(s, "xy")),
+        "scale then cut": lambda s: cutbox(k.scale(s, 2)),
+        "cut by rot45 tool": lambda s: k.boolean(
+            "cut", s, k.transform(rot(k.box(2, 2, 100), 45),
+                                  translate=_mid(k, s))),
+        "cut by loft tool": lambda s: k.boolean("cut", s, loft_tool(s)),
+        "cut then cut": lambda s: k.boolean(
+            "cut", cutbox(s), k.transform(k.cylinder(1, 100),
+                                          translate=_mid(k, s))),
+        "cut then union": lambda s: k.boolean(
+            "union", cutbox(s), k.transform(k.box(2, 2, 2),
+                                            translate=_far(k, s))),
+        "cut then shell": lambda s: k.shell(cutbox(s), [], 1),
+        "cut then fillet": lambda s: k.fillet(cutbox(s), [], 1),
+        "cut then export_step": lambda s: k.export_step(cutbox(s),
+                                                        out("cc.step")),
+        "rot90 then export_step": lambda s: k.export_step(rot(s, 90),
+                                                          out("r90.step")),
+        "rot45 then export_step": lambda s: k.export_step(rot(s, 45),
+                                                          out("r45.step")),
+        "rot90 then tessellate": lambda s: k.tessellate(rot(s, 90)),
+        "rot45 then measure": lambda s: k.measure(rot(s, 45)),
+    }
+
+
 # Cells that are OUTSIDE ANY EXACT FIELD, permanently. These are not backlog
 # and never will be: under ADR-0019 the refusal IS the finished answer, and
 # counting them as gaps makes the matrix read as 345 achievable cells when it
@@ -173,8 +255,59 @@ _EXACT_FIELD_BOUNDARY = {
 }
 
 
+# COMPOSED cells outside any exact field, permanently — ONLY entries whose
+# tier-1 proof carries verbatim through the composing operation (an isometry
+# maps the whole configuration to a congruent one, and a rational scaling
+# keeps the volume in the same field). Anything without such an argument
+# stays an honest gap; classifying it here without proof would be gaming
+# the number. In particular the "cut then …" chains on sphere/cone stay
+# gaps even though their FIRST step is a proven wall: a certified-interval
+# answer (ADR-0019) to step one would unblock them, so they are not
+# permanent in the same sense.
+_SPHERE_WALL = _EXACT_FIELD_BOUNDARY[("sphere", "cut box")]
+_CONE_WALL = _EXACT_FIELD_BOUNDARY[("cone", "cut box")]
+_EXACT_FIELD_BOUNDARY_COMPOSED: dict[tuple[str, str], str] = {
+    # a sphere is invariant under every rotation and reflection about its
+    # center, and the probe tool is placed relative to the (moved) bbox —
+    # each of these configurations is CONGRUENT to tier-1 (sphere, cut box)
+    ("sphere", "rot90 then cut"): _SPHERE_WALL,
+    ("sphere", "rot45 then cut"): _SPHERE_WALL,
+    ("sphere", "rot90x then cut"): _SPHERE_WALL,
+    ("sphere", "translate then cut"): _SPHERE_WALL,
+    ("sphere", "mirror then cut"): _SPHERE_WALL,
+    # rotating the square tool about its own vertical axis and cutting a
+    # sphere is the tier-1 configuration rotated 45° whole
+    ("sphere", "cut by rot45 tool"): _SPHERE_WALL,
+    # the proof is generic in the sphere's radius (a square prism through a
+    # sphere has an arcsin in its volume), so the 2× sphere hits it too
+    ("sphere", "scale then cut"): _SPHERE_WALL,
+    # the cone is axisymmetric about z and the tool tracks the bbox, so a
+    # z-rotation or a translation maps tier-1 (cone, cut box) congruently;
+    # NOT carried: mirror (cuts the other half — different integral),
+    # rot90x (cone on its side), scale (tool no longer scales with it)
+    ("cone", "rot90 then cut"): _CONE_WALL,
+    ("cone", "rot45 then cut"): _CONE_WALL,
+    ("cone", "translate then cut"): _CONE_WALL,
+}
+
+
 def probe(k=None) -> dict:
     """Run every operation against every representation; classify each cell."""
+    return _probe(k, operations, _EXACT_FIELD_BOUNDARY)
+
+
+def probe_composed(k=None) -> dict:
+    """The COMPOSED tier (#10): every op CHAIN against every representation.
+
+    Same classification, same honesty rules — but each cell exercises two or
+    three operations composed, scoring whether results stay usable. Reported
+    ALONGSIDE the single-op number, never blended into it: the pair is the
+    honest headline, because a fresh-solid grid alone overstates what a real
+    modelling session can do."""
+    return _probe(k, composed_operations, _EXACT_FIELD_BOUNDARY_COMPOSED)
+
+
+def _probe(k, make_ops, boundary) -> dict:
     import tempfile
 
     if k is None:
@@ -183,7 +316,7 @@ def probe(k=None) -> dict:
         k = get_kernel()
     tmpdir = tempfile.mkdtemp()
     shapes = representations(k)
-    ops = operations(k, tmpdir)
+    ops = make_ops(k, tmpdir)
     grid: dict[str, dict[str, str]] = {}
     detail: dict[tuple[str, str], str] = {}
     for sname, shape in shapes.items():
@@ -203,10 +336,10 @@ def probe(k=None) -> dict:
                 row[oname] = {"NotYetImplemented": "refused",
                               "BadInput": "bad-input"}.get(diag, "refused")
                 detail[(sname, oname)] = str(exc)
-                if (sname, oname) in _EXACT_FIELD_BOUNDARY:
+                if (sname, oname) in boundary:
                     # a permanent, correct answer — not a gap to be closed
                     row[oname] = "exact-field"
-                    detail[(sname, oname)] = _EXACT_FIELD_BOUNDARY[(sname, oname)]
+                    detail[(sname, oname)] = boundary[(sname, oname)]
             except NotImplementedError as exc:
                 row[oname] = "refused"
                 detail[(sname, oname)] = str(exc)
@@ -222,29 +355,48 @@ _MARK = {"ok": "✅", "refused": "🚧", "bad-input": "·", "CRASH": "💥",
          "exact-field": "∎", "n/a": "—"}
 
 
-def to_markdown(result: dict) -> str:
+def tally(result: dict) -> dict[str, int]:
+    t: dict[str, int] = {}
+    for row in result["grid"].values():
+        for v in row.values():
+            t[v] = t.get(v, 0) + 1
+    return t
+
+
+def summary(result: dict) -> str:
+    t = tally(result)
+    total = sum(t.values()) or 1
+    return (f"{t.get('ok', 0)}/{total} "
+            f"({float(100 * t.get('ok', 0) / total):.0f}%) working, "
+            f"{t.get('refused', 0)} gaps, "
+            f"{t.get('exact-field', 0)} at the exact-field boundary "
+            f"(permanent), {t.get('CRASH', 0)} crashes")
+
+
+def headline(single: dict, composed: dict) -> str:
+    """THE public number — the honest pair (#10). The single-op grid alone
+    overstates real coverage (every cell starts from a fresh solid); the
+    composed grid is where a modelling session actually lives. Neither
+    number is allowed to travel without the other."""
+    return (f"single-op {summary(single)} · composed {summary(composed)}")
+
+
+def to_markdown(result: dict, title: str | None = None) -> str:
     grid, ops = result["grid"], result["ops"]
-    lines = ["| representation | " + " | ".join(ops) + " |",
-             "| --- |" + " --- |" * len(ops)]
+    lines = []
+    if title:
+        lines += [f"### {title}", ""]
+    lines += ["| representation | " + " | ".join(ops) + " |",
+              "| --- |" + " --- |" * len(ops)]
     for sname, row in grid.items():
         lines.append(f"| {sname} | "
                      + " | ".join(_MARK.get(row[o], row[o]) for o in ops) + " |")
-    tally: dict[str, int] = {}
-    for row in grid.values():
-        for v in row.values():
-            tally[v] = tally.get(v, 0) + 1
-    total = sum(tally.values()) or 1
     lines.append("")
     lines.append("Legend: ✅ works · 🚧 honest refusal (capability gap) · "
                  "· bad-input · 💥 raw crash through the seam (DEFECT) · "
                  "∎ outside any exact field, permanently · — n/a")
     lines.append("")
-    lines.append(f"**Coverage: {tally.get('ok', 0)}/{total} "
-                 f"({float(100 * tally.get('ok', 0) / total):.0f}%) working, "
-                 f"{tally.get('refused', 0)} gaps, "
-                 f"{tally.get('exact-field', 0)} at the exact-field "
-                 "boundary (permanent), "
-                 f"{tally.get('CRASH', 0)} crashes.**")
+    lines.append(f"**Coverage: {summary(result)}.**")
     return "\n".join(lines)
 
 
@@ -259,14 +411,32 @@ def main() -> None:  # pragma: no cover - CLI
     ap.add_argument("--md", action="store_true", help="markdown table")
     ap.add_argument("--crashes", action="store_true",
                     help="list only the raw-crash cells (defects)")
+    ap.add_argument("--single", action="store_true",
+                    help="single-op tier only (skip the composed grid)")
     args = ap.parse_args()
     r = probe()
+    rc = None if args.single else probe_composed()
     if args.crashes:
-        for (s, o), msg in sorted(r["detail"].items()):
-            if r["grid"].get(s, {}).get(o) == "CRASH":
-                print(f"{s:24} {o:16} {msg}")
+        for res in (r, rc) if rc else (r,):
+            for (s, o), msg in sorted(res["detail"].items()):
+                if res["grid"].get(s, {}).get(o) == "CRASH":
+                    print(f"{s:24} {o:24} {msg}")
         return
-    print(to_markdown(r) if args.md else _plain(r))
+    if args.md:
+        out = [to_markdown(r, title="single operations (fresh solid)")]
+        if rc:
+            out.append("")
+            out.append(to_markdown(rc, title="composed operations "
+                                             "(result-of-an-op as operand — #10)"))
+            out.append("")
+            out.append(f"**Headline (the honest pair): {headline(r, rc)}.**")
+        print("\n".join(out))
+    else:
+        chunks = [_plain(r)]
+        if rc:
+            chunks.append(_plain(rc))
+            chunks.append(f"headline: {headline(r, rc)}")
+        print("\n".join(c for c in chunks if c))
 
 
 def _plain(r: dict) -> str:

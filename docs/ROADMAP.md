@@ -19,13 +19,27 @@ cross-domain · **[G]** GUI/viewer · **[I]** infra/ecosystem ·
 
 ## Where things stand (2026-07-27)
 
-**Released:** all six packages are live on PyPI at **0.9.8** (`gitcad`,
+**Released:** all six packages are live on PyPI at **0.9.9** (`gitcad`,
 `gitcad-core`, `gitcad-mech`, `gitcad-ecad`, `forgekernel`, `forgekernel_rs`).
-A clean `pip install gitcad==0.9.8` scores **340/345 (99%)** on the capability
-matrix (`python -m gitcad.bench.capability --md`) — 0 honest gaps, 5 cells
-permanently outside any exact field (each carries a transcendence proof; see
-`docs/releases/0.9.7.md`), 0 crashes. Main and the release currently coincide
-— the matrix run from the repo venv reports the same 340/345.
+
+**The capability number is a pair now (#10), and both halves are the
+public claim** (`python -m gitcad.bench.capability --md` prints both):
+
+* **single-op 340/345 (99%)** — every seam operation against a fresh
+  solid; 0 honest gaps, 5 cells permanently outside any exact field (each
+  carries a transcendence proof; see `docs/releases/0.9.7.md`), 0 crashes.
+  Identical on main and the released wheels.
+* **composed 130/255 (51%)** — operation CHAINS: rotate-then-boolean,
+  boolean-result reuse (cut→cut, cut→shell, cut→fillet), cutting with a
+  transformed or lofted tool, export/tessellate of a transformed solid.
+  115 honest gaps, 10 permanent (tier-1 proofs carried verbatim by
+  congruence), 0 crashes. Measured on main 2026-07-27; the composed tier
+  itself lands in the next release.
+
+The single-op grid alone overstated what a modelling session can do — a
+rotated lathe scored ✅ while no longer being a boolean operand or a STEP
+export. The composed gap list is the composition backlog, in priority
+order; see `docs/kernel-roadmap.md`.
 
 **0.9.8's headline is K7**: booleans over freeform NURBS solids — two lofted
 solids in, one audited shell out, the volume reported as a certified interval

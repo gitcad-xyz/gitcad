@@ -75,3 +75,20 @@ def test_no_operation_crashes_through_the_kernel_seam() -> None:
                for s, row in r["grid"].items()
                for o, v in row.items() if v == "CRASH"]
     assert crashes == [], f"raw exceptions through the seam: {crashes[:5]}"
+
+
+@pytest.mark.kernel
+def test_no_composed_operation_crashes_through_the_kernel_seam() -> None:
+    """INVARIANT: the same honesty rule holds for COMPOSED operations (#10) —
+    the result of one seam op used as the operand of the next. This is where
+    a real modelling session lives, and where 11 crashes hid when the census
+    only ever probed fresh solids (a rotated drilled plate cut by a box died
+    in `SurdVal ** int`; shelling a cut boss died unpacking a None bbox).
+    A refusal is a finished answer; a raw TypeError never is."""
+    from gitcad.bench.capability import probe_composed
+
+    r = probe_composed()
+    crashes = [(s, o, r["detail"].get((s, o), ""))
+               for s, row in r["grid"].items()
+               for o, v in row.items() if v == "CRASH"]
+    assert crashes == [], f"raw exceptions through the seam: {crashes[:5]}"

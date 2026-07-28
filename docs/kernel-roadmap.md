@@ -31,9 +31,25 @@ regenerable — no more discovering fundamentals by accident.
 
 ## Current state
 
-**340/345 (99%) working · 0 honest gaps · 5 permanent (outside any exact
-field) · 0 crashes** — identical on main (repo venv, 2026-07-27) and on the
-released **0.9.8** wheels (clean-venv `pip install gitcad==0.9.8`).
+The headline is a PAIR (#10) — neither number travels without the other:
+
+**Single-op: 340/345 (99%) working · 0 honest gaps · 5 permanent (outside
+any exact field) · 0 crashes** — identical on main (repo venv, 2026-07-27)
+and on the released wheels.
+
+**Composed: 130/255 (51%) working · 115 honest gaps · 10 permanent · 0
+crashes** — measured on main, 2026-07-27. The composed grid probes op
+CHAINS (rotate-then-boolean, boolean-result-then-shell, cut by a
+transformed tool, export/tessellate of a transformed solid): whether the
+*result* of an operation is still a usable operand, which the single-op
+grid — every cell a fresh solid — cannot see. A first real model
+contradicts a fresh-solid 99% within minutes of use; 51% is the honest
+number for that session, and the gap list between the two IS the
+composition backlog (dominated by `Body × Solid` booleans — a transformed
+solid landing in the canonical B-rep loses boolean operability — and
+boolean-result reuse). The 10 permanent composed cells inherit tier-1
+transcendence proofs verbatim (isometry/rational-scaling congruence only;
+everything without such a proof stays a gap).
 
 (Progression: 218/345 when this document was written; 236 after ADR-0021
 landed; 247 after transforms and STEP moved to the canonical form; 290 after
