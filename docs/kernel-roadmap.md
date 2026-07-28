@@ -33,17 +33,18 @@ regenerable — no more discovering fundamentals by accident.
 
 The headline is a PAIR (#10) — neither number travels without the other:
 
-**Single-op: 340/345 (99%) working · 0 honest gaps · 5 permanent (outside
-any exact field) · 0 crashes** — identical on main (repo venv, 2026-07-27)
-and on the released wheels.
+**Single-op: 341/345 (99%) working · 0 honest gaps · 4 permanent (outside
+any exact field) · 0 crashes** — measured on main, 2026-07-28. The tier is
+COMPLETE: 341 + 0 + 4 = 345, so every cell either computes or hits a wall
+backed by a real transcendence proof.
 
-**Composed: 130/255 (51%) working · 115 honest gaps · 10 permanent · 0
-crashes** — measured on main, 2026-07-27. The composed grid probes op
+**Composed: 166/285 (58%) working · 109 honest gaps · 10 permanent · 0
+crashes** — measured on main, 2026-07-28. The composed grid probes op
 CHAINS (rotate-then-boolean, boolean-result-then-shell, cut by a
 transformed tool, export/tessellate of a transformed solid): whether the
 *result* of an operation is still a usable operand, which the single-op
 grid — every cell a fresh solid — cannot see. A first real model
-contradicts a fresh-solid 99% within minutes of use; 51% is the honest
+contradicts a fresh-solid 99% within minutes of use; 58% is the honest
 number for that session, and the gap list between the two IS the
 composition backlog (dominated by `Body × Solid` booleans — a transformed
 solid landing in the canonical B-rep loses boolean operability — and
@@ -51,12 +52,28 @@ boolean-result reuse). The 10 permanent composed cells inherit tier-1
 transcendence proofs verbatim (isometry/rational-scaling congruence only;
 everything without such a proof stays a gap).
 
+**The DENOMINATOR moved on 2026-07-28, and that is part of the claim.** The
+composed grid was 255 cells and is now 285: every tool in it was axis-aligned
+or turned by the SAME angle as the body, so a boolean across two DIFFERENT
+number fields — a 45° body cut by a 30° tool — could not occur, and the grid
+reported "0 crashes" while two crashes and a silent wrong number were live.
+Two columns now cover that family. A grid that cannot see a family cannot
+score it; when a bug is found outside the instrument, widen the instrument in
+the same change and say the new denominator out loud.
+
 (Progression: 218/345 when this document was written; 236 after ADR-0021
 landed; 247 after transforms and STEP moved to the canonical form; 290 after
 the Cone and RevolveSolid converters, the native body text format, and
 chamfer/shell on curved solids; 327 at the 0.9.6 release; 339 after
 the trimmed-quadric, torus, and Q[√d] exact-field work; 340 — the ceiling
-short of the five proven walls — measured on the 0.9.8 wheels.)
+short of the five proven walls — measured on the 0.9.8 wheels; 341 once
+`chamfered box × chamfer(all)` was shown NOT to be a wall, leaving four.
+
+Composed progression: 130/255 → 145/255 after the biquadratic tower was wired
+in → 155/285 on the widened grid → 166/285 once rigid motions stopped
+destroying the representation. The last step moved 11 cells without adding a
+single geometry algorithm: it only stopped THROWING AWAY what the kernel
+already knew.)
 
 The matrix does not yet probe the K7 freeform boolean cells (loft × loft
 and PatchSolid × PatchSolid land outside its 15 representations × 23 ops
