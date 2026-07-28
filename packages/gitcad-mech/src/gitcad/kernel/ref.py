@@ -3145,9 +3145,14 @@ class RefKernel:
         if not (open_top or open_bot):
             _nope("boolean.cut(a pocket open at neither end is an internal "
                   "cavity)", "K2.2")
-        if open_top and open_bot:
-            _nope("boolean.cut(a prism open at both ends splits the lathe)",
-                  "K2.2")
+        # Open at BOTH ends is a THROUGH SLOT, not a split — the same reading
+        # `_pocket_solid` already corrected for general bodies. A prism whose
+        # footprint stays strictly inside the wall (the guard below) cannot
+        # disconnect the material: the remainder still runs all the way round
+        # it. The refusal is decided AFTER the guards for exactly that reason,
+        # so "does it split?" is answered by the wall test rather than asserted
+        # from the z extent (#48).
+        through = open_top and open_bot
         # the footprint must stay strictly inside the material over [za, zb],
         # or the prism breaks out through a wall and the faces are not these
         far2 = max((x - cx) ** 2 + (y - cy) ** 2
@@ -3202,7 +3207,7 @@ class RefKernel:
             _nope("boolean.cut(the prism's column is not solid to the axis: a "
                   "coaxial bore runs through it)", "K2.2")
         return _pocket_lathe_body(prof, cx, cy, (x0, y0, x1, y1), za, zb,
-                                  open_top)
+                                  open_top, through=through)
 
     def _bore_lathe(self, a, tool):
         """A coaxial cylinder through a solid of revolution is another solid
@@ -6512,7 +6517,7 @@ def _bore_lathe_profile(prof, tool_r, zlo, zhi):
     return out
 
 
-def _pocket_lathe_body(prof, cx, cy, rect, za, zb, open_top):
+def _pocket_lathe_body(prof, cx, cy, rect, za, zb, open_top, through=False):
     """A solid of revolution with an axis-aligned rectangular POCKET.
 
     A plane parallel to a lathe's axis meets its cylindrical faces in straight
@@ -6520,6 +6525,11 @@ def _pocket_lathe_body(prof, cx, cy, rect, za, zb, open_top):
     and no new surface type — only the topology has to be built: the open
     end's cap gains an inner loop, the prism contributes four planar walls,
     and a blind pocket contributes a floor.
+
+    ``through`` opens BOTH ends — two mouths and no floor, the same shape
+    ``_pocket_into_body`` builds for a general body. It is the caller's wall
+    guard, not the z extent, that decides whether such a slot disconnects the
+    part; a footprint strictly inside the wall never does (#48).
     """
     from fractions import Fraction as Q
     from forgekernel import body as B
@@ -6527,7 +6537,7 @@ def _pocket_lathe_body(prof, cx, cy, rect, za, zb, open_top):
 
     x0, y0, x1, y1 = rect
     zc = za if open_top else zb                 # the closed (floor) end
-    zo = zb if open_top else za                 # the open end
+    opens = (za, zb) if through else ((zb,) if open_top else (za,))
     corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
 
     def loop_of(pts):
@@ -6553,22 +6563,26 @@ def _pocket_lathe_body(prof, cx, cy, rect, za, zb, open_top):
 
     faces = []
     src = B.to_body(RevolveSolid(prof, cx, cy)).faces
-    caps = [i for i, f in enumerate(src)
-            if isinstance(f.surface, B.Plane) and f.surface.n[0] == 0
-            and f.surface.n[1] == 0 and B._plane_point(f.surface)[2] == zo]
-    if len(caps) != 1:
-        # a lathe can have SEVERAL planar faces at one z (an annular groove
-        # reaching that end), and punching the mouth into all of them removed
-        # 20 where the truth was 12 — with a watertight mesh, so nothing
-        # downstream noticed. Zero caps means the open end is an apex.
-        _nope(f"boolean.cut(the pocket's open end meets {len(caps)} planar "
-              "faces, not exactly one)", "K2.2")
+    punched = {}
+    for zo in opens:
+        caps = [i for i, f in enumerate(src)
+                if isinstance(f.surface, B.Plane) and f.surface.n[0] == 0
+                and f.surface.n[1] == 0 and B._plane_point(f.surface)[2] == zo]
+        if len(caps) != 1:
+            # a lathe can have SEVERAL planar faces at one z (an annular groove
+            # reaching that end), and punching the mouth into all of them removed
+            # 20 where the truth was 12 — with a watertight mesh, so nothing
+            # downstream noticed. Zero caps means the open end is an apex.
+            _nope(f"boolean.cut(the pocket's open end meets {len(caps)} planar "
+                  "faces, not exactly one)", "K2.2")
+        punched[caps[0]] = zo
     for i, f in enumerate(src):
-        if i == caps[0]:
+        if i in punched:
             # an inner loop winds AGAINST the outer one about the surface
             # normal, whichever way that normal happens to point
             faces.append(B.Face(f.surface,
-                                f.loops + (ring(zo, False, f.surface.n),),
+                                f.loops + (ring(punched[i], False,
+                                                f.surface.n),),
                                 f.sense))
         else:
             faces.append(f)
@@ -6582,11 +6596,14 @@ def _pocket_lathe_body(prof, cx, cy, rect, za, zb, open_top):
         faces.append(B.Face(B.Plane(n, sum(n[k] * pts[0][k] for k in range(3))),
                             (oriented(pts, n, True),), True))
 
-    nz = Q(1) if open_top else Q(-1)             # floor faces INTO the pocket
-    nvec = (Q(0), Q(0), nz)
-    faces.append(B.Face(B.Plane(nvec, Q(zc) * nz),
-                        (ring(zc, True, nvec),), True))
-    return _audited(B.Body(tuple(faces)), "boolean.cut(lathe pocket)")
+    if not through:                              # a through slot has no floor
+        nz = Q(1) if open_top else Q(-1)         # floor faces INTO the pocket
+        nvec = (Q(0), Q(0), nz)
+        faces.append(B.Face(B.Plane(nvec, Q(zc) * nz),
+                            (ring(zc, True, nvec),), True))
+    return _audited(B.Body(tuple(faces)),
+                    "boolean.cut(lathe through slot)" if through
+                    else "boolean.cut(lathe pocket)")
 
 
 def _cap_index_at(src, zo, probe):
