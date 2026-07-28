@@ -116,10 +116,26 @@ def test_a_narrow_shoulder_refuses_by_name(k) -> None:
         k.shell(shape, [], 1)
 
 
-def test_a_bottom_entry_blind_bore_still_refuses_honestly(k) -> None:
-    """Entering from below is the same mathematics mirrored; there is no
-    constructor for it yet and the refusal must stay a refusal, not become
-    a wrong top-entry answer."""
-    shape = _plate([Cyl(15, 15, 3, 0, 6)])
-    with pytest.raises(KernelError, match="does not implement|K4.2"):
-        k.shell(shape, [], 1)
+def test_a_bottom_entry_blind_bore_is_the_mirror_not_a_top_entry_answer(k):
+    """Entering from below is the same mathematics mirrored — and now it is
+    BUILT, by conjugating the upward construction with a reflection through
+    the plate's own mid-z plane (shelling commutes with isometries).
+
+    This asserted a refusal, whose stated worry was that the bottom case must
+    "not become a wrong top-entry answer". That worry is kept, and sharpened
+    into the check that would actually catch it: the bore here is 6 deep in a
+    10 plate, so it is NOT symmetric in z, and a bottom-entry answer that
+    quietly reused the top-entry construction would differ. The two must be
+    EQUAL — because they are congruent — and exact arithmetic lets that be
+    tested as equality rather than as a tolerance.
+    """
+    bottom = k.shell(_plate([Cyl(15, 15, 3, 0, 6)]), [], 1)
+    top = k.shell(_plate([Cyl(15, 15, 3, 4, 10)]), [], 1)
+
+    vb = k.mass_props(bottom)["volume"]
+    vt = k.mass_props(top)["volume"]
+    assert vb == vt, f"mirror pair disagree: {vb} vs {vt}"
+    assert k.validate(bottom).ok and k.validate(top).ok
+
+    # and it is a real hollowing, not a pass-through of the solid
+    assert vb < k.mass_props(_plate([Cyl(15, 15, 3, 0, 6)]))["volume"]

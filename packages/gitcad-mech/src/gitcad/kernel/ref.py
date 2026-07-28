@@ -418,6 +418,19 @@ def _trimmed_face_descriptor(face) -> dict:
     return base
 
 
+def bands_open_down(cyls, bz0, bz1) -> bool:
+    """Does this coaxial stack reach the BOTTOM face and not the top?
+
+    The test is exact — equality of rationals against the base's own z
+    extent — because "does the bore break the surface" is topology, not a
+    proximity question (ADR-0019). Mirrors the band logic of the upward
+    path: the stack's extent is the union of its cylinders' z spans.
+    """
+    z0 = min(c[0] for c in cyls)
+    z1 = max(c[1] for c in cyls)
+    return z0 == bz0 and z1 != bz1
+
+
 def _open_edge_count(mesh: dict) -> int:
     """Edges used by exactly one triangle — the mesh's own witness that it
     does not bound a solid. Counted on the winding, so it is a topological
@@ -2549,7 +2562,7 @@ class RefKernel:
         # opposite directions and cancel; boundary edges survive once.
         from collections import Counter
 
-        directed: Counter = Counter()
+        raw: list = []
         found_cap = False
         for p in shape.polys:
             if all(v[2] == z0 for v in p.verts):
@@ -2558,82 +2571,173 @@ class RefKernel:
                 for i in range(m):
                     a = (p.verts[i][0], p.verts[i][1])
                     b = (p.verts[(i + 1) % m][0], p.verts[(i + 1) % m][1])
-                    directed[(a, b)] += 1
-            elif not all(v[2] in (z0, z1) for v in p.verts):
+                    raw.append((a, b))
+            elif all(v[2] in (z0, z1) for v in p.verts):
+                pass                              # top cap, or a wall spanning
+            elif sum(p.verts[i][0] * p.verts[(i + 1) % len(p.verts)][1]
+                     - p.verts[(i + 1) % len(p.verts)][0] * p.verts[i][1]
+                     for i in range(len(p.verts))) == 0:
+                # A VERTICAL wall — zero projected area in xy — ADDED to the
+                # vertices-on-the-caps test above, not replacing it. A boolean
+                # routinely splits a wall at the tool's own z, leaving a vertex
+                # partway up a solid that is still a perfectly good right
+                # prism: cutting a 20³ box with a tool starting at mid-height
+                # reported "non-prism base" for a prism. The shoelace is exact
+                # over ℚ.
+                #
+                # Replacing the older test instead of widening it broke
+                # `loft/shell`, whose SLANTED walls have vertices only on the
+                # two caps and are not vertical at all. Both admit real cases;
+                # neither subsumes the other.
+                pass
+            else:
                 raise ValueError("shell(non-prism base) — K4.2")
         if not found_cap:
             raise ValueError("shell: no planar bottom cap found — K4.2")
+
+        # T-JUNCTIONS. Cancellation assumes the two polygons either side of an
+        # interior edge name the SAME segment, and after a boolean they often
+        # do not: cutting a 4x4 bore through a 20x20 cap leaves one side of the
+        # line y=8 as a single edge (0,8)->(20,8) while the other side is split
+        # at x=8 and x=12 by the hole. Those never cancel, so the interior line
+        # survives as "boundary" and the loop walk fails — which is what
+        # "cap boundary is not a single loop" was really reporting for a bored
+        # prism. Splitting every edge at each vertex lying strictly inside it
+        # restores the pairing. Collinearity and betweenness are exact
+        # predicates over ℚ, so no tolerance enters (ADR-0019).
+        verts = {v for e in raw for v in e}
+        directed: Counter = Counter()
+        for a, b in raw:
+            dx, dy = b[0] - a[0], b[1] - a[1]
+            span = dx * dx + dy * dy
+            on = []
+            for v in verts:
+                if v == a or v == b:
+                    continue
+                if (v[0] - a[0]) * dy != (v[1] - a[1]) * dx:
+                    continue                      # not collinear
+                s = (v[0] - a[0]) * dx + (v[1] - a[1]) * dy
+                if 0 < s < span:
+                    on.append((s, v))
+            chain = [a] + [v for _, v in sorted(on)] + [b]
+            for i in range(len(chain) - 1):
+                directed[(chain[i], chain[i + 1])] += 1
         boundary = {a: b for (a, b), cnt in directed.items()
                     if cnt == 1 and directed.get((b, a), 0) == 0}
         if not boundary:
             raise ValueError("shell: cap boundary reconstruction failed")
-        start = next(iter(boundary))
-        bottom = [start]
-        cur = boundary[start]
-        while cur != start:
-            bottom.append(cur)
-            cur = boundary.get(cur)
-            if cur is None or len(bottom) > len(boundary) + 1:
-                raise ValueError("shell: cap boundary is not a single loop")
-        if len(bottom) != len(boundary):
-            # The walk CLOSED without CONSUMING every boundary edge: the cap
-            # has more than one loop (a disconnected solid, or a cap with a
-            # hole). Chaining one loop successfully proved nothing — hollowing
-            # just that component returned 1488 for a pair of 10³ boxes whose
-            # true member-wise shell is 976, a silent wrong number.
-            raise ValueError("shell: cap boundary is not a single loop — "
-                             "K4.2 for multi-loop caps")
-        # drop collinear midpoints so each remaining edge is a true side
-        cleaned = []
-        m = len(bottom)
-        for i in range(m):
-            (x0_, y0_), (x1_, y1_), (x2_, y2_) = (
-                bottom[i - 1], bottom[i], bottom[(i + 1) % m])
-            if (x1_ - x0_) * (y2_ - y1_) != (y1_ - y0_) * (x2_ - x1_):
-                cleaned.append(bottom[i])
-        bottom = cleaned
-        if len(bottom) < 3:
-            raise ValueError("shell: degenerate cap boundary")
-        # enforce CCW (positive shoelace)
-        area2 = sum(bottom[i][0] * bottom[(i + 1) % len(bottom)][1]
-                    - bottom[(i + 1) % len(bottom)][0] * bottom[i][1]
-                    for i in range(len(bottom)))
-        if area2 < 0:
-            bottom = list(reversed(bottom))
-            area2 = -area2
-        n = len(bottom)
-        lines = []                          # (a, b, c): ax + by = c inset line
-        for i in range(n):
-            (x1, y1), (x2, y2) = bottom[i], bottom[(i + 1) % n]
-            dx, dy = x2 - x1, y2 - y1
-            # NOT a convexity check. A reflex corner's inset is perfectly
-            # well defined — two inset lines still meet at a point — so
-            # refusing every L-bracket was too strong. What can actually go
-            # wrong is the inset SELF-INTERSECTING or escaping the profile
-            # where a notch is narrower than 2t, and that is checked on the
-            # finished polygon below, where it is a property of the answer
-            # rather than a guess about the input.
-            # |d| must be rational (Pythagorean edge)
-            l2 = dx * dx + dy * dy
-            num, den = l2.numerator, l2.denominator
-            rn, rd = isqrt(num), isqrt(den)
-            if rn * rn != num or rd * rd != den:
+        # EVERY loop, not just the first. Chaining one and stopping was the
+        # silent-wrong this guard was added for — hollowing a single component
+        # returned 1488 for a pair of 10³ boxes whose true member-wise shell is
+        # 976. But "more than one loop" conflated two different things: a cap
+        # with a HOLE (one solid, a prism bored through — the common pocket)
+        # and a DISCONNECTED cap (two solids). The first is buildable; only the
+        # second has to refuse.
+        loops = []
+        unvisited = dict(boundary)
+        while unvisited:
+            start = next(iter(unvisited))
+            loop = [start]
+            cur = unvisited.pop(start)
+            while cur != start:
+                if cur not in unvisited:
+                    raise ValueError("shell: cap boundary reconstruction "
+                                     "failed — an edge chain does not close")
+                loop.append(cur)
+                cur = unvisited.pop(cur)
+            loops.append(loop)
+
+        # The loop enclosing the most area is the outer boundary; the rest must
+        # be holes inside it. Two loops of the SAME orientation are two
+        # separate components, and their shells do not compose — that is the
+        # 1488-vs-976 case and it still refuses.
+        areas = [_signed_area2(lp) for lp in loops]
+        oi = max(range(len(loops)), key=lambda i: abs(areas[i]))
+        outer_sign = 1 if areas[oi] > 0 else -1
+        for i, a in enumerate(areas):
+            if i == oi:
+                continue
+            if (1 if a > 0 else -1) == outer_sign:
                 raise ValueError(
-                    "shell(irrational edge normal) — K4.2 (certified insets)")
-            length = Fraction(rn, rd)
-            # inward (left) unit normal = (-dy, dx)/|d|
-            a, b = -dy, dx
-            c = a * x1 + b * y1 + t * length   # shift by t along unit normal
-            lines.append((a, b, c))
-        inset = []
-        for i in range(n):
-            a1, b1, c1 = lines[i - 1]
-            a2, b2, c2 = lines[i]
-            det = a1 * b2 - a2 * b1
-            if det == 0:
-                raise ValueError("shell: degenerate inset corner")
-            inset.append(((c1 * b2 - c2 * b1) / det,
-                          (a1 * c2 - a2 * c1) / det))
+                    "shell: the cap has two separate outlines, so this is two "
+                    "solids and not one — shell each body on its own "
+                    "(K4.2 composes per body, not per scene)")
+        bottom = loops[oi]
+        # each hole keeps its own (opposite) winding: the offset below shifts
+        # every edge along its LEFT normal, which is into the material for the
+        # outer loop and out of the hole for a hole — the same code, no sign
+        # analysis, because the reconstruction already orients each loop with
+        # material on its left
+        holes = [lp for i, lp in enumerate(loops) if i != oi]
+        # Normalise ALL loops together: the outer becomes CCW and every hole
+        # follows. Flipping only the outer would break the relative winding
+        # the offset relies on, and turn a hole's dilation into an erosion —
+        # a wrong number rather than a refusal.
+        if areas[oi] < 0:
+            bottom = list(reversed(bottom))
+            holes = [list(reversed(h)) for h in holes]
+
+        def _clean(loop):
+            """Drop collinear midpoints so each remaining edge is a true side."""
+            out = []
+            m = len(loop)
+            for i in range(m):
+                (x0_, y0_), (x1_, y1_), (x2_, y2_) = (
+                    loop[i - 1], loop[i], loop[(i + 1) % m])
+                if (x1_ - x0_) * (y2_ - y1_) != (y1_ - y0_) * (x2_ - x1_):
+                    out.append(loop[i])
+            if len(out) < 3:
+                raise ValueError("shell: degenerate cap boundary")
+            return out
+
+        bottom = _clean(bottom)
+        holes = [_clean(h) for h in holes]
+        area2 = _signed_area2(bottom)
+
+        def _offset(loop):
+            """Every edge shifted t along its LEFT unit normal, corners at the
+            shifted lines' intersections.
+
+            Orientation-agnostic on purpose: the reconstruction hands each loop
+            back with material on its left, so this erodes the outer boundary
+            and DILATES a hole with no sign analysis at all. That is why a
+            bored prism needs no second algorithm.
+            """
+            m = len(loop)
+            lines = []                      # (a, b, c): ax + by = c offset line
+            for i in range(m):
+                (x1, y1), (x2, y2) = loop[i], loop[(i + 1) % m]
+                dx, dy = x2 - x1, y2 - y1
+                # NOT a convexity check. A reflex corner's inset is perfectly
+                # well defined — two inset lines still meet at a point — so
+                # refusing every L-bracket was too strong. What can actually go
+                # wrong is the inset SELF-INTERSECTING or escaping the profile
+                # where a notch is narrower than 2t, and that is checked on the
+                # finished polygon below, where it is a property of the answer
+                # rather than a guess about the input.
+                # |d| must be rational (Pythagorean edge)
+                l2 = dx * dx + dy * dy
+                num, den = l2.numerator, l2.denominator
+                rn, rd = isqrt(num), isqrt(den)
+                if rn * rn != num or rd * rd != den:
+                    raise ValueError("shell(irrational edge normal) — K4.2 "
+                                     "(certified insets)")
+                length = Fraction(rn, rd)
+                a, b = -dy, dx              # inward (left) unit normal
+                c = a * x1 + b * y1 + t * length
+                lines.append((a, b, c))
+            out = []
+            for i in range(m):
+                a1, b1, c1 = lines[i - 1]
+                a2, b2, c2 = lines[i]
+                det = a1 * b2 - a2 * b1
+                if det == 0:
+                    raise ValueError("shell: degenerate inset corner")
+                out.append(((c1 * b2 - c2 * b1) / det,
+                            (a1 * c2 - a2 * c1) / det))
+            return out
+
+        inset = _offset(bottom)
         # validity, checked on the RESULT: same orientation, strictly smaller,
         # simple, and wholly inside the profile it hollows
         in_area2 = _signed_area2(inset)
@@ -2646,8 +2750,35 @@ class RefKernel:
                 "shell(thickness makes the void self-intersect) — K4.2")
         if not all(_point_in_poly(bottom, q) for q in inset):
             raise ValueError("shell(the void escapes the profile) — K4.2")
+
+        grown = []
+        for h in holes:
+            g = _offset(h)
+            # a dilated hole must GROW (its signed area, negative here, gets
+            # more negative), stay simple, and still sit inside the eroded
+            # outer wall — otherwise the wall between hole and rim is thinner
+            # than 2t and there is no shell, only a wrong number
+            if not _is_simple(g):
+                raise ValueError("shell(thickness makes the bore's wall "
+                                 "self-intersect) — K4.2")
+            if abs(_signed_area2(g)) <= abs(_signed_area2(h)):
+                raise ValueError("shell: a bore's wall did not grow — the "
+                                 "hole's winding is inconsistent with the cap")
+            if not all(_point_in_poly(inset, q) for q in g):
+                raise ValueError(
+                    "shell(the wall around a bore is thinner than 2t, so the "
+                    "cavity breaks into the bore) — K4.2")
+            grown.append(g)
+
         void = self._fk.prism(inset, z1 - z0 - 2 * t)
         void = self._fk.translate(void, 0, 0, z0 + t)
+        for g in grown:
+            # the material around a bore is NOT cavity: remove each dilated
+            # hole from the void before it is cut out of the solid
+            solidified = self._fk.translate(
+                self._fk.prism([(x, y) for x, y in reversed(g)],
+                               z1 - z0 - 2 * t), 0, 0, z0 + t)
+            void = self._fk.boolean("cut", void, solidified)
         return self._fk.boolean("cut", shape, void)
 
     def _box_check(self, shape):
@@ -3882,6 +4013,43 @@ class RefKernel:
             if z1 > z0:
                 groups[(Fraction(c.cx), Fraction(c.cy))].append(
                     (z0, z1, Fraction(c.r)))
+
+        # -- the mirrored construction, by CONJUGATION rather than a rewrite --
+        #
+        # The erosion below is written for stacks that open UPWARD. A bore
+        # entering from the bottom used to refuse as "the mirrored
+        # construction, not built yet" — and the twin case, the SAME integers
+        # reflected, returned a Body. That asymmetry was the sharpest single
+        # piece of evidence in the exact-vs-approximate audit that these gaps
+        # are unwritten code rather than arithmetic: no number field can
+        # explain one direction working and its mirror image not.
+        #
+        # Shelling COMMUTES WITH ISOMETRIES — shell(σS, t) = σ shell(S, t) for
+        # any distance-preserving σ, because the offset is defined by distance
+        # alone. So the mirrored case needs no new geometry: reflect the input
+        # through the base's own mid-z plane, run the upward construction, and
+        # reflect the answer back. z ↦ (bz0+bz1) − z is exact in ℚ, maps the
+        # box to itself, and `Affine.mirror` flips face senses (a reflection
+        # reverses orientation) — checked: the reflected body's vector-area
+        # defect is exactly (0,0,0), so the shell stays closed and outward.
+        if groups and all(bands_open_down(v, bz0, bz1) for v in groups.values()):
+            from forgekernel.quadric import Cyl as _Cyl
+
+            span = bz0 + bz1
+            flipped = DrilledSolid(
+                shape.base,
+                [_Cyl(c.cx, c.cy, c.r, span - Fraction(c.z1),
+                      span - Fraction(c.z0)) for c in shape.bores])
+            out = self._shell_drilled(flipped, t)
+            if out is None:
+                return None
+            return _audited(
+                B.to_body(out)
+                .transformed(B.Affine.mirror("z"))
+                .transformed(B.Affine.translation(0, 0, float(span)
+                                                  if not isinstance(span, Fraction)
+                                                  else span)),
+                "shell(drilled solid: mirrored)")
         scaffold: list = []        # cylinders to cut into the inset box
         sites: list = []           # (cx, cy, Z, ρ): reentrant rims → tori
         for (cx, cy), cyls in groups.items():
@@ -3905,13 +4073,19 @@ class RefKernel:
                       "erodes to a floating internal void)",
                       "K4.2 (offset surfaces)")
             if not open_top:
-                _nope("shell(drilled solid: a bore entering from the BOTTOM "
-                      "is the mirrored construction, not built yet)",
-                      "K4.2 (offset surfaces)",
-                      predicate="stack_opens_upward",
+                # Handled by the mirror conjugation above; reaching here means
+                # the stacks disagree about which way they open, which no
+                # single reflection fixes.
+                _nope("shell(drilled solid: this solid has bores entering from "
+                      "BOTH ends, and the erosion is only built for stacks "
+                      "that agree)", "K4.2 (offset surfaces)",
+                      predicate="stacks_open_the_same_way",
                       measured={"stack_z": [float(bands[0][0]),
                                             float(bands[-1][1])],
-                                "solid_z": [float(bz0), float(bz1)]})
+                                "solid_z": [float(bz0), float(bz1)]},
+                      remedy=("shell the solid with the bores from one end, "
+                              "then cut the opposite-entering bores into the "
+                              "shelled body"))
             for (_a, zb0, r0), (_a2, _b2, r1) in zip(bands, bands[1:]):
                 if r1 <= r0:
                     _nope("shell(drilled solid: a stack that narrows upward "

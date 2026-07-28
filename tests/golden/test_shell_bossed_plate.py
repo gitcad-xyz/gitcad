@@ -115,5 +115,10 @@ def test_a_disconnected_solid_refuses_rather_than_hollowing_one_part(k):
 
     u = csg.union(Solid.box(10, 10, 10),
                   fk_translate(Solid.box(10, 10, 10), 15, 0, 0))
-    with pytest.raises(KernelError, match="single loop"):
+    # Matched "single loop" until the cap walk learned to reconstruct EVERY
+    # loop: a cap with a hole is now built (a bored prism shells), so
+    # "more than one loop" stopped being the reason. The reason is that these
+    # are two SOLIDS, whose shells do not compose — which is what the message
+    # says now, and what this test has always actually been about.
+    with pytest.raises(KernelError, match="two solids"):
         k.shell(u, [], 1)
