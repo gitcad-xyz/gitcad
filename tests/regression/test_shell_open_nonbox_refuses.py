@@ -6,7 +6,9 @@ bounding box, which is only the right void when the base IS its bounding
 box. On a lofted frustum (40x40 base, 20x20 top, h=20) the box void
 swallowed every sloped wall above z=4: the "shell" measured 1480 mm^3,
 reported with ``geometry_verified: true``, where a true 2 mm open shell is
-~3900 mm^3. Silent wrong geometry, found designing a mouse top shell on the
+~5514 mm^3 (56000/3 - 18144 + 2232*sqrt5, derived from the perpendicular
+face offsets and Monte-Carlo-verified; the ~3900 first reported in #20 was
+itself a wrong number). Silent wrong geometry, found designing a mouse top shell on the
 0.9.9 wheels.
 
 Violated invariant: a refusal with a remedy is the product working; a wrong
