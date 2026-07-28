@@ -35,6 +35,20 @@ _GITATTRIBUTES = """\
 *.pcba   merge=gitcad
 """
 
+_GITIGNORE = """\
+# Text is source; geometry is a build artifact (ADR-0004). Exports and
+# rendered drawings are rebuilt from the model text — never committed.
+*.step
+*.stp
+*.stl
+*.brep
+*.dxf
+*.glb
+# rendered drawing sheets (regenerate with model_drawing / gitcad-render)
+*.drawing.pdf
+*.drawing.svg
+"""
+
 _WORKFLOW = """\
 name: gitcad
 on: [push, pull_request]
@@ -89,6 +103,7 @@ def init_project(path: str, *, name: str | None = None) -> list[str]:
     root_manifest = Assembly(project).to_manifest(new_part_id())
     files = {
         ".gitattributes": _GITATTRIBUTES,
+        ".gitignore": _GITIGNORE,
         ".github/workflows/gitcad.yml": _WORKFLOW,
         "README.md": _README.format(name=project),
         f"{project}.gitcad": root_manifest.dumps(),
