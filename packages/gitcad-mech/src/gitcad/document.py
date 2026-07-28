@@ -358,6 +358,17 @@ class Document:
             activity.note(text=f"{f.op} · {f.id}", feature=f.id)
             try:
                 shape = _dispatch(kernel, f_run, ins, result)
+            except KeyError as exc:
+                # A bare KeyError escaping an op body is a missing required
+                # param (`p["..."]`). Name the op, the feature and the key —
+                # "'top_z'" alone through the seam is a refusal no caller can
+                # act on (same contract as the structured kernel refusals).
+                key = exc.args[0] if exc.args else exc
+                msg = (f"op {f.op!r} missing required param {key!r} "
+                       f"(feature {f.id})")
+                activity.note("problem", text=f"{f.op} · {f.id}: {msg}",
+                              feature=f.id)
+                raise GitcadError(msg) from exc
             except Exception as exc:
                 activity.note("problem", text=f"{f.op} · {f.id}: {exc}",
                               feature=f.id)
