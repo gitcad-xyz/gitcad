@@ -5670,6 +5670,16 @@ class RefKernel:
             f.write(text)
 
     def export_stl(self, shape, path, *, deflection=0.1):
+        """Write the seam mesh as ASCII STL at the caller's deflection.
+
+        Floats are right here (ADR-0019): the tessellation is already the
+        float DISPLAY/EXPORT projection of the exact model — no topology is
+        decided downstream of it. The `norm > 0.0` guard on the facet-normal
+        length only chooses between emitting the derived unit normal and the
+        spec-blessed `0 0 0` placeholder for a degenerate sliver; both
+        branches write the same triangle, so no geometry hangs on the
+        comparison.
+        """
         # Round-9 docket W5 + W10: this used to try forge's `io.to_stl(shape)`
         # first, which calls `shape.tessellate()` with NO argument — so every
         # representation carrying a `.tessellate` attribute took a
@@ -5701,7 +5711,21 @@ class RefKernel:
         v = mesh["vertices"]
         out = ["solid forge"]
         for a, b, c in mesh["triangles"]:
-            out += ["facet normal 0 0 0", "outer loop"]
+            # STL facet normal from the triangle's own winding (right-hand
+            # rule), unit length as the spec asks. Strict consumers reject
+            # or re-orient on the `0 0 0` placeholder this used to write
+            # (#31); the winding already carries the orientation, so the
+            # normal is derived, never invented. A degenerate sliver keeps
+            # the spec-blessed zero vector rather than fabricating one.
+            (ax, ay, az), (bx, by, bz), (cx, cy, cz) = v[a], v[b], v[c]
+            ux, uy, uz = bx - ax, by - ay, bz - az
+            wx, wy, wz = cx - ax, cy - ay, cz - az
+            nx, ny, nz = (uy * wz - uz * wy, uz * wx - ux * wz,
+                          ux * wy - uy * wx)
+            norm = math.sqrt(nx * nx + ny * ny + nz * nz)
+            if norm > 0.0:
+                nx, ny, nz = nx / norm, ny / norm, nz / norm
+            out += [f"facet normal {nx:.9g} {ny:.9g} {nz:.9g}", "outer loop"]
             out += [f"vertex {v[i][0]:.9g} {v[i][1]:.9g} {v[i][2]:.9g}"
                     for i in (a, b, c)]
             out += ["endloop", "endfacet"]
