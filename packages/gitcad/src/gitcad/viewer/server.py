@@ -432,8 +432,9 @@ def discover_schematics(root: Path, limit: int = 12) -> list[dict]:
 
 class _Handler(BaseHTTPRequestHandler):
     # Set by serve(): project root + default view + kernel (+ review base ref).
-    path_watched: Path                     # the DEFAULT view (top assembly)
+    path_watched: Path                     # the startup view (top assembly)
     project_root: Path | None = None
+    pinned_default: bool = False           # True when serve() got a FILE
     kernel: Kernel
     review_base: str | None = None
 
@@ -448,6 +449,36 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
+    def _default(self) -> Path:
+        """The project's default view, RE-RESOLVED per request.
+
+        A project-mode viewer (started on a directory) promised "the page
+        opens on the TOP ASSEMBLY". Resolving that once at startup broke the
+        promise for the only order of work that exists: parts are written
+        before the assembly that instances them, so the daemon that
+        ``model_new(path=...)`` auto-starts is always looking at whichever
+        part happened to be created first, and the assembly — written last —
+        never became the default. Discovery is already re-scanned per
+        request (``/api/parts``); the default is the same kind of
+        project-level question and now answers the same way.
+
+        A viewer started on a single FILE keeps that file: pinning it is the
+        documented contract of ``serve(<design file>)``.
+        """
+        if self.pinned_default or self.project_root is None:
+            return self.path_watched
+        from gitcad.viewer.project import discover_designs, resolve_default
+
+        root = self.project_root
+        try:
+            rel = resolve_default(root, discover_designs(root))
+        except OSError:                      # a scan failure is never fatal
+            return self.path_watched
+        if not rel:
+            return self.path_watched
+        p = root / rel
+        return p if p.is_file() else self.path_watched
+
     def _target(self) -> Path:
         """The design a request is about: ``?file=<root-relative>`` selects any
         design in the project (the parts-are-in-page contract); no param means
@@ -457,7 +488,7 @@ class _Handler(BaseHTTPRequestHandler):
         rel = unquote((parse_qs(urlparse(self.path).query).get("file")
                        or [""])[0])
         if not rel:
-            return self.path_watched
+            return self._default()
         root = self.project_root or self.path_watched.parent
         p = (root / rel).resolve()
         if not p.is_relative_to(root):
@@ -482,7 +513,7 @@ class _Handler(BaseHTTPRequestHandler):
                 root = self.project_root or self.path_watched.parent
                 self._send(200, json.dumps({
                     "ok": True, "pid": _os.getpid(), "root": str(root),
-                    "default": self._rel(self.path_watched),
+                    "default": self._rel(self._default()),
                 }).encode(), "application/json")
                 return
             if route == "/api/parts":
@@ -491,7 +522,7 @@ class _Handler(BaseHTTPRequestHandler):
                 root = self.project_root or self.path_watched.parent
                 self._send(200, json.dumps({
                     "project": root.name,
-                    "default": self._rel(self.path_watched),
+                    "default": self._rel(self._default()),
                     "designs": discover_designs(root),
                 }).encode(), "application/json")
                 return
@@ -657,6 +688,7 @@ def serve(path: str, port: int = 8137, kernel: Kernel | None = None,
     handler = type("Handler", (_Handler,), {
         "path_watched": watched,
         "project_root": root,
+        "pinned_default": Path(path).resolve().is_file(),
         "kernel": kernel or get_kernel(),
         "review_base": review_base,
     })
