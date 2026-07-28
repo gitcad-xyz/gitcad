@@ -254,6 +254,24 @@ Assemblies of rotated parts are where this bites in real use.
 > at every representable angle, `validate` ok
 > (`tests/invariants/test_ops_commute_with_rotation.py`).
 >
+> **And a uniform SCALE, the third of the family (2026-07-28).** Same argument
+> once more: a similarity maps every representation here to itself, so a
+> cylinder scaled ×2 is a cylinder — and `scale` was sending all of them
+> through the canonical `Body`. `scaled(f)` now lives beside `mirrored` and
+> `rotated`. Anisotropic scale genuinely is NOT closed (an elliptic cylinder
+> is not in any family here) and keeps its honest refusal.
+>
+> The oracle is arithmetic: a similarity of ratio f multiplies volume by f³
+> exactly. All 15 corpus representations at ×2 — every type preserved, every
+> ratio exactly 8.0000. **Composed tier 166/285 → 174/285**, precisely the 8
+> `scale then cut` cells.
+>
+> Taken together, mirror + rotation + scale moved the composed tier 145 → 174
+> **without adding one geometry algorithm.** Every cell came from not throwing
+> away what the kernel already knew. That is worth stating plainly, because it
+> says the composed backlog was never purely a mathematics problem: a large
+> slice of it was the kernel forgetting what it was holding.
+>
 > Three further defects surfaced, each by the probe and not by the suite:
 > `kernel.rotate` typed coordinates as ℚ[√1] even at 90° (so a quarter-turned
 > drilled plate lost `fillet` — the byte-canonical form of this is docket S1);

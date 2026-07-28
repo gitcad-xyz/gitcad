@@ -1421,6 +1421,22 @@ class RefKernel:
             return self._fk.scale(shape, fx, fy, fz)
         fy = fx if fy is None else fy
         fz = fx if fz is None else fz
+        # A UNIFORM scale is a similarity, and every quadric family is closed
+        # under one: a scaled cylinder is a cylinder, radius and all. Dropping
+        # to the canonical Body for it cost the representation and with it
+        # every op that dispatches on one — `scale then cut` was 8 of the
+        # composed grid's 34 "landed in the canonical B-rep" cells.
+        #
+        # ANISOTROPIC scale genuinely leaves the family (squash a cylinder in
+        # x and it is an elliptic cylinder, which nothing here holds), so that
+        # case still goes through the canonical form, which is the answer
+        # rather than a refusal.
+        if fx == fy == fz:
+            own = getattr(shape, "scaled", None)
+            if own is not None:
+                out = own(fx)
+                if out is not None:
+                    return out
         return self._via_body(
             "scale", shape, lambda b: b.transformed(B.Affine.scaling(fx, fy, fz)))
 

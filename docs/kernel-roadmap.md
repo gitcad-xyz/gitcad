@@ -38,7 +38,7 @@ any exact field) · 0 crashes** — measured on main, 2026-07-28. The tier is
 COMPLETE: 341 + 0 + 4 = 345, so every cell either computes or hits a wall
 backed by a real transcendence proof.
 
-**Composed: 166/285 (58%) working · 109 honest gaps · 10 permanent · 0
+**Composed: 174/285 (61%) working · 101 honest gaps · 10 permanent · 0
 crashes** — measured on main, 2026-07-28. The composed grid probes op
 CHAINS (rotate-then-boolean, boolean-result-then-shell, cut by a
 transformed tool, export/tessellate of a transformed solid): whether the
@@ -70,10 +70,27 @@ short of the five proven walls — measured on the 0.9.8 wheels; 341 once
 `chamfered box × chamfer(all)` was shown NOT to be a wall, leaving four.
 
 Composed progression: 130/255 → 145/255 after the biquadratic tower was wired
-in → 155/285 on the widened grid → 166/285 once rigid motions stopped
-destroying the representation. The last step moved 11 cells without adding a
-single geometry algorithm: it only stopped THROWING AWAY what the kernel
-already knew.)
+in → 155/285 on the widened grid → 166/285 once ROTATION stopped destroying
+the representation → 174/285 once a uniform SCALE did too. Those last two
+steps moved 19 cells without adding a single geometry algorithm: they only
+stopped THROWING AWAY what the kernel already knew.
+
+The composed backlog is now measured rather than guessed — group the refusals
+and 101 gaps fall into four families:
+
+| cells | family |
+|---:|---|
+| 30 | `boolean.cut` on quadric × quadric operands — real unwritten geometry (K2.x) |
+| 26 | a `Body` operand the boolean has no path over (ADR-0021) |
+| 21 | `boolean.cut` on other operand pairs |
+| 19 | `fillet` / `shell` over composites and non-planar bases (K4.2 / K5.2) |
+
+The `Body`-operand family is the one that is about ARCHITECTURE rather than
+about missing mathematics, and it is what ADR-0021 exists to finish. Its
+remaining members are dominated by two cases the quadric families genuinely
+cannot express — a cylinder tilted onto the x axis (`Cyl` is +z by
+construction) and a rounded box turned 45° — which is the honest signal that
+`Body` itself has to become operable.)
 
 The matrix does not yet probe the K7 freeform boolean cells (loft × loft
 and PatchSolid × PatchSolid land outside its 15 representations × 23 ops
