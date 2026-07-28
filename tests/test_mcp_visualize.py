@@ -47,6 +47,76 @@ def test_visualize_without_browser_is_actionable(monkeypatch) -> None:
     assert r["ok"] is False and r["error"]["type"] == "NoBrowser"
 
 
+def _two_part_assembly(tmp_path):
+    """A tub + lid assembly on disk: manifest plus the sibling .part/.model
+    files its instances resolve against."""
+    from gitcad.part import Assembly, Interface, PartManifest, new_part_id
+
+    parts = []
+    for name, dz in (("tub", 0.0), ("lid", 5.0)):
+        (tmp_path / f"{name}.model").write_text(_MODEL, encoding="utf-8")
+        p = PartManifest(
+            id=new_part_id(), name=name, domain="mech", version="0.1.0",
+            interface=Interface(envelope={"origin": [0, 0, dz], "dx": 20,
+                                          "dy": 10, "dz": 5}),
+            body={"model": f"{name}.model"})
+        (tmp_path / f"{name}.part").write_text(p.dumps(), encoding="utf-8")
+        parts.append((name, p, dz))
+    asm = Assembly("enclosure")
+    for name, p, dz in parts:
+        asm.add(name, p, translate=(0, 0, dz))
+    path = tmp_path / "enclosure.part"
+    path.write_text(asm.to_manifest(new_part_id()).dumps(), encoding="utf-8")
+    return path
+
+
+def test_visualize_refuses_assembly_text_rather_than_shooting_the_error(tmp_path) -> None:
+    # An assembly resolves instances from sibling .part files. Handed only the
+    # TEXT there are no siblings, and the old path screenshotted the viewer's
+    # own "part not found" page and returned ok:true with it.
+    path = _two_part_assembly(tmp_path)
+    r = S.REGISTRY["visualize"](design=path.read_text(encoding="utf-8"))
+    assert r["ok"] is False
+    assert r["error"]["type"] == "AssemblyNeedsPath"
+    assert "path" in r["error"]["message"].lower()
+
+
+def test_visualize_renders_a_path_where_it_lives(tmp_path, monkeypatch) -> None:
+    path = _two_part_assembly(tmp_path)
+    seen: dict[str, str] = {}
+
+    def fake_render(file, out, **kw):
+        seen["file"] = file
+        seen.update({k: v for k, v in kw.items() if k in ("explode",)})
+        open(out, "wb").write(b"\x89PNG\r\n\x1a\n")
+        return out
+
+    monkeypatch.setattr("gitcad.render.find_browser", lambda: "chrome")
+    monkeypatch.setattr("gitcad.render.render", fake_render)
+    r = S.REGISTRY["visualize"](design=str(path), explode=0.6)
+    assert r["ok"] is True and r["kind"] == "assembly"
+    # rendered the manifest ITSELF, not a copy in a temp dir with no siblings
+    assert seen["file"] == str(path)
+    assert seen["explode"] == 0.6
+
+
+def test_visualize_still_takes_model_text(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("gitcad.render.find_browser", lambda: "chrome")
+    monkeypatch.setattr("gitcad.render.render",
+                        lambda file, out, **kw: open(out, "wb").write(
+                            b"\x89PNG\r\n\x1a\n"))
+    r = S.REGISTRY["visualize"](design=_MODEL)
+    assert r["ok"] is True and r["kind"] == "model"
+
+
+def test_design_text_and_path_only_treats_real_files_as_paths(tmp_path) -> None:
+    assert S._design_text_and_path(_MODEL) == (_MODEL, None)
+    assert S._design_text_and_path("no/such/file.model") == ("no/such/file.model", None)
+    f = tmp_path / "part.model"
+    f.write_text(_MODEL, encoding="utf-8")
+    assert S._design_text_and_path(str(f)) == (_MODEL, str(f))
+
+
 def test_image_bridge_converts_image_payload() -> None:
     import base64
 

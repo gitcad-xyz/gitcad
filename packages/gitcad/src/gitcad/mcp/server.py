@@ -1334,9 +1334,15 @@ def _svg_to_png_b64(svg: str, width: int = 1400, height: int = 900) -> str | Non
 
 
 def _design_to_png_b64(text: str, *, explode: float = 0.0, three: bool = False,
-                       width: int = 1400, height: int = 900) -> str | None:
-    """Render a design document (model/board/schematic/pcba/assembly text) to a
-    base64 PNG via ``gitcad.render``. Returns None when no browser is found."""
+                       width: int = 1400, height: int = 900,
+                       src_path: str | None = None) -> str | None:
+    """Render a design document (model/board/schematic/pcba/assembly) to a
+    base64 PNG via ``gitcad.render``. Returns None when no browser is found.
+
+    ``src_path`` renders the design WHERE IT LIVES. That matters for any
+    composite kind: an assembly resolves each instance against sibling
+    ``.part`` files, so a copy in a throwaway temp directory has no
+    instances to find and renders the resolver's own error message."""
     import base64
     import tempfile
     from pathlib import Path
@@ -1346,8 +1352,14 @@ def _design_to_png_b64(text: str, *, explode: float = 0.0, three: bool = False,
 
     if find_browser() is None:
         return None
-    ext = {"schematic": ".sch", "board": ".board", "pcba": ".pcba"}.get(
-        detect_kind(text), ".model")
+    if src_path is not None:
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "design.png"
+            render(src_path, str(out), width=width, height=height,
+                   explode=explode, three=three)
+            return base64.b64encode(out.read_bytes()).decode("ascii")
+    ext = {"schematic": ".sch", "board": ".board", "pcba": ".pcba",
+           "assembly": ".part"}.get(detect_kind(text), ".model")
     with tempfile.TemporaryDirectory() as td:
         src = Path(td) / f"design{ext}"
         src.write_text(text, encoding="utf-8")
@@ -1357,19 +1369,46 @@ def _design_to_png_b64(text: str, *, explode: float = 0.0, three: bool = False,
         return base64.b64encode(out.read_bytes()).decode("ascii")
 
 
+def _design_text_and_path(design: str) -> tuple[str, str | None]:
+    """``design`` is document text, or the PATH of a design file. Returns
+    (text, path-or-None); the path is what lets a composite design resolve
+    its neighbours."""
+    from pathlib import Path
+
+    if design.lstrip()[:1] == "{":
+        return design, None
+    try:
+        p = Path(design)
+        if p.is_file():
+            return p.read_text(encoding="utf-8"), str(p)
+    except OSError:
+        pass
+    return design, None
+
+
 @tool("visualize")
 def visualize(design: str, explode: float = 0.0, three: bool = False,
               width: int = 1400, height: int = 900) -> dict[str, Any]:
-    """Render a design document (model, board, schematic, pcba, or assembly
-    text) to an inline PNG that displays directly in the chat. 3D kinds render
-    an isometric view; ``explode`` spreads an assembly along its axes; ``three``
-    forces the 3D board view. Rasterization uses a local Chrome/Edge — without
-    one this returns an actionable error rather than a silent downgrade."""
+    """Render a design document to an inline PNG that displays directly in the
+    chat. ``design`` is document text (model, board, schematic, pcba) or the
+    PATH of a design file — an ASSEMBLY must be given as a path, because it
+    resolves its instances from the ``.part`` files sitting next to it. 3D
+    kinds render an isometric view; ``explode`` spreads an assembly along its
+    axes; ``three`` forces the 3D board view. Rasterization uses a local
+    Chrome/Edge — without one this returns an actionable error rather than a
+    silent downgrade."""
     from gitcad.viewer.server import detect_kind
 
-    kind = detect_kind(design)
-    png = _design_to_png_b64(design, explode=explode, three=three,
-                             width=width, height=height)
+    text, path = _design_text_and_path(design)
+    kind = detect_kind(text)
+    if kind == "assembly" and path is None:
+        return {"ok": False, "error": {"type": "AssemblyNeedsPath", "message":
+                "an assembly resolves every instance against the .part files "
+                "beside it on disk, so its text alone cannot be rendered — "
+                "pass the manifest's PATH instead "
+                "(visualize(design='enclosure.part'))."}}
+    png = _design_to_png_b64(text, explode=explode, three=three,
+                             width=width, height=height, src_path=path)
     if png is None:
         return {"ok": False, "error": {"type": "NoBrowser", "message":
                 "inline PNG needs a local Chrome/Edge (headless screenshot); "
