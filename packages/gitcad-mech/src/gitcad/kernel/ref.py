@@ -3830,6 +3830,26 @@ class RefKernel:
         # share a normal, so the normal alone cannot tell min from max.
         ordered = sorted(shape.logical_faces().items(),
                          key=lambda kv: (kv[0][1], kv[0][0]))
+        # The box void below is only the right void when the base IS its
+        # bounding box: every logical face axis-aligned AND lying on the
+        # bbox itself. Anything else (a loft, a stepped union, a cut
+        # result) would have its sloped or interior walls carved away by
+        # the box — dogfood #20 measured a frustum "shell" at 1480 mm³,
+        # geometry_verified, where the true 2 mm shell is ~3900 mm³.
+        # Refuse exactly like the closed-shell paths do, instead of
+        # answering with a different solid.
+        for (plane_key, _), frags in ordered:
+            n = plane_key[:3]
+            axis = max(range(3), key=lambda c: abs(n[c]))
+            if any(n[c] != 0 for c in range(3) if c != axis):
+                _nope("shell(open shell of a non-box base: face normals "
+                      "are not axis-aligned — the box void would cut the "
+                      "walls away)", "K4.2 (offset surfaces)")
+            coord = frags[0].verts[0][axis]
+            if coord != lo[axis] and coord != hi[axis]:
+                _nope("shell(open shell of a non-box base: a face lies "
+                      "inside the bounding box — the box void would cut "
+                      "the walls away)", "K4.2 (offset surfaces)")
         void_lo = [lo[c] + t for c in range(3)]
         void_hi = [hi[c] - t for c in range(3)]
         for idx in remove_faces:
