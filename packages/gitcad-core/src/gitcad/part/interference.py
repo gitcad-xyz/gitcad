@@ -46,6 +46,7 @@ def check_interference(
 
     violations: list[str] = []
     overlaps: dict[str, float] = {}
+    where: dict[str, dict] = {}
     undetermined: dict[str, str] = {}
     names = sorted(placed)
     checked = 0
@@ -75,15 +76,48 @@ def check_interference(
                 continue
             vol = kernel.measure(common).get("volume", 0.0)
             if vol > _VOL_TOL:
-                overlaps[f"{na}<->{nb}"] = round(vol, 4)
+                key = f"{na}<->{nb}"
+                overlaps[key] = round(vol, 4)
+                where[key] = _locate(kernel, common)
             if vol > tol:
                 violations.append(f"interference:{na}<->{nb}:overlap={float(vol):.3f}mm3")
 
     return ValidationReport(
         ok=not violations,
         checks={"instances": len(instances), "pairs_intersected": checked,
-                "overlaps_mm3": overlaps, "undetermined": undetermined,
+                "overlaps_mm3": overlaps, "overlap_where": where,
+                "undetermined": undetermined,
                 "tol_mm3": tol,
                 "method": "exact-boolean-common", "kernel": kernel.name},
         violations=violations,
     )
+
+
+def _locate(kernel: Kernel, common: Shape) -> dict:
+    """WHERE the clash is, in the assembly frame.
+
+    A volume alone does not say what to change: 15.658 mm3 between a ring
+    gear and a planet is equally consistent with wrong backlash, wrong tooth
+    phasing, wrong centre distance and an axial fault, and each implies a
+    different edit. The kernel has already built the common solid to measure
+    it — reading its bounding box and centroid off before discarding it costs
+    one call and turns the number into a lead.
+
+    Never fatal: a shape whose bbox/centroid the kernel cannot produce still
+    reports its volume, which is the pre-existing behaviour.
+    """
+    out: dict = {}
+    try:
+        lo, hi = kernel.bbox(common)
+        out["bbox"] = [[round(float(c), 4) for c in lo],
+                       [round(float(c), 4) for c in hi]]
+        out["size"] = [round(float(b - a), 4) for a, b in zip(lo, hi)]
+    except Exception:                        # noqa: BLE001 - advisory only
+        pass
+    try:
+        props = kernel.mass_props(common)
+        if "centroid" in props:
+            out["centroid"] = [round(float(c), 4) for c in props["centroid"]]
+    except Exception:                        # noqa: BLE001 - advisory only
+        pass
+    return out
