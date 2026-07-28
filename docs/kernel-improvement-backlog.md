@@ -216,6 +216,53 @@ Assemblies of rotated parts are where this bites in real use.
 > that way: an entry there is a shape the kernel can build one way up and not
 > the other, which is a thing it is wrong about *itself*.
 
+> **And the same for ROTATION (2026-07-28).** Turning a part before machining
+> it does not change the part, and the same probe asked of rotation what it
+> had asked of reflection: **41 (shape, op) pairs worked upright and stopped
+> working once rotated.** After this work, **23 — and at 90°, 5 → 0. Every
+> quarter turn is now free.**
+>
+> Two families hid in the 41, and only measuring told them apart:
+>
+> **A. The representation was dropped.** Every rotated quadric went through
+> the canonical `Body`, so `filleted box`, `drilled`, `counterbore` and
+> `disjoint union` lost every op that dispatches on representation. This is
+> the same "a transformed solid lands in the canonical B-rep and boolean has
+> no path over it" that dominates the composed tier. Fixed structurally:
+> `rotated(axis, deg)` on the quadric families (forge `quadric.py`), which
+> returns **None** rather than an error when the family genuinely cannot
+> express the result — falling through to the canonical form is the right
+> answer for a tilt, not a refusal. The one drop left is a rounded box at 45°,
+> and that one is correct: it is not an axis-aligned rounded box any more.
+>
+> **B. The representation survived and the OP crashed.** `shell` of a
+> 45°-rotated box raised a raw `TypeError` through the seam; `chamfer`'s whole
+> refusal message was `'SurdVal' object has no attribute 'numerator'`. Cause:
+> an exact rotation types every coordinate as ℚ[√d] **even where the value is
+> rational** — a 20 mm edge turned 45° has dx = dy = 10√2 and l² = 400 — and
+> three places read `.numerator` off that or handed it to `Fraction()`.
+>
+> So the question "is this exact value rational?" now has ONE answer for the
+> whole kernel: `forgekernel.exact.as_fraction`, next to `F`. **`F` widens,
+> `as_fraction` asks.** Getting it wrong has gone both ways here — assume
+> rational and you crash; assume irrational and you silently drop a radical
+> and report 960 for 960 − 20√3. `body._as_fraction` now points at it rather
+> than being a second implementation, which is exactly how `brep` grew a third.
+>
+> Both are verified against CLOSED FORMS rather than an oracle, because a
+> box's chamfer and shell have them: chamfer d=1 = 3906 and shell t=1 = 1408
+> at every representable angle, `validate` ok
+> (`tests/invariants/test_ops_commute_with_rotation.py`).
+>
+> Three further defects surfaced, each by the probe and not by the suite:
+> `kernel.rotate` typed coordinates as ℚ[√1] even at 90° (so a quarter-turned
+> drilled plate lost `fillet` — the byte-canonical form of this is docket S1);
+> `_Quad.integral` used `hi ** 3`, and neither `SurdVal` nor `BiSurd`
+> implements `__pow__`, so an obliquely-rotated body raised TypeError out of a
+> VOLUME; and `SurdVal.__truediv__` never learned to promote — the one
+> arithmetic route #127 missed — which `AttributeError`ed on a sphere rotated
+> about an oblique axis, where the centre lands in ℚ(√2,√3).
+
 ---
 
 ## 3. Geometry capability (the actual roadmap)

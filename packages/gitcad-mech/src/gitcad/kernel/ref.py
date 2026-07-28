@@ -1203,6 +1203,24 @@ class RefKernel:
         from forgekernel.quadric import (AxisStack, Cone, Cyl, DisjointUnion,
                                          DrilledSolid, RevolveSolid, Sphere)
 
+        # THE FAMILY'S OWN ANSWER FIRST. forge's quadrics know which rotations
+        # they absorb (quadric.rotated): any exact angle about z for the
+        # +z-axis families — not just quarter turns, which is all the code
+        # below ever managed — every rotation at all for a sphere, and a half
+        # turn about x or y, which stands a frustum on its other end.
+        #
+        # 45° was the gap that mattered: it dropped a RoundedBox, DrilledSolid
+        # or DisjointUnion to the canonical Body, and since the feature and
+        # boolean paths dispatch on representation, "a transformed solid lands
+        # in the canonical B-rep and boolean has no path over it" was one of
+        # the largest composed-tier gap families. 36 (shape, op) pairs worked
+        # upright and stopped working once turned.
+        own = getattr(shape, "rotated", None)
+        if own is not None:
+            out = own(tuple(rotate_axis), rotate_deg)
+            if out is not None:
+                return out
+
         q = self._quarter_turns(rotate_axis, rotate_deg)
         if isinstance(shape, Sphere):
             c, ax = (shape.cx, shape.cy, shape.cz), tuple(rotate_axis)
@@ -1309,8 +1327,23 @@ class RefKernel:
                                   for p in shape.prims])
             return shape
         if not isinstance(shape, Solid):
-            # any other representation with a converter (a rounded box, say)
-            # transforms through the canonical form rather than refusing
+            # NOTHING LEFT TO DO is not a reason to change representation.
+            # _rotate_native above may have already absorbed the rotation, and
+            # this fallback then converted the result to a Body anyway — so a
+            # rounded box turned 90°, which its own family expresses exactly,
+            # still arrived as a Body and lost every op that dispatches on
+            # representation. Handle the residue in the family where the family
+            # can, and reach for the canonical form only when it genuinely
+            # cannot.
+            if not rotate_deg:
+                if not any(translate):
+                    return shape
+                own_t = getattr(shape, "translated", None)
+                if own_t is not None:
+                    return own_t(*translate)
+            # any other representation with a converter (a rounded box turned
+            # 45°, say) transforms through the canonical form rather than
+            # refusing
             return self._transform_via_body(
                 f"transform a {type(shape).__name__}", shape,
                 rotate_axis, rotate_deg, translate)
@@ -2506,10 +2539,24 @@ class RefKernel:
         from forgekernel.kernel import translate
         from forgekernel.surd import SurdVal
 
+        from forgekernel.exact import as_fraction
+
         lo, hi = shape.bbox()
+        # THIS IS A RECOGNISER: "is this an axis-aligned chamfered box?" A
+        # rotated solid's coordinates live in ℚ[√d], and the honest answer for
+        # one is "no, not my family" — not TypeError from Fraction(SurdVal),
+        # which is what `shell` raised straight through the seam for something
+        # as ordinary as a box turned 45° and hollowed.
+        lo_r = [as_fraction(v) for v in lo]
+        hi_r = [as_fraction(v) for v in hi]
+        if any(v is None for v in lo_r + hi_r):
+            return None
+        lo, hi = tuple(lo_r), tuple(hi_r)
         d = None
         for p in shape.polys:
-            n = tuple(Fraction(x) for x in p.plane.n)
+            n = tuple(as_fraction(x) for x in p.plane.n)
+            if any(c is None for c in n) or as_fraction(p.plane.d) is None:
+                return None
             nz = [c for c in range(3) if n[c] != 0]
             if len(nz) == 2 and abs(n[nz[0]]) == abs(n[nz[1]]):
                 scale = abs(n[nz[0]])
@@ -2571,6 +2618,7 @@ class RefKernel:
         profile is the exact inward inset: each edge line moved ``t``
         along its inward unit normal (rational only for Pythagorean
         edge directions), adjacent inset lines intersected exactly."""
+        from forgekernel.exact import as_fraction
         from math import isqrt
 
         lo, hi = shape.bbox()
@@ -2744,8 +2792,18 @@ class RefKernel:
                 # where a notch is narrower than 2t, and that is checked on the
                 # finished polygon below, where it is a property of the answer
                 # rather than a guess about the input.
-                # |d| must be rational (Pythagorean edge)
-                l2 = dx * dx + dy * dy
+                # |d| must be rational (Pythagorean edge).
+                #
+                # as_fraction, not `.numerator`: a ROTATED prism's edge deltas
+                # are SurdVal-typed even where the LENGTH is an integer — a
+                # 20 mm edge turned 45° has dx = dy = 10√2 and l² = 400 — so
+                # reading .numerator raised AttributeError through the seam for
+                # a shape whose inset is perfectly exact. A value from a wider
+                # field has to be ASKED whether it is rational.
+                l2 = as_fraction(dx * dx + dy * dy)
+                if l2 is None:
+                    raise ValueError("shell(edge length² is not rational) — "
+                                     "K4.2 (certified insets)")
                 num, den = l2.numerator, l2.denominator
                 rn, rd = isqrt(num), isqrt(den)
                 if rn * rn != num or rd * rd != den:
