@@ -112,7 +112,24 @@ class Drawing:
 
 
 def _fmt(v: float) -> str:
-    return f"{float(v):.1f}".rstrip("0").rstrip(".")
+    """A dimension text that says what the model says.
+
+    This used to be a one-decimal fixed format, which printed a Ø11.96
+    shaft as ``12`` (#72). On a drawing — what a shop cuts from — 0.04 mm is
+    not a display preference, it is the whole clearance to the Ø12.00 bore
+    it has to enter.
+
+    Fixed to ``_DIM_DECIMALS`` places (which absorbs float residue: 0.1+0.2
+    must print 0.3, not 0.30000000000000004), then trailing zeros dropped —
+    the decimal point survives the strip, so 120.0 stays "120". Gives
+    11.96 -> "11.96", 12.0 -> "12", 2.50 -> "2.5", 0.05 -> "0.05".
+    """
+    return f"{float(v):.{_DIM_DECIMALS}f}".rstrip("0").rstrip(".")
+
+
+# a micron is finer than any mechanical drawing needs, and coarse enough
+# that binary-float residue never survives to the sheet
+_DIM_DECIMALS = 4
 
 
 def _transform(polys, scale: float, ox: float, oy: float, bmin: Point):
