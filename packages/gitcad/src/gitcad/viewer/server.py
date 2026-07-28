@@ -1,8 +1,15 @@
-"""The viewer server — Python stdlib only, one file in, live page out.
+"""The viewer server — Python stdlib only, one PROJECT in, live page out.
 
 Serves ``PAGE`` (the self-contained WebGL2 client in :mod:`.page`) plus a
-tiny JSON API. The page polls ``/api/version`` (content hash of the watched
-file) and refetches on change — edit the model text, the view updates.
+tiny JSON API. The page polls ``/api/version`` (content hash of the viewed
+file and everything it is built from) and refetches on change — edit the
+model text, the view updates.
+
+ONE server per project (not per part file): the default view is the project's
+top assembly, ``/api/parts`` lists every viewable design under the project
+root, and every design endpoint takes ``?file=<root-relative path>`` so the
+page can show any part IN-PAGE (the ``#part=`` deep link) — a second part is
+never a second server on another port.
 """
 
 from __future__ import annotations
@@ -408,8 +415,9 @@ def discover_schematics(root: Path, limit: int = 12) -> list[dict]:
 
 
 class _Handler(BaseHTTPRequestHandler):
-    # Set by serve(): watched file path + kernel (+ optional review base ref).
-    path_watched: Path
+    # Set by serve(): project root + default view + kernel (+ review base ref).
+    path_watched: Path                     # the DEFAULT view (top assembly)
+    project_root: Path | None = None
     kernel: Kernel
     review_base: str | None = None
 
@@ -424,28 +432,74 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
+    def _target(self) -> Path:
+        """The design a request is about: ``?file=<root-relative>`` selects any
+        design in the project (the parts-are-in-page contract); no param means
+        the default view. Escapes outside the project root are refused."""
+        from urllib.parse import parse_qs, unquote, urlparse
+
+        rel = unquote((parse_qs(urlparse(self.path).query).get("file")
+                       or [""])[0])
+        if not rel:
+            return self.path_watched
+        root = self.project_root or self.path_watched.parent
+        p = (root / rel).resolve()
+        if not p.is_relative_to(root):
+            raise ValueError(f"file {rel!r} escapes the project root")
+        if not p.is_file():
+            raise ValueError(f"file {rel!r} not found in the project")
+        return p
+
     def do_GET(self) -> None:  # noqa: N802 - http.server API
+        from urllib.parse import urlparse
+
+        route = urlparse(self.path).path
         try:
-            text = self.path_watched.read_text(encoding="utf-8")
-            if self.path == "/":
+            # project-level endpoints first: they must answer even while the
+            # current design text is broken mid-edit
+            if route == "/":
                 self._send(200, PAGE.encode(), "text/html; charset=utf-8")
-            elif self.path.startswith("/api/activity"):
-                from urllib.parse import parse_qs, urlparse
+                return
+            if route == "/api/health":
+                import os as _os
+
+                root = self.project_root or self.path_watched.parent
+                self._send(200, json.dumps({
+                    "ok": True, "pid": _os.getpid(), "root": str(root),
+                    "default": self._rel(self.path_watched),
+                }).encode(), "application/json")
+                return
+            if route == "/api/parts":
+                from gitcad.viewer.project import discover_designs
+
+                root = self.project_root or self.path_watched.parent
+                self._send(200, json.dumps({
+                    "project": root.name,
+                    "default": self._rel(self.path_watched),
+                    "designs": discover_designs(root),
+                }).encode(), "application/json")
+                return
+            if route == "/api/activity":
+                from urllib.parse import parse_qs, urlparse as _up
 
                 from gitcad.activity import Activity
 
-                q = parse_qs(urlparse(self.path).query)
+                q = parse_qs(_up(self.path).query)
                 since = int((q.get("since") or ["0"])[0])
                 state = Activity(self.path_watched).state(since)
                 self._send(200, json.dumps(state).encode(), "application/json")
-            elif self.path.startswith("/api/version"):
+                return
+
+            target = self._target()
+            text = target.read_text(encoding="utf-8")
+            if route == "/api/version":
                 kind = detect_kind(text)
-                digest = _version_digest(self.path_watched, text, kind)
+                digest = _version_digest(target, text, kind)
                 self._send(200, json.dumps({"version": digest, "kind": kind,
-                                            "name": self.path_watched.name,
+                                            "name": target.name,
                                             "review_base": self.review_base}).encode(),
                            "application/json")
-            elif self.path == "/api/review":
+            elif route == "/api/review":
                 if not self.review_base:
                     self._send(404, b'{"error": "no review base configured"}',
                                "application/json")
@@ -454,38 +508,38 @@ class _Handler(BaseHTTPRequestHandler):
 
                 from gitcad.review import review_range
 
-                top = _sp.run(["git", "-C", str(self.path_watched.parent),
+                top = _sp.run(["git", "-C", str(target.parent),
                                "rev-parse", "--show-toplevel"],
                               capture_output=True, text=True)
                 if top.returncode != 0:
                     raise ValueError("watched file is not inside a git repo")
                 report = review_range(top.stdout.strip(), self.review_base)
                 self._send(200, json.dumps(report).encode(), "application/json")
-            elif self.path == "/api/mesh":
+            elif route == "/api/mesh":
                 kind = detect_kind(text)
                 if kind == "assembly":
-                    payload = assembly_mesh_payload(self.path_watched, self.kernel)
+                    payload = assembly_mesh_payload(target, self.kernel)
                 elif kind == "pcba":
                     from gitcad.pcba import pcba_sources
 
-                    src = pcba_sources(text, str(self.path_watched.parent))
+                    src = pcba_sources(text, str(target.parent))
                     board = Board.loads(src["board"].read_text(encoding="utf-8"))
                     payload = pcba_mesh_payload(board, self.kernel)
                 else:
                     payload = mesh_payload(
                         resolve_import_paths(Document.loads(text),
-                                             self.path_watched.parent),
+                                             target.parent),
                         self.kernel)
                 self._send(200, json.dumps(payload).encode(), "application/json")
-            elif self.path == "/api/checks":
+            elif route == "/api/checks":
                 self._send(200, json.dumps(
-                    run_checks_for(self.path_watched, self.kernel)).encode(),
+                    run_checks_for(target, self.kernel)).encode(),
                     "application/json")
-            elif self.path == "/api/schematics":
-                sheets = discover_schematics(self.path_watched.parent)
+            elif route == "/api/schematics":
+                sheets = discover_schematics(target.parent)
                 self._send(200, json.dumps({"sheets": sheets}).encode(),
                            "application/json")
-            elif self.path == "/api/board.svg":
+            elif route == "/api/board.svg":
                 kind = detect_kind(text)
                 if kind == "schematic":
                     from gitcad.ecad import Schematic, schematic_to_svg
@@ -494,13 +548,13 @@ class _Handler(BaseHTTPRequestHandler):
                 elif kind == "pcba":
                     from gitcad.pcba import pcba_sources
 
-                    src = pcba_sources(text, str(self.path_watched.parent))
+                    src = pcba_sources(text, str(target.parent))
                     svg = board_to_svg(Board.loads(
                         src["board"].read_text(encoding="utf-8")))
                 else:
                     svg = board_to_svg(Board.loads(text))
                 self._send(200, svg.encode(), "image/svg+xml")
-            elif self.path.startswith("/api/drawing."):
+            elif route.startswith("/api/drawing."):
                 # the dimensioned 2D drawing — PDF is the deliverable, SVG the
                 # in-page render. Only for single-part model documents.
                 if detect_kind(text) != "model":
@@ -511,11 +565,11 @@ class _Handler(BaseHTTPRequestHandler):
                 from gitcad.kernel import get_kernel
 
                 doc = resolve_import_paths(Document.loads(text),
-                                           self.path_watched.parent)
+                                           target.parent)
                 d = make_drawing(doc.build(self.kernel).final(doc),
-                                 title=self.path_watched.stem,
+                                 title=target.stem,
                                  notes=doc.tolerance_notes())
-                if self.path.startswith("/api/drawing.pdf"):
+                if route.startswith("/api/drawing.pdf"):
                     self._send(200, d.to_pdf(), "application/pdf")
                 else:
                     self._send(200, d.to_svg().encode("utf-8"), "image/svg+xml")
@@ -525,9 +579,25 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(500, json.dumps({"error": f"{type(exc).__name__}: {exc}"}).encode(),
                        "application/json")
 
-    def do_POST(self) -> None:  # noqa: N802 - http.server API
-        """The human's half of the loop: answering a question the agent asked."""
+    def _rel(self, p: Path) -> str:
+        root = self.project_root or self.path_watched.parent
         try:
+            return p.relative_to(root).as_posix()
+        except ValueError:
+            return p.name
+
+    def do_POST(self) -> None:  # noqa: N802 - http.server API
+        """The human's half of the loop (answering a question the agent asked)
+        + the ONE way this server stops: an explicit POST /api/shutdown from
+        viewer_stop / ``gitcad-view --stop``. Nothing stops it implicitly."""
+        try:
+            if self.path == "/api/shutdown":
+                import threading as _t
+
+                self._send(200, b'{"ok": true, "stopping": true}',
+                           "application/json")
+                _t.Thread(target=self.server.shutdown, daemon=True).start()
+                return
             if self.path != "/api/answer":
                 self._send(404, b"not found", "text/plain")
                 return
@@ -553,16 +623,24 @@ class _Handler(BaseHTTPRequestHandler):
 
 def serve(path: str, port: int = 8137, kernel: Kernel | None = None,
           review_base: str | None = None) -> ThreadingHTTPServer:
-    """Start (and return) the server; caller decides whether to block.
-    ``review_base``: a git ref — the viewer grows a review tab comparing
-    the design's repo against it (the gitcad-review report, in-app)."""
+    """Start (and return) THE project server; caller decides whether to block.
+
+    ``path`` may be a project DIRECTORY — the default view is then the top
+    assembly (:func:`gitcad.viewer.project.resolve_project`) — or a single
+    design file, which stays the default view while the rest of its project
+    remains reachable via ``?file=``/``#part=``. ``review_base``: a git ref —
+    the viewer grows a review tab comparing the design's repo against it."""
+    from gitcad.viewer.project import resolve_project
+
+    root, watched = resolve_project(path)
     # Narration is on whenever a viewer is watching. Builds this process runs
     # (the mesh endpoint rebuilds the design on every change) then show up on
     # the live rail with no further wiring — which is the common case: a person
     # watching the same project an agent is editing.
-    activity.narrate_to(Path(path))
+    activity.narrate_to(watched)
     handler = type("Handler", (_Handler,), {
-        "path_watched": Path(path),
+        "path_watched": watched,
+        "project_root": root,
         "kernel": kernel or get_kernel(),
         "review_base": review_base,
     })
@@ -570,14 +648,28 @@ def serve(path: str, port: int = 8137, kernel: Kernel | None = None,
 
 
 def main() -> None:  # pragma: no cover - CLI entrypoint
-    ap = argparse.ArgumentParser(description="gitcad viewer — live local window on a model or board")
-    ap.add_argument("file", help="a .gitcad.json model or board document")
+    ap = argparse.ArgumentParser(
+        description="gitcad viewer — ONE live local window per project")
+    ap.add_argument("path", nargs="?", default=".",
+                    help="a project directory (default view: its top assembly) "
+                         "or a single design file; default: the current dir")
     ap.add_argument("--port", type=int, default=8137)
     ap.add_argument("--review", metavar="BASE",
                     help="git ref to review against (adds the review tab)")
+    ap.add_argument("--stop", action="store_true",
+                    help="stop the detached project viewer for this path "
+                         "(the explicit stop — nothing stops it implicitly)")
     args = ap.parse_args()
-    httpd = serve(args.file, args.port, review_base=args.review)
-    print(f"gitcad viewer: http://127.0.0.1:{args.port}/  (watching {args.file}, Ctrl+C to stop)")
+    if args.stop:
+        from gitcad.viewer.daemon import stop_viewer
+
+        r = stop_viewer(args.path)
+        print(f"gitcad viewer: {'stopped ' + r.get('url', '') if r['stopped'] else r['reason']}")
+        return
+    httpd = serve(args.path, args.port, review_base=args.review)
+    bound = httpd.server_address[1]
+    watched = httpd.RequestHandlerClass.path_watched
+    print(f"gitcad viewer: http://127.0.0.1:{bound}/  (watching {watched}, Ctrl+C to stop)")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

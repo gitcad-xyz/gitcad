@@ -1,8 +1,11 @@
 """The viewer page — one self-contained HTML string, zero external assets.
 
-ONE page; everything else is a tab in it (3d, schematics, checks, review,
-drawing, activity), each addressable as a hash token composable with the
-older deep links (#checks,x=0.6). WebGL2 with flat shading via
+ONE page per PROJECT; everything else is a view in it. Tabs (3d, schematics,
+checks, review, drawing, activity) and the PARTS NAVIGATOR — a menu of every
+design in the project, addressable as the ``part=<file>`` hash token — are
+each hash tokens composable with the older deep links (#checks,x=0.6,
+#part=lid.model). Switching part never means another server: the same page
+re-points its API calls with ``?file=``. WebGL2 with flat shading via
 fragment-shader derivatives, orbit/zoom, live reload by content-hash
 polling, and the live loop: a narration rail tailing /api/activity, a
 camera that follows the assembly instance being worked on (the #follow
@@ -32,6 +35,10 @@ PAGE = r"""<!DOCTYPE html>
   .sheet-name{color:var(--dim);margin:0 auto 4px;max-width:1200px}
   .sheet-err{color:#f85149;margin:0 auto 18px;max-width:1200px}
   #tabs{position:fixed;left:12px;top:10px;display:flex;gap:8px;z-index:5}
+  /* the parts navigator: the project's designs, one page, no second server */
+  #partsbox{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:5}
+  #parts{display:none;font:inherit;color:var(--acc);background:rgba(13,17,23,.8);
+         border:1px solid var(--line);border-radius:4px;padding:2px 6px;max-width:340px}
   .tab{color:var(--dim);cursor:pointer;padding:2px 10px;border:1px solid var(--line);
        border-radius:4px;background:rgba(13,17,23,.8);user-select:none}
   .tab.on{color:var(--acc);border-color:var(--acc)}
@@ -124,6 +131,7 @@ PAGE = r"""<!DOCTYPE html>
 <div id="checks"></div><div id="review"></div><div id="drawing"></div>
 <div id="activity"></div>
 <div id="tabs"></div>
+<div id="partsbox"><select id="parts" title="every part of this project, in this one page"></select></div>
 <div id="explodebox"><span>explode</span>
   <input id="explodeslider" type="range" min="0" max="100" value="0"></div>
 <div id="live"></div>
@@ -555,6 +563,59 @@ function hashTokens(){
   return location.hash.replace(/^#/, "").split(",").filter(Boolean);
 }
 let activeTab = hashTokens().find(t => TABS.includes(t)) || "3d", sheetCount = 0;
+
+// -- the parts navigator ------------------------------------------------------
+// ONE server per project: the hash token part=<file> re-points every design
+// API call (?file=) at another part of the SAME page — "look at the lid" is a
+// click or a deep link (#part=lid.model), never a second server on a second
+// port. No token = the project default (the top assembly).
+let curPart = null;
+function partTok(){
+  const t = hashTokens().find(x => x.startsWith("part="));
+  return t ? decodeURIComponent(t.slice(5)) : null;
+}
+curPart = partTok();
+function qs(sep){
+  return curPart ? (sep || "?") + "file=" + encodeURIComponent(curPart) : "";
+}
+const partsSel = document.getElementById("parts");
+function setPart(rel){
+  const rest = hashTokens().filter(t => !t.startsWith("part="));
+  location.hash = (rel ? rest.concat(["part=" + encodeURIComponent(rel)])
+                       : rest).join(",");
+}
+function applyPart(){
+  const p = partTok();
+  if(p !== curPart){
+    curPart = p;
+    version = null;                 // force a full reload of the new design
+    err.textContent = "";
+    partsSel.value = p || "";
+  }
+}
+async function loadParts(){
+  try {
+    const d = await (await fetch("/api/parts")).json();
+    const designs = d.designs || [];
+    if(designs.length < 2){ partsSel.style.display = "none"; return; }
+    partsSel.style.display = "block";
+    partsSel.innerHTML = "";
+    const def = designs.find(x => x.file === d.default);
+    const top = document.createElement("option");
+    top.value = "";
+    top.textContent = (d.project || "project") + " › " +
+                      (def ? `${def.name} (${def.kind})` : "default view");
+    partsSel.appendChild(top);
+    for(const g of designs){
+      if(g.file === d.default) continue;
+      const o = document.createElement("option");
+      o.value = g.file; o.textContent = `${g.name} (${g.kind})`;
+      partsSel.appendChild(o);
+    }
+    partsSel.value = curPart || "";
+  } catch(e){ /* the parts menu is optional; the page stands alone */ }
+}
+partsSel.onchange = () => setPart(partsSel.value || null);
 function writeTabHash(){
   const rest = hashTokens().filter(t => !TABS.includes(t));
   const toks = (activeTab === "3d" ? [] : [activeTab]).concat(rest);
@@ -564,6 +625,7 @@ function writeTabHash(){
 addEventListener("hashchange", () => {
   const t = hashTokens().find(x => TABS.includes(x)) || "3d";
   if(t !== activeTab){ activeTab = t; showTab(); renderTabs(); }
+  applyPart();
 });
 function renderTabs(){
   tabsEl.innerHTML = "";
@@ -590,8 +652,8 @@ function renderTabs(){
 }
 function loadDrawing(){
   const v = version || "", el = document.getElementById("drawing");
-  el.innerHTML = `<div class="dbar"><a href="/api/drawing.pdf?v=${v}" target="_blank">download PDF ⤓</a></div><div class="dwrap">loading drawing…</div>`;
-  fetch(`/api/drawing.svg?v=${v}`).then(r => r.text()).then(svg => {
+  el.innerHTML = `<div class="dbar"><a href="/api/drawing.pdf?v=${v}${qs("&")}" target="_blank">download PDF ⤓</a></div><div class="dwrap">loading drawing…</div>`;
+  fetch(`/api/drawing.svg?v=${v}${qs("&")}`).then(r => r.text()).then(svg => {
     el.querySelector(".dwrap").innerHTML = svg;      // inline SVG, one page
   }).catch(e => { el.querySelector(".dwrap").textContent = "drawing unavailable: " + e; });
 }
@@ -649,7 +711,7 @@ async function loadReview(baseRef){
 }
 async function loadChecks(){
   try {
-    checksState = await (await fetch("/api/checks")).json();
+    checksState = await (await fetch("/api/checks" + qs())).json();
     if(checksState.error) throw new Error(checksState.error);
     const el = document.getElementById("checks");
     el.innerHTML = "";
@@ -676,7 +738,7 @@ async function loadChecks(){
 }
 async function loadSheets(){
   try {
-    const data = await (await fetch("/api/schematics")).json();
+    const data = await (await fetch("/api/schematics" + qs())).json();
     const sheets = data.sheets || [];
     sheetCount = sheets.length;
     const el = document.getElementById("sheets");
@@ -703,7 +765,7 @@ async function loadSheets(){
 let version = null;
 async function poll(){
   try {
-    const v = await (await fetch("/api/version")).json();
+    const v = await (await fetch("/api/version" + qs())).json();
     if(v.error) throw new Error(v.error);
     document.title = v.name + " — gitcad viewer";
     if(v.version !== version){
@@ -713,13 +775,13 @@ async function poll(){
       if(activeTab === "drawing") loadDrawing();
       renderTabs();
       if(v.kind === "board" || v.kind === "schematic"){
-        const svg = await (await fetch("/api/board.svg")).text();
+        const svg = await (await fetch("/api/board.svg" + qs())).text();
         document.getElementById("board").innerHTML = svg;
         document.getElementById("board").style.display = "flex";
         canvas.style.display = "none";
         hud.textContent = v.name;
       } else {
-        const mesh = await (await fetch("/api/mesh")).json();
+        const mesh = await (await fetch("/api/mesh" + qs())).json();
         if(mesh.error) throw new Error(mesh.error);
         upload(mesh);
         picks = []; updateMeasure();
@@ -736,6 +798,7 @@ async function poll(){
       }
       loadSheets();
       loadChecks();
+      loadParts();
       loadReview(v.review_base);
     }
   } catch(e){ err.textContent = String(e); }
