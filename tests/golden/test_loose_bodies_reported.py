@@ -8,6 +8,8 @@ document had two loose bodies.
 
 The tools still answer for `features[-1]` — this pins that they say so.
 """
+import pytest
+
 from gitcad.document import Document, Feature
 from gitcad.mcp.server import REGISTRY
 
@@ -56,6 +58,12 @@ def test_a_scaffold_left_by_a_refused_cut_is_named_in_model_mass():
 def test_model_export_and_drawing_carry_the_same_report(tmp_path):
     d = _doc(("box", {"dx": 10, "dy": 10, "dz": 10}, []),
              ("box", {"dx": 2, "dy": 2, "dz": 30}, []))
+    # STEP/SVG need real geometry; under the null backend both tools return a
+    # structured refusal and there is nothing to attach the report to. Asked
+    # through the result rather than by naming the kernel, so conftest's
+    # derived marker leaves the rest of this module in the null suite.
+    if not REGISTRY["model_mass"](model=d.dumps())["geometry_verified"]:
+        pytest.skip("export/drawing need a geometry kernel")
     step = REGISTRY["model_export"](model=d.dumps(),
                                     path=str(tmp_path / "p.step"))
     assert step["bodies"] == 2 and "warning" in step
