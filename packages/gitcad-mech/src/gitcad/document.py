@@ -135,6 +135,20 @@ class Document:
     def features(self) -> list[Feature]:
         return list(self._features)
 
+    def unconsumed_bodies(self) -> list[Feature]:
+        """Features no other feature takes as an input — the document's loose
+        bodies, in document order.
+
+        A finished single-part document has exactly one. More than one means
+        the tree has not converged: a scaffold left behind by a refused
+        boolean, a pattern seed nothing unioned, blades waiting for their
+        hub. ``final()`` picks the LAST of these by position, so the reporting
+        tools need this count to say whether that pick was a choice or an
+        accident (issue #52).
+        """
+        consumed = {ref for f in self._features for ref in f.inputs}
+        return [f for f in self._features if f.id not in consumed]
+
     # -- named parameters (SW-map P1) -----------------------------------------
 
     def set_parameter(self, name: str, value: Any) -> None:

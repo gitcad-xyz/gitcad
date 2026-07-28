@@ -121,6 +121,30 @@ def _load_model(model: str) -> tuple[Document, Any]:
     return Document.loads(p.read_text(encoding="utf-8")), p
 
 
+def _body_report(doc: Document) -> dict[str, Any]:
+    """Which feature the reporting tools just spoke for, and whether that was
+    a choice or an accident (#52).
+
+    ``final()`` is ``features[-1]`` — the LAST feature, not "the part". When a
+    refused boolean leaves its tool behind, or seven blades are still waiting
+    for their hub, the answer is one loose body out of several and nothing in
+    the result says so. Every tool that reports "the part" carries this."""
+    if not len(doc):
+        return {}
+    loose = doc.unconsumed_bodies()
+    final = doc.features[-1]
+    out: dict[str, Any] = {"bodies": len(loose),
+                           "final_feature": {"id": final.id, "op": final.op}}
+    if len(loose) > 1:
+        out["loose_bodies"] = [{"id": f.id, "op": f.op} for f in loose]
+        out["warning"] = (
+            f"this document has {len(loose)} unconsumed bodies; the answer "
+            f"above describes only feature {final.id} ({final.op}) — the last "
+            "one added. Union/cut the rest together (or remove the leftovers) "
+            "before trusting a mass, an export or a drawing.")
+    return out
+
+
 def _ensure_project_viewer(path: Any) -> dict[str, Any]:
     """#6 — the GUI is a consequence of starting work, not agent virtue:
     idempotently ensure THE project viewer for ``path``'s project and return
@@ -338,11 +362,16 @@ def feature_add(model: str, op: str, params: dict[str, Any] | None = None,
             if isinstance(exc, KernelError):
                 refusal["refusal"] = exc.as_dict()
                 refusal["fingerprint"] = fingerprint(exc.signature)
+            # a refused boolean is exactly how a document ends up holding the
+            # cutting tool as its last feature (#52) — report the shape of
+            # what is left, at the moment the leftovers appear
+            refusal.update(_body_report(Document.loads(before)))
             if fpath is not None:
                 refusal["path"] = str(fpath)
             return refusal
         out["buildable"] = True
         out["geometry_verified"] = not kernel.name.startswith("null")
+    out.update(_body_report(doc))
     if fpath is not None:
         fpath.write_text(out["model"], encoding="utf-8")
         out["path"] = str(fpath)
@@ -410,7 +439,8 @@ def model_mass(model: str, density_g_cm3: float = 1.0) -> dict[str, Any]:
     props = kernel.mass_props(result.final(doc))
     out: dict[str, Any] = {"kernel": kernel.name,
                            "geometry_verified": not kernel.name.startswith("null"),
-                           "density_g_cm3": density_g_cm3, **props}
+                           "density_g_cm3": density_g_cm3, **props,
+                           **_body_report(doc)}
     if "volume" in props:
         out["mass_g"] = props["volume"] * density_g_cm3 / 1000.0  # mm^3 -> cm^3
     return out
@@ -476,7 +506,8 @@ def model_export(model: str, path: str, fmt: str = "step") -> dict[str, Any]:
         kernel.export_stl(final, path)
     else:
         raise ValueError(f"unknown format {fmt!r} (want step|stl)")
-    return {"path": path, "format": fmt, "kernel": kernel.name}
+    return {"path": path, "format": fmt, "kernel": kernel.name,
+            **_body_report(doc)}
 
 
 @tool("model_drawing")
@@ -550,7 +581,8 @@ def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3",
     result = {"path": path, "scale": d.scale, "sheet": d.sheet,
               "views": [v.name for v in d.views],
               "bom": [{k: ln[k] for k in ("item", "qty", "label")}
-                      for ln in bom_lines] if bom_lines else []}
+                      for ln in bom_lines] if bom_lines else [],
+              **_body_report(doc)}
     png = _svg_to_png_b64(svg)               # inline preview when a browser exists
     if png:
         result["image"] = {"png_base64": png, "mime": "image/png"}
