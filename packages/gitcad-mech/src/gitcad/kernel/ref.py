@@ -878,6 +878,117 @@ class RefKernel:
             return self._fk.translate(m, *t)
         return m.translated(*t)
 
+    @staticmethod
+    def _quarter_turns(rotate_axis, rotate_deg):
+        """``(axis_name, k)`` for an exact quarter-turn about a principal
+        axis through the origin (k counter-clockwise quarter-turns about the
+        POSITIVE axis, in {0, 1, 2, 3}), else None."""
+        signed = {(1, 0, 0): ("x", 1), (0, 1, 0): ("y", 1),
+                  (0, 0, 1): ("z", 1), (-1, 0, 0): ("x", -1),
+                  (0, -1, 0): ("y", -1), (0, 0, -1): ("z", -1)}
+        named = signed.get(tuple(rotate_axis))
+        if named is None or rotate_deg % 90 != 0:
+            return None
+        name, sign = named
+        return name, int(sign * (rotate_deg // 90)) % 4
+
+    @staticmethod
+    def _rot_q(x, y, k):
+        """Rotate (x, y) by k counter-clockwise quarter-turns, exactly."""
+        for _ in range(k % 4):
+            x, y = -y, x
+        return x, y
+
+    @classmethod
+    def _rot_q3(cls, p, axis, k):
+        """Rotate a 3d point by k quarter-turns about a principal axis."""
+        x, y, z = p
+        if axis == "z":
+            x, y = cls._rot_q(x, y, k)
+        elif axis == "x":
+            y, z = cls._rot_q(y, z, k)
+        else:
+            z, x = cls._rot_q(z, x, k)
+        return x, y, z
+
+    def _rotate_native(self, shape, rotate_axis, rotate_deg):
+        """Rotate WITHOUT leaving the representation, where symmetry allows
+        (issue #8: rotate must not be a one-way door where it needn't be).
+
+        The exact facts this encodes, nothing more:
+
+          * any rotation about a z-axisymmetric solid's OWN axis is the
+            identity (a lathe spun about its axis is the same lathe);
+          * a quarter-turn about z maps the z-axisymmetric family (Cyl,
+            Cone, RevolveSolid, AxisStack, DrilledSolid, DisjointUnion of
+            such) to itself with centres rotated exactly;
+          * a sphere is a sphere about any centre: principal-axis
+            quarter-turns rotate its centre, and any rotation about an
+            axis through its centre is the identity.
+
+        Returns None where the rotation genuinely breaks the
+        representation — the caller then converts through the canonical
+        B-rep (ADR-0021), which is lossy for booleans and says so
+        downstream. Never widens what is exactly representable.
+        """
+        from forgekernel.brep import Solid
+        from forgekernel.quadric import (AxisStack, Cone, Cyl, DisjointUnion,
+                                         DrilledSolid, RevolveSolid, Sphere)
+
+        q = self._quarter_turns(rotate_axis, rotate_deg)
+        if isinstance(shape, Sphere):
+            c, ax = (shape.cx, shape.cy, shape.cz), tuple(rotate_axis)
+            if c == (0, 0, 0):
+                return shape                # any axis through the centre
+            if (ax in ((0, 0, 1), (0, 0, -1)) and c[:2] == (0, 0)) \
+                    or (ax in ((1, 0, 0), (-1, 0, 0)) and c[1:] == (0, 0)) \
+                    or (ax in ((0, 1, 0), (0, -1, 0))
+                        and (c[0], c[2]) == (0, 0)):
+                return shape                # the axis passes through it
+            if q is None:
+                return None
+            axis, k = q
+            if k == 0:
+                return shape
+            cx, cy, cz = self._rot_q3((shape.cx, shape.cy, shape.cz), axis, k)
+            return Sphere(cx, cy, cz, shape.r)
+        if tuple(rotate_axis) not in ((0, 0, 1), (0, 0, -1)):
+            return None
+        if isinstance(shape, (Cyl, Cone, RevolveSolid)) \
+                and (shape.cx, shape.cy) == (0, 0):
+            return shape                    # its own axis: the identity
+        if q is None:
+            return None
+        _axis, k = q
+        if k == 0:
+            return shape
+        if isinstance(shape, (Cyl, Cone, RevolveSolid)):
+            cx, cy = self._rot_q(shape.cx, shape.cy, k)
+            return shape.translated(cx - shape.cx, cy - shape.cy, 0)
+        if isinstance(shape, DrilledSolid):
+            base = self._fk.rotate_quarter(shape.base, "z", k)
+            bores = [Cyl(*self._rot_q(b.cx, b.cy, k), b.r, b.z0, b.z1)
+                     for b in shape.bores]
+            return DrilledSolid(base, bores)
+        if isinstance(shape, AxisStack):
+            cx, cy = self._rot_q(shape.cx, shape.cy, k)
+            return AxisStack(cx, cy,
+                             [p.translated(cx - p.cx, cy - p.cy, 0)
+                              for p in shape.prims])
+        if isinstance(shape, DisjointUnion):
+            members = []
+            for m in shape.members:
+                if isinstance(m, Solid):
+                    members.append(self._fk.rotate_quarter(m, "z", k))
+                    continue
+                rm = self._rotate_native(m, rotate_axis, rotate_deg)
+                if rm is None:
+                    return None
+                members.append(rm)
+            # a rigid motion of the whole preserves pairwise disjointness
+            return DisjointUnion._unchecked(members)
+        return None
+
     def transform(self, shape, *, translate=(0, 0, 0),
                   rotate_axis=(0, 0, 1), rotate_deg: float = 0.0):
         from forgekernel.brep import Solid
@@ -885,6 +996,11 @@ class RefKernel:
                                          DrilledSolid, RevolveSolid, Sphere)
         from forgekernel.curve import TubeSolid
 
+        if rotate_deg and not isinstance(shape, Solid):
+            native = self._rotate_native(shape, rotate_axis, rotate_deg)
+            if native is not None:
+                shape = native
+                rotate_deg = 0.0            # only the translation remains
         if isinstance(shape, (TubeSolid, DrilledSolid, RevolveSolid)):
             # these carry their own (x, y, z) translate; the planar path would
             # hand them a single vector
@@ -902,15 +1018,27 @@ class RefKernel:
             return DisjointUnion._unchecked(
                 [self._translate_any(m, translate) for m in shape.members])
         if isinstance(shape, (Cyl, Cone, Sphere)):
-            if rotate_deg and (tuple(rotate_axis) != (0, 0, 1)):
+            if rotate_deg:
+                # a rotation the family cannot absorb (a tilt, or a
+                # non-quarter turn of an off-axis solid) genuinely leaves
+                # the representation — through the canonical form, honestly
                 return self._transform_via_body(
                     "tilt a quadric", shape, rotate_axis, rotate_deg, translate)
             return shape.translated(*translate)
         if isinstance(shape, AxisStack):
-            if rotate_deg or any(translate):
+            if rotate_deg:
                 return self._transform_via_body(
                     "transform an AxisStack", shape,
                     rotate_axis, rotate_deg, translate)
+            if any(translate):
+                # rigid translation: every member carries its own centre.
+                # F() first — Fraction + float would round through the float
+                from forgekernel.exact import F as _F
+
+                return AxisStack(shape.cx + _F(translate[0]),
+                                 shape.cy + _F(translate[1]),
+                                 [p.translated(*translate)
+                                  for p in shape.prims])
             return shape
         if not isinstance(shape, Solid):
             # any other representation with a converter (a rounded box, say)
@@ -1232,10 +1360,24 @@ class RefKernel:
                 members = a.members if isinstance(a, DisjointUnion) else [a]
                 other = b.members if isinstance(b, DisjointUnion) else [b]
                 return DisjointUnion(members + other)
-            except ValueError as exc:
-                raise KernelError(str(exc), FailureSignature(
-                    op="boolean.union", diagnostic="NotYetImplemented",
-                    kernel="ref"))
+            except ValueError:
+                # genuinely overlapping (or unprovably separated). Coaxial
+                # solids of revolution union EXACTLY — the union of their
+                # (r, z) profiles (issue #14: the overlapping hose-nozzle
+                # collar). Everything else keeps refusing, without the old
+                # text that called an OVERLAPPING pair "disjoint-union".
+                fused = self._fuse_lathe(a, b)
+                if fused is not None:
+                    return fused
+                _nope(f"boolean.union of {type(a).__name__}+"
+                      f"{type(b).__name__} whose members overlap or cannot "
+                      "be proven separate",
+                      "K2.3 (general quadric union)",
+                      predicate="union_members_provably_disjoint",
+                      remedy="coaxial overlapping solids of revolution fuse "
+                             "exactly through their shared profile; move the "
+                             "parts apart, make them coaxial, or wait for "
+                             "the general union")
         if op == "cut":
             # #123 — a box tool whose FOOTPRINT STRADDLES a bore. It has to be
             # tried before the representation-specific paths below, because
@@ -1344,12 +1486,38 @@ class RefKernel:
                     raise KernelError(str(exc), FailureSignature(
                         op="boolean.cut", diagnostic="NotYetImplemented",
                         kernel="ref"))
+        if op == "intersect":
+            # a z-band clip of a solid of revolution (the split op's
+            # half-space boolean) truncates its PROFILE — exact (#14)
+            clipped = self._clip_lathe_zband(a, b)
+            if clipped is None:
+                clipped = self._clip_lathe_zband(b, a)
+            if clipped is not None:
+                return clipped
+        # A rotated solid that left its representation lands in the canonical
+        # B-rep (Body), which no boolean path accepts yet — name THAT, rather
+        # than blaming whichever quadric shares the call (issue #8: the
+        # boundary an agent needs is which rotations preserve representation).
+        from forgekernel.body import Body as _CanonBody
+
+        if isinstance(a, _CanonBody) or isinstance(b, _CanonBody):
+            _nope(f"boolean.{op} on {type(a).__name__} × {type(b).__name__} "
+                  "— a transformed solid landed in the canonical B-rep "
+                  "(Body)", _K7,
+                  predicate="canonical_brep_boolean_unbuilt",
+                  remedy="quarter-turns about z, principal quarter-turns of "
+                         "a sphere, and any rotation about a z-axisymmetric "
+                         "solid's own axis all PRESERVE the native "
+                         "representation — re-order the recipe to keep "
+                         "boolean operands native (e.g. rotate the boolean's "
+                         "result instead of its operand)")
         # RoundedBox, RevolveSolid and DisjointUnion belong on this list too:
         # they have no `.polys`, so falling through to the planar BSP engine
         # surfaced raw CPython text ("'RoundedBox' object has no attribute
         # 'polys'") as the kernel's diagnostic instead of naming the stage.
         if isinstance(a, curved) or isinstance(b, curved):
-            _nope(f"boolean.{op} on quadric operands", "K2.2")
+            _nope(f"boolean.{op} on quadric operands "
+                  f"({type(a).__name__} × {type(b).__name__})", "K2.2")
         try:
             return self._fk.boolean(op, a, b)
         except ArithmeticError as exc:
@@ -2929,15 +3097,123 @@ class RefKernel:
 
     def _bore_lathe(self, a, tool):
         """A coaxial cylinder through a solid of revolution is another solid
-        of revolution — exactly, with no surface-surface intersection."""
+        of revolution — exactly, with no surface-surface intersection.
+
+        Issue #14: the specialised reconstruction demands the bore stay
+        strictly inside EVERY wall — including the INNER wall of a tube — so
+        widening an existing bore, stepping a counterbore, or truncating a
+        cone past its apex radius all refused despite being exactly
+        representable. Where it refuses, the general profile subtraction
+        (``_profile_boolean``) runs: subtracting the tool's rectangle from
+        the profile polygon. ONE loop out is a lathe again; anything else
+        (a genuine internal cavity, a severed part) re-raises the
+        specialised path's refusal, which names the reason.
+        """
         from forgekernel.quadric import RevolveSolid
 
         prof, cx, cy = self._lathe_profile(a)
         if prof is None or (tool.cx, tool.cy) != (cx, cy):
             return None                      # not a lathe, or not coaxial
-        out = _bore_lathe_profile(prof, Fraction(tool.r),
-                                  Fraction(tool.z0), Fraction(tool.z1))
+        try:
+            out = _bore_lathe_profile(prof, Fraction(tool.r),
+                                      Fraction(tool.z0), Fraction(tool.z1))
+        except KernelError as refusal:
+            rect = [(Fraction(0), Fraction(tool.z0)),
+                    (Fraction(tool.r), Fraction(tool.z0)),
+                    (Fraction(tool.r), Fraction(tool.z1)),
+                    (Fraction(0), Fraction(tool.z1))]
+            loops = _profile_boolean(prof, rect, "cut")
+            if loops is not None and len(loops) == 1 \
+                    and _axis_runs(loops[0]) <= 1:
+                # >1 axis runs = the removed band is walled off from the
+                # outside by material above AND below — an internal cavity
+                # wearing a single loop (the slit down the axis), which is
+                # exactly what the specialised path's refusal is about
+                return _audited(RevolveSolid(loops[0], cx, cy),
+                                "boolean.cut(lathe rebore)")
+            raise refusal
         return RevolveSolid(out, cx, cy)
+
+    def _fuse_lathe(self, a, b):
+        """Union of two OVERLAPPING coaxial solids of revolution: the union
+        of their (r, z) profiles, exactly, when it stays one loop (#14).
+
+        Only consulted after ``DisjointUnion`` has refused, so tangent and
+        separated pairs keep their existing representation; returns None
+        for anything that is not a coaxial pair of lathe profiles, or whose
+        profile union is not a single loop.
+        """
+        from forgekernel.quadric import RevolveSolid
+
+        pa, cxa, cya = self._lathe_profile(a)
+        pb, cxb, cyb = self._lathe_profile(b)
+        if pa is None or pb is None or (cxa, cya) != (cxb, cyb):
+            return None
+        loops = _profile_boolean(pa, pb, "union")
+        if loops is None or len(loops) != 1:
+            return None
+        return _audited(RevolveSolid(loops[0], cxa, cya),
+                        "boolean.union(coaxial lathe profiles)")
+
+    def _clip_lathe_zband(self, body, tool):
+        """Intersect a solid of revolution with an axis-aligned box that
+        contains its whole xy footprint: a z-band clip of the PROFILE — the
+        split op's half-space boolean, exactly (#14).
+
+        Returns None when this is not that family (the caller falls through
+        to its generic refusals). A box that clips in x or y refuses HERE,
+        naming the real boundary: keeping part of a lathe's cross-section
+        breaks its axial symmetry, and no (r, z) profile can say that.
+        """
+        from forgekernel.brep import Solid
+        from forgekernel.quadric import RevolveSolid, _exact_bbox
+
+        prof, cx, cy = self._lathe_profile(body)
+        if prof is None or not isinstance(tool, Solid):
+            return None
+        bb = _exact_bbox(tool)
+        if bb is None or not _is_axis_box(self, tool, bb):
+            return None
+        try:
+            rmax = max(Fraction(r) for r, _ in prof)
+            zvals = [Fraction(z) for _r, z in prof]
+            cx, cy = Fraction(cx), Fraction(cy)
+        except (TypeError, ValueError):
+            return None                      # surd-valued profile: not here
+        (tx0, ty0, tz0), (tx1, ty1, tz1) = bb
+        if not (tx0 <= cx - rmax and tx1 >= cx + rmax
+                and ty0 <= cy - rmax and ty1 >= cy + rmax):
+            _nope("boolean.intersect(the tool clips a lathe in x/y, which "
+                  "would break its axial symmetry)", "K2.2",
+                  predicate="split_plane_is_z_normal",
+                  measured={"tool_xy": [float(tx0), float(ty0),
+                                        float(tx1), float(ty1)],
+                            "lathe_reach": float(rmax)},
+                  remedy="only a z-normal split keeps a solid of revolution "
+                         "a solid of revolution; split with normal 'z', or "
+                         "rebuild the body in a planar representation before "
+                         "an x/y split")
+        zmin, zmax = min(zvals), max(zvals)
+        if tz0 <= zmin and tz1 >= zmax:
+            return body                      # the box contains it whole
+        if tz1 <= zmin or tz0 >= zmax:
+            _nope("boolean.intersect(the z band keeps nothing of the lathe)",
+                  "K2.2", predicate="split_keeps_material",
+                  measured={"band": [float(tz0), float(tz1)],
+                            "lathe_z": [float(zmin), float(zmax)]},
+                  remedy="move the split plane inside the body's z range")
+        rect = [(Fraction(0), tz0), (rmax + 1, tz0),
+                (rmax + 1, tz1), (Fraction(0), tz1)]
+        loops = _profile_boolean(prof, rect, "intersect")
+        if loops is None:
+            return None
+        if len(loops) != 1:
+            _nope(f"boolean.intersect(the z band leaves {len(loops)} "
+                  "separate profile loops, not one solid)", "K2.2",
+                  predicate="clip_is_one_loop",
+                  remedy="split where the body's profile is connected")
+        return _audited(RevolveSolid(loops[0], cx, cy),
+                        "boolean.intersect(lathe z-band)")
 
     def _chamfer_lathe(self, shape, d):
         """Chamfer a solid of revolution by chamfering its PROFILE.
@@ -5819,6 +6095,190 @@ def _lathe_body(segs, cx, cy):
     from forgekernel import body as B
 
     return B.lathe_body(segs, cx, cy)
+
+
+def _axis_runs(loop) -> int:
+    """How many maximal circular runs of axis (r == 0) edges the profile
+    loop has. A valid lathe profile has 0 (a tube) or 1 (a solid); 2+ means
+    an axis-touching slit — an internal cavity wearing a single loop."""
+    n = len(loop)
+    on_axis = [loop[i][0] == 0 and loop[(i + 1) % n][0] == 0
+               for i in range(n)]
+    if all(on_axis) or not any(on_axis):
+        return 1 if on_axis and on_axis[0] else 0
+    return sum(1 for i in range(n) if on_axis[i] and not on_axis[i - 1])
+
+
+def _profile_boolean(loop_a, loop_b, op):
+    """Exact boolean of two closed (r, z) profile polygons — a z-band sweep.
+
+    A coaxial boolean on solids of revolution IS a boolean on their
+    profiles, and a polygon boolean is exact plane geometry: every event
+    (a vertex, or one polygon's edge crossing the other's) happens at a
+    RATIONAL z, because the edges are rational lines. Between events the
+    cross-section of each region is a fixed list of r-intervals whose
+    endpoints move linearly, so the boolean is interval arithmetic per
+    band; the boundary is then re-stitched from the band walls plus the
+    horizontal symmetric-difference at each event height.
+
+    ``op`` is "cut" (a minus b), "union" or "intersect". Returns the list
+    of result loops (Fraction coordinates, collinear runs merged), or
+    ``None`` when the inputs leave ℚ (a surd-valued profile) or the
+    boundary does not stitch into simple loops (a pinch vertex, where four
+    boundary edges meet) — the caller keeps its honest refusal for those.
+    """
+    from collections import defaultdict
+
+    def rat(v):
+        if isinstance(v, Fraction):
+            return v
+        if isinstance(v, int):
+            return Fraction(v)
+        return None                          # SurdVal / float: not this path
+
+    def edges_of(loop):
+        out = []
+        n = len(loop)
+        for i in range(n):
+            (r1, z1), (r2, z2) = loop[i], loop[(i + 1) % n]
+            vals = [rat(r1), rat(z1), rat(r2), rat(z2)]
+            if any(v is None for v in vals):
+                return None
+            r1, z1, r2, z2 = vals
+            if z1 != z2:                     # horizontals carry no coverage
+                out.append((r1, z1, r2, z2))
+        return out
+
+    ea, eb = edges_of(loop_a), edges_of(loop_b)
+    if ea is None or eb is None:
+        return None
+    events = set()
+    for loop in (loop_a, loop_b):
+        for _r, z in loop:
+            zv = rat(z)
+            if zv is None:
+                return None
+            events.add(zv)
+    # an A edge crossing a B edge swaps their r-order: that z is an event
+    # (edges within ONE simple polygon never cross each other)
+    for r1, z1, r2, z2 in ea:
+        sa = (r2 - r1) / (z2 - z1)
+        alo, ahi = (z1, z2) if z1 < z2 else (z2, z1)
+        for p1, w1, p2, w2 in eb:
+            sb = (p2 - p1) / (w2 - w1)
+            if sa == sb:
+                continue
+            zx = (p1 - sb * w1 - r1 + sa * z1) / (sa - sb)
+            blo, bhi = (w1, w2) if w1 < w2 else (w2, w1)
+            if max(alo, blo) < zx < min(ahi, bhi):
+                events.add(zx)
+    zs = sorted(events)
+
+    def band_pairs(edges, zl, zh):
+        """Each edge spanning the band as its (r@zl, r@zh) pair, sorted —
+        the order is constant inside a band because crossings are events."""
+        out = []
+        for r1, z1, r2, z2 in edges:
+            if min(z1, z2) <= zl and max(z1, z2) >= zh:
+                s = (r2 - r1) / (z2 - z1)
+                out.append((r1 + s * (zl - z1), r1 + s * (zh - z1)))
+        out.sort()
+        return out
+
+    keep = {"cut": lambda in_a, in_b: in_a and not in_b,
+            "union": lambda in_a, in_b: in_a or in_b,
+            "intersect": lambda in_a, in_b: in_a and in_b}[op]
+    bands = []                               # (zl, zh, [(lo, hi), ...])
+    for zl, zh in zip(zs, zs[1:]):
+        toggles = {}
+        for p in band_pairs(ea, zl, zh):
+            toggles.setdefault(p, [0, 0])[0] ^= 1
+        for p in band_pairs(eb, zl, zh):
+            toggles.setdefault(p, [0, 0])[1] ^= 1
+        in_a = in_b = cur = False
+        open_at = None
+        ivs = []
+        for p in sorted(toggles):
+            ta, tb = toggles[p]
+            if ta:
+                in_a = not in_a
+            if tb:
+                in_b = not in_b
+            now = keep(in_a, in_b)
+            if now and not cur:
+                open_at = p
+            elif cur and not now and open_at != p:
+                ivs.append((open_at, p))
+            cur = now
+        if cur:
+            return None                      # unbalanced parity: degenerate
+        if ivs:
+            bands.append((zl, zh, ivs))
+
+    # boundary soup: slanted/vertical walls per band, horizontal edges at
+    # each event = coverage-below XOR coverage-above
+    segs = []
+    at_z = {z: ([], []) for z in zs}         # z -> (below-cover, above-cover)
+    for zl, zh, ivs in bands:
+        for lo, hi in ivs:
+            segs.append(((lo[0], zl), (lo[1], zh)))
+            segs.append(((hi[0], zl), (hi[1], zh)))
+            at_z[zh][0].append((lo[1], hi[1]))
+            at_z[zl][1].append((lo[0], hi[0]))
+    for z, (below, above) in at_z.items():
+        marks = defaultdict(lambda: [0, 0])
+        for lo, hi in below:
+            marks[lo][0] += 1
+            marks[hi][0] -= 1
+        for lo, hi in above:
+            marks[lo][1] += 1
+            marks[hi][1] -= 1
+        cb = ca = 0
+        start = None
+        for r in sorted(marks):
+            db, da = marks[r]
+            prev = (cb > 0) != (ca > 0)
+            cb += db
+            ca += da
+            now = (cb > 0) != (ca > 0)
+            if now and not prev:
+                start = r
+            elif prev and not now and start != r:
+                segs.append(((start, z), (r, z)))
+
+    adj = defaultdict(list)
+    for a, b in segs:
+        if a == b:
+            continue
+        adj[a].append(b)
+        adj[b].append(a)
+    if any(len(nbrs) != 2 for nbrs in adj.values()):
+        return None                          # a pinch vertex: not simple loops
+    loops = []
+    seen = set()
+    for begin in adj:
+        if begin in seen:
+            continue
+        loop = [begin]
+        seen.add(begin)
+        prev, cur = begin, adj[begin][0]
+        while cur != begin:
+            loop.append(cur)
+            seen.add(cur)
+            nxt = adj[cur][0] if adj[cur][0] != prev else adj[cur][1]
+            prev, cur = cur, nxt
+        # merge collinear runs (band events that did not bend the boundary)
+        out = []
+        n = len(loop)
+        for i in range(n):
+            p0, p1, p2 = loop[i - 1], loop[i], loop[(i + 1) % n]
+            ux, uy = p1[0] - p0[0], p1[1] - p0[1]
+            vx, vy = p2[0] - p1[0], p2[1] - p1[1]
+            if ux * vy - uy * vx == 0 and ux * vx + uy * vy > 0:
+                continue
+            out.append(p1)
+        loops.append(out)
+    return loops
 
 
 def _bore_lathe_profile(prof, tool_r, zlo, zhi):

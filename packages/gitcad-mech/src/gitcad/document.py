@@ -441,6 +441,14 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
     if f.op == "cone":
         return kernel.cone(p["r1"], p["r2"], p["height"])
     if f.op == "move":
+        # Translation always preserves the representation. Rotation preserves
+        # it where symmetry allows: any angle about a z-axisymmetric solid's
+        # OWN axis, quarter-turns about z for the whole z-axisymmetric family
+        # (cylinder, cone, revolve, drilled/stacked/disjoint composites), and
+        # principal-axis quarter-turns of a sphere. Other rotations convert
+        # to the canonical B-rep, which is exact for ℚ[√d] angles but is NOT
+        # a boolean operand yet (K7) — rotate the result of a boolean rather
+        # than its operands, or build tools pre-oriented.
         return kernel.transform(
             ins[0],
             translate=tuple(p.get("translate", (0, 0, 0))),
@@ -523,6 +531,12 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
         indices = _resolve_entity_indices(edge_ids, f.inputs[0], result) if edge_ids else None
         return kernel.chamfer(ins[0], indices, p["distance"])
     if f.op == "shell":
+        # Works on: boxes (plain, hollow, chamfered), cones, drilled and
+        # bossed plates, rounded boxes. On a lathe the inset profile must
+        # stay in ONE quadratic field: at most one distinct slant radical
+        # per profile (K3.1 brings the biquadratic) — for lathe parts an
+        # ANNULAR revolve profile gives the hollow body in one exact op and
+        # is usually the better answer than shell.
         face_indices = _resolve_entity_indices(p.get("faces", []), f.inputs[0], result, kind="face")
         return kernel.shell(ins[0], face_indices, p["thickness"])
     if f.op in ("move_face", "offset_face", "delete_face"):
@@ -601,6 +615,13 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
     if f.op == "hole":
         # Drilled from top_z downward; optional counterbore. A composed cut —
         # the workhorse mech feature as one intent-level op.
+        #
+        # Works on: planar solids (any placement), and solids of revolution
+        # when the hole is COAXIAL — the bore is then a profile subtraction
+        # and stays exact, including widening an existing bore or stepping a
+        # counterbore. Refuses on a lathe: off-axis holes (K2.1), a bore
+        # that would sever the part, or one that would leave a sealed
+        # internal cavity.
         x, y, top_z = p["x"], p["y"], p["top_z"]
         depth, dia = p["depth"], p["diameter"]
         # Cut each coaxial tool SEQUENTIALLY rather than pre-unioning them: a
@@ -675,6 +696,12 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
     if f.op == "split":
         # Keep one side of an axis-aligned plane: a half-space boolean sized
         # from the body's own bounds — the SolidWorks Split, agent-first.
+        #
+        # Works on: planar solids (any normal), and solids of revolution
+        # with normal "z" only — a z split truncates the (r, z) profile and
+        # the result is another lathe, exactly. An x/y split of a lathe
+        # refuses: keeping half the cross-section breaks the axial symmetry
+        # the representation is built on.
         normal, offset = p.get("normal", "z"), p["offset"]
         keep = p.get("keep", "below")
         if normal not in ("x", "y", "z") or keep not in ("above", "below"):

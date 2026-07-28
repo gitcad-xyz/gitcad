@@ -244,9 +244,20 @@ def test_a_blind_bore_from_the_BOTTOM_removes_its_own_depth(k, depth) -> None:
 def test_a_bore_through_a_cone_apex_cannot_ADD_material(k) -> None:
     """The wall guard skipped an apex because it tested r != 0, so boring a
     cone's tip moved the wall OUTWARD: 293.2 against an uncut 261.8, a solid
-    made larger by cutting it."""
-    with pytest.raises(Exception, match="wider than the lathe"):
-        k.boolean("cut", Cone(0, 0, 5, 0, 0, 10), Cyl(0, 0, 1, -5, 15))
+    made larger by cutting it.
+
+    #14 narrowed the guard: the general profile subtraction now BUILDS this
+    (the wall crosses r=1 at z=8, so the cone is truncated there and the
+    result is a ring over [0, 8]) — and the invariant this test pins is
+    unchanged: cutting must remove exactly the overlap, never add. The
+    old reconstruction's failure mode is now impossible by construction:
+    V = pi * int_0^8 ((5 - z/2)^2 - 1) dz = 224 pi / 3 < 250 pi / 3."""
+    uncut = k.mass_props(Cone(0, 0, 5, 0, 0, 10))["volume"]
+    out = k.boolean("cut", Cone(0, 0, 5, 0, 0, 10), Cyl(0, 0, 1, -5, 15))
+    assert isinstance(out, RevolveSolid)
+    got = k.mass_props(out)["volume"]
+    assert got == pytest.approx(math.pi * 224 / 3)
+    assert got < uncut
 
 
 def test_a_pocket_inside_a_coaxial_bore_removes_no_air(k) -> None:
@@ -371,11 +382,14 @@ def test_a_union_falls_through_to_the_seams_own_distribution(k) -> None:
     out = k.boolean("cut", boss, tool)
     assert k.mass_props(out)["volume"] == pytest.approx(
         k.mass_props(boss)["volume"])
-    # ...and the no-op is not vacuous: a WIDER tool would have to WIDEN the
-    # existing bore, which a profile clamp cannot express, and refuses
+    # ...and the no-op is not vacuous: a WIDER tool genuinely widens the
+    # existing bore. #14: that is a profile subtraction and it is exact —
+    # pi (2^2 - 1^2) x (9 - 4.5) more material gone, nothing else moved.
     wider = k.transform(k.cylinder(2, 100), translate=(15, 15, 4.5))
-    with pytest.raises(Exception, match="wider than the lathe"):
-        k.boolean("cut", boss, wider)
+    widened = k.boolean("cut", boss, wider)
+    assert isinstance(widened, DisjointUnion)
+    assert k.mass_props(boss)["volume"] - k.mass_props(widened)["volume"] \
+        == pytest.approx(math.pi * 3 * 4.5)
 
 
 ROUNDED_POCKETS = [

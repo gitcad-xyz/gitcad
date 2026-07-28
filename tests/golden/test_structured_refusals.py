@@ -54,17 +54,24 @@ def test_a_pocket_off_its_flat_says_how_far_off_and_which_way(k) -> None:
 
 
 def test_a_bore_wider_than_the_wall_names_the_height_and_the_radius(k) -> None:
-    """A cone tapers, so 'too wide' is only true at some heights — the useful
-    answer is WHICH height and by how much."""
+    """The useful answer is WHICH height binds and by how much.
+
+    (The bait used to be a tapering cone — #14's profile subtraction now
+    BUILDS that as a truncation, so the bait is a part the bore genuinely
+    severs: an hourglass necked to r=1, bored r=2. The refusal must still
+    carry the neck's numbers.)"""
+    from forgekernel.quadric import RevolveSolid
+
+    hourglass = RevolveSolid([(0, 0), (5, 0), (1, 10), (5, 20), (0, 20)], 0, 0)
     err = _refusal(lambda: k.boolean(
-        "cut", Cone(0, 0, 2, 5, 0, 10),
-        k.transform(k.cylinder(3, 100), translate=(0, 0, -50))))
+        "cut", hourglass,
+        k.transform(k.cylinder(2, 100), translate=(0, 0, -50))))
     assert err.predicate == "bore_inside_material"
     m = err.measured
-    assert m["tool_radius"] == 3.0
-    assert m["wall_radius"] == pytest.approx(2.0)  # the r=2 end of the taper
-    assert m["at_z"] == pytest.approx(0.0)
-    assert "2" in err.remedy
+    assert m["tool_radius"] == 2.0
+    assert m["wall_radius"] == pytest.approx(1.0)  # the neck
+    assert m["at_z"] == pytest.approx(10.0)
+    assert "1" in err.remedy
 
 
 def test_a_prism_reaching_the_wall_says_what_width_would_fit(k) -> None:
