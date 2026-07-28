@@ -60,6 +60,33 @@ configured. Roles are detected by file content.
 pip install gitcad            # core, mechanical, electrical, MCP server, native kernel
 ```
 
+gitcad is an MCP server — there is no application to open. Wire it into an
+MCP client (either form):
+
+```
+claude mcp add gitcad -- gitcad-mcp
+```
+
+```json
+{ "mcpServers": { "gitcad": { "command": "gitcad-mcp" } } }
+```
+
+Once connected, the agent calls the `get_started` tool and opens the live
+browser viewer (`viewer_open`) as the project takes shape. Run `gitcad`
+(or `python -m gitcad`) any time to reprint this wiring and the viewer story.
+
+- **Windows per-user installs:** console scripts land in
+  `%APPDATA%\Python\PythonXY\Scripts`, which is typically not on PATH, so
+  `gitcad-mcp` can be "not recognized" right after install. Use the
+  PATH-proof spelling
+  `{ "mcpServers": { "gitcad": { "command": "python", "args": ["-m", "gitcad.mcp"] } } }`
+  or add that Scripts directory to PATH.
+- **Introspection:** `gitcad` is a namespace package shared by
+  `gitcad-core`/`-mech`/`-ecad`. Without the metapackage installed,
+  `gitcad.__file__` is `None` — introspect with `gitcad.__path__` or
+  `importlib.metadata`, never `os.path.dirname(gitcad.__file__)`. The
+  metapackage provides `gitcad.__version__`.
+
 The geometry kernel is [forge](https://github.com/gitcad-xyz/forge)
 (`forgekernel`), the project's own exact-arithmetic kernel and the only one
 (ADR-0020); its native build is installed by default on common platforms.

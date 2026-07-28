@@ -1562,10 +1562,22 @@ def main() -> None:  # pragma: no cover - process entrypoint
     are bridged to native ImageContent so the picture renders in the host."""
     import argparse
 
+    from gitcad.cli import WIRING_CMD, WIRING_JSON, WIRING_JSON_PATHPROOF
+
     ap = argparse.ArgumentParser(
         prog="gitcad-mcp",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         description="gitcad MCP server (stdio JSON-RPC). Configure it in your "
-                    "MCP client rather than running it by hand.")
+                    "MCP client rather than running it by hand - run by hand "
+                    "it waits silently on stdin for a client.",
+        epilog=(
+            "wire it into a client (either form):\n"
+            f"    {WIRING_CMD}\n"
+            f"    {WIRING_JSON}\n"
+            "if this script is off PATH (Windows per-user installs):\n"
+            f"    {WIRING_JSON_PATHPROOF}\n"
+            "run `gitcad` (or `python -m gitcad`) for the full "
+            "post-install guide."))
     ap.add_argument("--version", action="version",
                     version=f"gitcad-mcp {_server_version()}")
     ap.parse_args()                  # handles --help/--version, then falls through
@@ -1671,3 +1683,7 @@ def _image_bridge(fn: Handler, image_cls: Any) -> Handler:
         return [*imgs, meta]
 
     return wrapped
+
+
+if __name__ == "__main__":  # pragma: no cover - `python -m gitcad.mcp.server`,
+    main()                  # the PATH-proof spelling of `gitcad-mcp` (#5/#13)

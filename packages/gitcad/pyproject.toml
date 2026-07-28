@@ -38,6 +38,7 @@ Repository = "https://github.com/gitcad-xyz/gitcad"
 Issues = "https://github.com/gitcad-xyz/gitcad/issues"
 
 [project.scripts]
+gitcad = "gitcad.cli:main"
 gitcad-mcp = "gitcad.mcp.server:main"
 gitcad-view = "gitcad.viewer.server:main"
 gitcad-review = "gitcad.review:main"
