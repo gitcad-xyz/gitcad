@@ -94,11 +94,17 @@ ASYMMETRIC_KNOWN = {
     ("sphere", "chamfer"), ("sphere", "fillet"), ("sphere", "shell"),
 }
 
-#: #89 part 2 — chamfer of a tapered solid disagrees with its own mirror
-#: (100.548 vs 98.593). Proven wrong; not yet fixed, because the true value
-#: has not been independently derived and pinning an unverified number would
-#: be the same mistake in the other direction.
-KNOWN_WRONG = {("loft", "chamfer")}
+#: EMPTY, and it should stay that way. It briefly held ("loft", "chamfer"),
+#: which disagreed with its own mirror at 100.548 vs 98.593. Tracing that to
+#: its cause found the real defect one layer down — ``brep._unit_normal``
+#: tested for a perfect square with ``isqrt(int(nn))``, and ``int()``
+#: TRUNCATES a Fraction, so |n|² = 37/36 passed as 1 and the function returned
+#: a vector of length 1.0138 as a "unit" normal. Fixing the predicate made
+#: chamfer refuse the taper honestly instead of guessing.
+#:
+#: A wrong number belongs here only while it is being traced. It is not a
+#: waiver list.
+KNOWN_WRONG: set = set()
 
 
 def _outcome(fn, shape):
@@ -147,11 +153,27 @@ def test_every_op_commutes_with_reflection(k, shapes, op, plane):
     assert not problems, "\n  ".join([f"{op}/{plane} violations:"] + problems)
 
 
-@pytest.mark.xfail(reason="#89 part 2: chamfer of a tapered solid disagrees "
-                          "with its mirror (100.548 vs 98.593); true value "
-                          "not yet derived", strict=True)
-def test_chamfer_of_a_tapered_solid_is_still_inconsistent(k, shapes):
-    s = shapes["loft"]
-    a = k.mass_props(k.chamfer(s, None, 1))["volume"]
-    b = k.mass_props(k.chamfer(k.mirror(s, "xy"), None, 1))["volume"]
-    assert a == b
+def test_no_operation_returns_a_wrong_number(k, shapes):
+    """The headline claim, stated once as a whole rather than per-op: across
+    every representation, every op and both mirror planes, NO pair of
+    congruent solids disagrees about its own volume.
+
+    This was false twice on 2026-07-28 — shell of a tapered solid (206.04 vs
+    624.0, truth 418.04) and chamfer of one (100.548 vs 98.593) — and both
+    were shipped, valid=True, scored "working" by the capability grid.
+    """
+    wrong = []
+    for name, s in shapes.items():
+        for plane in ("xy", "yz"):
+            try:
+                m = k.mirror(s, plane)
+            except Exception:                     # noqa: BLE001
+                continue
+            for op, fn in _ops(k).items():
+                a, b = _outcome(fn, s), _outcome(fn, m)
+                if isinstance(a, str) or isinstance(b, str):
+                    continue                      # refusal/crash: other tests
+                va, vb = (k.mass_props(a)["volume"], k.mass_props(b)["volume"])
+                if va != vb:
+                    wrong.append(f"{name}/{op}/{plane}: {va} vs {vb}")
+    assert not wrong, "congruent solids disagree:\n  " + "\n  ".join(wrong)
