@@ -402,6 +402,17 @@ def to_markdown(result: dict, title: str | None = None) -> str:
 
 def main() -> None:  # pragma: no cover - CLI
     import argparse
+    import sys
+
+    # The matrix is drawn with ✅ / 🚧 / ∎ / 💥. A default Windows console is
+    # cp1252 and cannot encode any of them, so the one command that proves the
+    # kernel works is also the first thing that dies there — with a
+    # UnicodeEncodeError traceback, after the whole probe has already run. Ask
+    # for UTF-8; degrade to replacement characters rather than losing the run.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):        # not a real stream (pipe, capture)
+        pass
 
     ap = argparse.ArgumentParser(
         prog="gitcad-capability",
