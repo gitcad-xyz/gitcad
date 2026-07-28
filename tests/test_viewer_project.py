@@ -261,3 +261,56 @@ def test_mcp_guidance_teaches_the_persistent_project_viewer() -> None:
     assert "NEVER stop the viewer" in doc
     assert "explicitly asks" in S.viewer_stop.__doc__
     assert "never a reason" in S.viewer_stop.__doc__
+
+
+def test_top_assembly_becomes_the_default_when_it_is_written_later(tmp_path) -> None:
+    """The order of work is parts-then-assembly, so the viewer that
+    ``model_new(path=...)`` auto-starts is always looking at a PART. The
+    default view must re-resolve, or the promised "opens on the TOP
+    ASSEMBLY" never comes true for any real project."""
+    import threading
+
+    from gitcad.viewer.server import serve
+
+    # a project with parts but NO assembly yet — this is what the daemon
+    # sees at the moment the first model_new lands
+    doc = Document()
+    doc.add(Feature(op="box", params={"dx": 10, "dy": 10, "dz": 2}))
+    (tmp_path / "base.model").write_text(doc.dumps(), newline="\n")
+
+    httpd = serve(str(tmp_path), port=0)
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}/"
+    try:
+        assert _get(base + "api/parts")["default"] == "base.model"
+        assert _get(base + "api/health")["default"] == "base.model"
+
+        _project(tmp_path)                  # the assembly arrives afterwards
+
+        assert _get(base + "api/parts")["default"] == "stack.part.json"
+        assert _get(base + "api/health")["default"] == "stack.part.json"
+        # and the page's own default view follows, not just the label
+        v = _get(base + "api/version")
+        assert v["kind"] == "assembly" and v["name"] == "stack.part.json"
+    finally:
+        httpd.shutdown()
+
+
+def test_a_viewer_served_on_one_file_keeps_that_file(tmp_path) -> None:
+    """``serve(<design file>)`` documents the opposite contract — the file
+    stays the default view even though the project has a top assembly."""
+    import threading
+
+    from gitcad.viewer.server import serve
+
+    _project(tmp_path)
+    httpd = serve(str(tmp_path / "lid.model"), port=0)
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}/"
+    try:
+        assert _get(base + "api/parts")["default"] == "lid.model"
+        assert _get(base + "api/version")["name"] == "lid.model"
+    finally:
+        httpd.shutdown()
