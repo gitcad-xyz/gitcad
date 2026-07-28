@@ -156,6 +156,24 @@ def test_subtractive_op_without_inputs_fails_loudly() -> None:
         doc.build(NullKernel())
 
 
+def test_missing_required_param_names_op_feature_and_key() -> None:
+    """A bare KeyError through the seam is a refusal nobody can act on.
+
+    0.9.9 field find (hose-nozzle dogfood): `engrave` without ``top_z``
+    surfaced as ``{"type": "KeyError", "message": "'top_z'"}`` — no op, no
+    feature, no hint that it is a parameter at all. The build must name all
+    three, like every other document-layer refusal does."""
+    from gitcad.kernel.null import NullKernel
+
+    doc = Document()
+    base = doc.add(Feature(op="box", params={"dx": 40, "dy": 12, "dz": 4}))
+    doc.add(Feature(op="engrave", inputs=[base],
+                    params={"text": "GITCAD", "height": 5}))  # no top_z!
+    with pytest.raises(GitcadError,
+                       match=r"op 'engrave' missing required param 'top_z'"):
+        doc.build(NullKernel())
+
+
 # -- board_to_model bridge (friction: hand-extruded board body) ---------------
 
 @pytest.mark.forge_gap
