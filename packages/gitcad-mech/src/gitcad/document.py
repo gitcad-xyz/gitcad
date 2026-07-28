@@ -416,6 +416,82 @@ _REQUIRED_INPUTS = {"boolean": 2, "fillet": 1, "chamfer": 1, "shell": 1,
 
 _AXIS_ROTATION = {"z": None, "y": ((1, 0, 0), -90.0), "x": ((0, 1, 0), 90.0)}
 
+# A loft section is READ for exactly these keys. Everything else used to be
+# dropped on the floor: dogfood #39 measured `rotate_deg: 30` surviving into
+# the byte-canonical document, reported buildable, and producing geometry
+# byte-identical to the unrotated loft (volume 1600.0, dy 8.0, either way).
+# A parameter that lives in the source text and never reaches the geometry is
+# worse than one that is missing — a reader of the document, human or the
+# parametric re-build story, cannot tell which numbers are load-bearing.
+_LOFT_SECTION_KEYS = frozenset({"profile", "z"})
+
+# Per-section ORIENTATION knobs (#39's requested shape) are refused BY NAME
+# rather than applied, and the refusal says why. A ruled loft rules straight
+# lines between INDEX-MATCHED section vertices; rotating or offsetting one
+# section makes those lateral quads non-planar, and the kernel builds the
+# solid by triangulating them — so the volume depends on which diagonal the
+# triangulation picks. Measured (20x8 rectangle lofted to itself rotated,
+# h=10): +30 deg -> 1141.88 mm3, -30 deg -> 1915.21 mm3, though the two
+# solids are exact mirror images and must have identical volume; the true
+# ruled volume is 1528.55 mm3. Applying these would trade a silently ignored
+# input for a silently WRONG number, which ADR-0006 calls the only true
+# failure. They graduate with K3.7 (exact ruled surfaces).
+_LOFT_SECTION_NOT_YET = {
+    "rotate_deg": "per-section twist",
+    "scale": "per-section scaling",
+    "offset": "per-section lateral offset",
+}
+
+
+def _loft_section(s: Any, index: int) -> dict:
+    """Read one loft section, refusing anything the build would not honour."""
+    if not isinstance(s, dict):
+        raise GitcadError(
+            f"loft section {index} must be an object with 'profile' and 'z', "
+            f"got {type(s).__name__}")
+    for name in ("profile", "z"):
+        if name not in s:
+            raise GitcadError(
+                f"loft section {index} is missing {name!r} — a section is "
+                "{'profile': <sketch profile>, 'z': <height>}")
+    extra = sorted(set(s) - _LOFT_SECTION_KEYS)
+    for name in extra:
+        if name in _LOFT_SECTION_NOT_YET:
+            # An identity value asks for nothing, so honour it: rotate_deg 0
+            # and scale 1 are what a configuration's default row looks like,
+            # and refusing them would be noise.
+            if _is_identity_section_transform(name, s[name]):
+                continue
+            raise GitcadError(
+                f"loft section {index}: {name!r} ({_LOFT_SECTION_NOT_YET[name]}) "
+                f"is recorded but cannot be applied exactly yet — K3.7 (exact "
+                f"ruled surfaces). It is refused rather than silently ignored: "
+                f"a ruled loft rules straight lines between index-matched "
+                f"section vertices, and {name!r} makes those lateral quads "
+                f"non-planar, where this kernel's answer depends on how they "
+                f"are triangulated. Remedy: bake the orientation into the "
+                f"section profile's own coordinates ONLY if every lateral quad "
+                f"stays planar; otherwise this shape needs K3.7.")
+        raise GitcadError(
+            f"loft section {index}: unknown key {name!r}. A section is "
+            f"{{'profile': <sketch profile>, 'z': <height>}} — an unread key "
+            f"would survive into the document as an intent the build never "
+            f"honoured.")
+    return s["profile"]
+
+
+def _is_identity_section_transform(name: str, value: Any) -> bool:
+    try:
+        if name == "rotate_deg":
+            return float(value) % 360.0 == 0.0
+        if name == "scale":
+            return float(value) == 1.0
+        if name == "offset":
+            return all(float(c) == 0.0 for c in value)
+    except (TypeError, ValueError):
+        return False
+    return False
+
 
 def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult) -> Shape:
     """Map an intent op to a kernel call. Unknown ops fail loud so an agent
@@ -511,7 +587,8 @@ def _dispatch(kernel: Kernel, f: Feature, ins: list[Shape], result: BuildResult)
         return kernel.revolve(p["profile"], p.get("angle_deg", 360.0))
     if f.op == "loft":
         # Sections: [{"profile": <sketch profile>, "z": height}, ...] bottom-up.
-        sections = [(s["profile"], s["z"]) for s in p["sections"]]
+        sections = [(_loft_section(s, i), s["z"])
+                    for i, s in enumerate(p["sections"])]
         return kernel.loft(sections, ruled=bool(p.get("ruled", False)))
     if f.op == "sweep":
         return kernel.sweep(p["profile"], [tuple(pt) for pt in p["path"]])

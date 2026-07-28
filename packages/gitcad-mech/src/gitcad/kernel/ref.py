@@ -4164,18 +4164,35 @@ class RefKernel:
         # geometry_verified, where the true 2 mm shell is ~3900 mm³.
         # Refuse exactly like the closed-shell paths do, instead of
         # answering with a different solid.
+        # The remedy is the route the #24 reporter reached by hand: build the
+        # inner surface as its own solid and cut it, which is exact today.
+        _open_remedy = (
+            "an open shell of this base needs a true offset surface (K4.2). "
+            "Build the inner solid explicitly and cut it: for a loft, re-loft "
+            "the section polygons inset by the wall thickness (dropping the "
+            "inner sections below the open face so the crown keeps thickness) "
+            "and boolean-cut it from the body. For a rectilinear base, shell "
+            "the box-shaped sub-solids separately and union them.")
         for (plane_key, _), frags in ordered:
             n = plane_key[:3]
             axis = max(range(3), key=lambda c: abs(n[c]))
             if any(n[c] != 0 for c in range(3) if c != axis):
                 _nope("shell(open shell of a non-box base: face normals "
                       "are not axis-aligned — the box void would cut the "
-                      "walls away)", "K4.2 (offset surfaces)")
+                      "walls away)", "K4.2 (offset surfaces)",
+                      predicate="open_shell_base_is_its_bounding_box",
+                      measured={"face_normal": [float(c) for c in n]},
+                      remedy=_open_remedy)
             coord = frags[0].verts[0][axis]
             if coord != lo[axis] and coord != hi[axis]:
                 _nope("shell(open shell of a non-box base: a face lies "
                       "inside the bounding box — the box void would cut "
-                      "the walls away)", "K4.2 (offset surfaces)")
+                      "the walls away)", "K4.2 (offset surfaces)",
+                      predicate="open_shell_base_is_its_bounding_box",
+                      measured={"axis": "xyz"[axis], "face_at": float(coord),
+                                "bbox_span": [float(lo[axis]),
+                                              float(hi[axis])]},
+                      remedy=_open_remedy)
         void_lo = [lo[c] + t for c in range(3)]
         void_hi = [hi[c] - t for c in range(3)]
         for idx in remove_faces:
