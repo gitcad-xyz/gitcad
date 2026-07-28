@@ -2572,26 +2572,35 @@ class RefKernel:
                     a = (p.verts[i][0], p.verts[i][1])
                     b = (p.verts[(i + 1) % m][0], p.verts[(i + 1) % m][1])
                     raw.append((a, b))
-            elif all(v[2] in (z0, z1) for v in p.verts):
-                pass                              # top cap, or a wall spanning
+            elif all(v[2] == z1 for v in p.verts):
+                pass                              # the TOP cap
             elif sum(p.verts[i][0] * p.verts[(i + 1) % len(p.verts)][1]
                      - p.verts[(i + 1) % len(p.verts)][0] * p.verts[i][1]
                      for i in range(len(p.verts))) == 0:
-                # A VERTICAL wall — zero projected area in xy — ADDED to the
-                # vertices-on-the-caps test above, not replacing it. A boolean
-                # routinely splits a wall at the tool's own z, leaving a vertex
-                # partway up a solid that is still a perfectly good right
-                # prism: cutting a 20³ box with a tool starting at mid-height
-                # reported "non-prism base" for a prism. The shoelace is exact
-                # over ℚ.
-                #
-                # Replacing the older test instead of widening it broke
-                # `loft/shell`, whose SLANTED walls have vertices only on the
-                # two caps and are not vertical at all. Both admit real cases;
-                # neither subsumes the other.
+                # A VERTICAL wall: zero projected area in xy, exact over ℚ.
+                # This is the property the erosion below actually relies on —
+                # it insets the cap outline by t in xy, which is the true
+                # offset only when the wall is perpendicular to that cap.
                 pass
             else:
-                raise ValueError("shell(non-prism base) — K4.2")
+                # A SLANTED wall. This used to be admitted by asking whether
+                # every wall VERTEX sat on the two caps, which a loft's
+                # tapered wall satisfies — so a frustum took the right-prism
+                # path and was inset in xy by t as though it were vertical.
+                # It returned a well-formed valid=True solid holding 206.04
+                # where the truth is 418.04: 50.7% WRONG, with the walls far
+                # THINNER than asked for. Found by a mirror-invariant sweep
+                # (shell∘mirror ≠ mirror∘shell), not by any test.
+                #
+                # The right answer offsets each face along its OWN unit
+                # normal; for this frustum that normal is (6,0,1)/√37, so even
+                # the simplest taper leaves ℚ, and different tapers bring
+                # different radicals (K3.1). That is real work — and a wrong
+                # number is not an acceptable stand-in for it.
+                raise ValueError(
+                    "shell(tapered base: a slanted wall's inward offset is "
+                    "along its own normal, not t in xy) — K4.2 (offset "
+                    "surfaces)")
         if not found_cap:
             raise ValueError("shell: no planar bottom cap found — K4.2")
 
