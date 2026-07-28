@@ -388,11 +388,44 @@ def _resolve_entity_indices(entity_ids: list[str], input_feature: str,
     assert identity is not None
     indexed = result.entities.get(input_feature, {}).get(kind, [])
     descriptors = [d for _, d in indexed]
-    by_current_id = {eid: i for i, (eid, _) in enumerate(indexed)}
+
+    # An id that names two entities names neither. The two branches below
+    # used to disagree about which one it meant — a dict keeps the LAST
+    # index, `list.index` returns the FIRST — so the same stored selector
+    # resolved to a different face depending on which path ran. Silently
+    # pointing at a face the author did not pick is exactly the
+    # topological-naming failure ADR-0003 exists to prevent, so ambiguity
+    # is refused rather than guessed.
+    #
+    # Measured over the corpus (box, cylinder, sphere, cone, drilled,
+    # chamfered, filleted, shelled, a plate with two identical holes, a
+    # plate with four congruent corner holes; faces and edges): ZERO
+    # ambiguous ids — ordinary descriptors carry enough geometry that even
+    # congruent bores stay distinct. The one producer is a certified
+    # TrimmedShell, whose face descriptor is {"surface": "trimmed-bspline",
+    # "sense": 1, "loops": 1} for every face alike. Giving those faces a
+    # real fingerprint is the proper fix and changes identity semantics
+    # (CLAUDE.md rule 1) — until then this refuses instead of lying.
+    by_current_id: dict[str, list[int]] = {}
+    for i, (eid, _) in enumerate(indexed):
+        by_current_id.setdefault(eid, []).append(i)
+
+    def _one(eid: str, hits: list[int]) -> int:
+        if len(hits) == 1:
+            return hits[0]
+        raise IdentityError(
+            f"{kind} {eid!r} is ambiguous on feature {input_feature!r}: "
+            f"{len(hits)} entities share it (indices {hits}). Their "
+            f"descriptors are indistinguishable, so no reference can name "
+            f"one of them",
+            entity=eid,
+        )
+
     indices: list[int] = []
     for eid in entity_ids:
-        if eid in by_current_id:            # exact id still present
-            indices.append(by_current_id[eid])
+        hits = by_current_id.get(eid)
+        if hits is not None:                # exact id still present
+            indices.append(_one(eid, hits))
             continue
         resolved = identity.resolve(eid, descriptors)   # re-bind by fingerprint
         if resolved is None:
@@ -400,7 +433,10 @@ def _resolve_entity_indices(entity_ids: list[str], input_feature: str,
                 f"{kind} {eid!r} no longer exists on feature {input_feature!r}",
                 entity=eid,
             )
-        indices.append(descriptors.index(resolved))
+        # same rule on the re-bind path: `.index` would silently take the
+        # first of several equal descriptors
+        matches = [i for i, d in enumerate(descriptors) if d == resolved]
+        indices.append(_one(eid, matches))
     return indices
 
 

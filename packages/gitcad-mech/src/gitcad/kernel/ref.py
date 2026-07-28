@@ -256,6 +256,51 @@ def _nope(op: str, stage: str, *, predicate: str | None = None,
 _DEFLECTION_FLOOR = 1e-9
 
 
+def _open_edge_count(mesh: dict) -> int:
+    """Edges used by exactly one triangle — the mesh's own witness that it
+    does not bound a solid. Counted on the winding, so it is a topological
+    fact about what would be written, not a tolerance question."""
+    from collections import Counter
+
+    use: Counter = Counter()
+    for a, b, c in mesh.get("triangles", ()):
+        for u, w in ((a, b), (b, c), (c, a)):
+            use[(u, w) if u < w else (w, u)] += 1
+    return sum(1 for n in use.values() if n == 1)
+
+
+def _check_watertight_for_export(op: str, mesh: dict) -> None:
+    """Refuse to write a mesh the mesher itself called a render.
+
+    A mesh crosses the seam carrying its own honesty: ``provenance``
+    ``"render"`` and a non-empty ``gaps`` list mean the mesher declined to
+    cover a region whose membership it could not certify. That is the right
+    answer for a VIEWER — the uncertainty band is drawn as a band — and the
+    wrong thing to hand a manufacturer, who reads an STL as a closed solid
+    and gets no signal that 152 quads of it are missing.
+
+    So the refusal is scoped to export. ``tessellate`` keeps returning the
+    render mesh unchanged; only writing it out is refused.
+    """
+    if mesh.get("provenance") != "render" and not mesh.get("gaps"):
+        return
+    gaps = len(mesh.get("gaps", ()))
+    open_edges = _open_edge_count(mesh)
+    _nope(
+        f"{op}(certified shell: the mesh is a render, not a solid)",
+        "K7 (certified freeform booleans)",
+        predicate="render_mesh_not_watertight",
+        measured={"provenance": mesh.get("provenance"),
+                  "gap_quads": gaps,
+                  "open_edges": open_edges,
+                  "facets": len(mesh.get("triangles", ()))},
+        remedy=("the trim boundary is known only as a certified enclosure, so "
+                "no watertight mesh exists yet — view it with tessellate() "
+                "(the gaps are drawn as the uncertainty band) and measure it "
+                "with mass_props(), which carries the certified bracket"),
+    )
+
+
 def _check_deflection(op: str, deflection) -> float:
     """Refuse a degenerate mesh tolerance BEFORE it reaches a mesher.
 
@@ -1321,11 +1366,33 @@ class RefKernel:
             # cut a tool it never meets refused with "bore misses the solid in
             # xy" rather than handing back the solid it already was.
             from forgekernel.quadric import _exact_bbox
+            from forgekernel.surd import MixedRadicals
 
+            #
+            # The comparison itself can leave the field: two boxes rotated by
+            # 45° and 30° carry coordinates in ℚ[√2] and ℚ[√3], which have no
+            # common home until the biquadratic tower (K3.1). That raised a
+            # bare ValueError out of surd.py, straight through the seam — and
+            # a raw exception escaping the seam is a CRASH by the capability
+            # bench's own taxonomy. The irony was sharp: this is one of the
+            # few walls that genuinely IS exactness, and it was the one place
+            # the seam did not say so. Now it refuses by name.
             ab, bb_ = _exact_bbox(a), _exact_bbox(b)
-            if ab is not None and bb_ is not None and any(
+            try:
+                separated = ab is not None and bb_ is not None and any(
                     bb_[1][k] <= ab[0][k] or ab[1][k] <= bb_[0][k]
-                    for k in range(3)):
+                    for k in range(3))
+            except MixedRadicals as exc:
+                d1, d2 = exc.radicals
+                _nope(f"boolean.cut(operands in ℚ[√{d1}] and ℚ[√{d2}])",
+                      "K3.1 (multi-radical tower)",
+                      predicate="mixed_radicals",
+                      measured={"radical_a": d1, "radical_b": d2},
+                      remedy=("both operands must live in ONE quadratic field "
+                              f"— rotate both by a multiple of the same angle "
+                              f"(√{d1} and √{d2} do not combine), or place "
+                              "the cut before the rotation"))
+            if separated:
                 return a
             # A bore can also miss inside the bbox — down an L-prism's notch,
             # say, where the two shapes overlap in every axis and the disc
@@ -5500,8 +5567,20 @@ class RefKernel:
         # ADR-0021, ONE mesher: the export path IS `self.tessellate`, at the
         # caller's deflection. Where the mesh would be wrong, this now refuses
         # structurally instead of shipping — the refusal is the answer.
+        #
+        # That fix covered a mesher that refuses. It did NOT cover a mesher
+        # that answers HONESTLY WITH GAPS: `trimmed_shell_mesh` meshes only
+        # the dyadic cells whose membership is certain, reports the SSI
+        # uncertainty band as `gaps` quads, and stamps `provenance: "render"`
+        # — its own docstring says "NOT watertight by design ... a render
+        # artifact, never a measure". Reading `triangles` and ignoring both
+        # channels shipped the pillow-cap as 992 facets with 144 edges used
+        # by exactly one facet, under a bare `solid forge` header. Every
+        # sibling consumer is honest about a certified result; this was the
+        # one that was not, on the one path a manufacturer consumes.
         deflection = _check_deflection("export_stl", deflection)
         mesh = self.tessellate(shape, deflection=deflection)
+        _check_watertight_for_export("export_stl", mesh)
         v = mesh["vertices"]
         out = ["solid forge"]
         for a, b, c in mesh["triangles"]:
