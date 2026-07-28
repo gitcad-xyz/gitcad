@@ -51,9 +51,82 @@ def tool(name: str) -> Callable[[Handler], Handler]:
 
 
 @tool("model_new")
-def model_new() -> dict[str, Any]:
-    """Create an empty model; returns its canonical text form."""
-    return {"model": Document().dumps()}
+def model_new(path: str = "") -> dict[str, Any]:
+    """Create an empty model. RECOMMENDED: pass ``path`` (e.g. 'body.model')
+    so the document is created ON DISK in the project — text is source
+    (ADR-0004), and a document that lives only in this conversation is
+    invisible to the user, undiffable, and lost if the session dies (#7).
+    File-backed models auto-start the project viewer and return its URL
+    (#6; opt out with GITCAD_NO_BROWSER=1), and every later
+    ``feature_add(model='<path>', ...)`` persists, so the user WATCHES
+    features land. Without ``path`` the model exists only in the returned
+    string (scratch work)."""
+    doc = Document()
+    out: dict[str, Any] = {"model": doc.dumps()}
+    if path:
+        from pathlib import Path
+
+        p = Path(path)
+        if p.exists():
+            raise ValueError(
+                f"{path} already exists — build on it with "
+                f"feature_add(model={path!r}, ...) or pick another name")
+        if p.suffix != ".model":
+            raise ValueError(
+                f"model path must end in .model (got {path!r}) — the project "
+                "viewer indexes *.model files, so any other suffix would be "
+                "invisible in the GUI")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(doc.dumps(), encoding="utf-8")
+        out["path"] = str(p)
+        out.update(_ensure_project_viewer(p))
+    else:
+        out["tip"] = (
+            "pass path='body.model' so the document LIVES in the project "
+            "(text is source — ADR-0004): every feature_add then persists to "
+            "disk and the live viewer shows each feature as it lands")
+    return out
+
+
+def _load_model(model: str) -> tuple[Document, Any]:
+    """``model`` is document TEXT or the PATH of a file-backed model (#7).
+    Returns ``(doc, path-or-None)``; canonical document text always starts
+    with '{', so the two forms cannot collide."""
+    if model.lstrip().startswith("{"):
+        return Document.loads(model), None
+    from pathlib import Path
+
+    p = Path(model)
+    if not p.is_file():
+        raise ValueError(
+            f"model {model!r} is neither document text nor an existing file — "
+            "pass the text a model tool returned, or create a file-backed "
+            "model first with model_new(path='body.model')")
+    return Document.loads(p.read_text(encoding="utf-8")), p
+
+
+def _ensure_project_viewer(path: Any) -> dict[str, Any]:
+    """#6 — the GUI is a consequence of starting work, not agent virtue:
+    idempotently ensure THE project viewer for ``path``'s project and return
+    ``viewer_url`` for the tool result (the URL must be unmissable).
+    ``GITCAD_NO_BROWSER=1`` opts out entirely; a viewer failure is reported
+    but never sinks the tool that asked."""
+    import os
+
+    if os.environ.get("GITCAD_NO_BROWSER") == "1":
+        return {}
+    from gitcad.viewer.daemon import ensure_viewer, launch_browser
+    from gitcad.viewer.project import find_project_root
+
+    root = find_project_root(path)
+    try:
+        state, reused = ensure_viewer(root)
+    except Exception as exc:             # noqa: BLE001 - advisory, never fatal
+        return {"viewer_note": f"viewer auto-start failed: {exc}"}
+    if not reused:
+        launch_browser(state["url"])
+    _OPENED[str(root)] = state
+    return {"viewer_url": state["url"]}
 
 
 _DESIGN_EXTS = {".model": "model", ".gitcad": "assembly", ".sch": "schematic",
@@ -94,11 +167,16 @@ def get_started(cwd: str = ".") -> dict[str, Any]:
            "running when your work is done; only the user's explicit request "
            "stops it (viewer_stop).")
 
+    viewer: dict[str, Any] = _ensure_project_viewer(root) if found else {}
     if found:
         steps = [
-            f"Found {len(found)} design(s) here. Open THE project viewer now: "
-            "viewer_open(path='.') — one viewer for the whole project, "
-            "top assembly first; navigate to any part in-page.",
+            f"Found {len(found)} design(s) here. "
+            + (f"THE project viewer is already running at "
+               f"{viewer['viewer_url']} — relay that URL to the user."
+               if viewer.get("viewer_url") else
+               "Open THE project viewer now: viewer_open(path='.') — one "
+               "viewer for the whole project, top assembly first; navigate "
+               "to any part in-page."),
             "Then iterate: add features / edit, and the GUI live-reloads.",
             "Verify with the check tools and export (STEP/STL/drawings/Gerbers).",
             "When you finish, LEAVE THE VIEWER RUNNING — it is the user's "
@@ -107,17 +185,21 @@ def get_started(cwd: str = ".") -> dict[str, Any]:
     else:
         steps = [
             "No gitcad design found here — offer to start one.",
-            "Mechanical: model_new -> feature_add (box, hole, extrude, fillet, ...) "
-            "-> viewer_open to see it live.",
+            "Mechanical: model_new(path='<part>.model') — the document lives "
+            "ON DISK and the viewer auto-starts — then feature_add(model="
+            "'<part>.model', op=box|hole|extrude|fillet|...): each feature "
+            "persists and appears live; an unbuildable one is refused "
+            "immediately with the kernel's reason.",
             "Electronics: author a schematic/board, or board_import / schematic_import "
             "an existing KiCad design.",
             "Import existing CAD: model_import a STEP file (planar solids come in exact).",
-            "Whatever you make, call viewer_open early — one persistent viewer "
-            "per project — so the user watches it take shape, and leave it up.",
+            "Whatever you make, the project viewer is ONE persistent GUI per "
+            "project — model_new(path=...) starts it for you (viewer_open by "
+            "hand also works); always relay its URL, and leave it up.",
         ]
     return {"has_project": bool(found), "designs_found": found,
             "recommended_next_steps": steps, "open_the_gui": gui,
-            "starter_model": Document().dumps(),
+            "starter_model": Document().dumps(), **viewer,
             "tip": "Proactively initialize a project and open the GUI early — "
                    "do not wait to be asked, and do not shut the viewer down "
                    "when you finish."}
@@ -158,13 +240,18 @@ def model_parameters(model: str, set: dict[str, Any] | None = None) -> dict[str,
     trig in degrees, pi available). Feature params reference them the same
     way — a part becomes a function of its parameters. Re-valuing a
     parameter changes geometry (an ADR-0006 breaking change, gated like
-    any other) but never re-identifies features. Returns the model text
-    and the fully resolved table."""
-    doc = Document.loads(model)
+    any other) but never re-identifies features. ``model`` is document
+    text or a file-backed model's path (persisted on update). Returns the
+    model text and the fully resolved table."""
+    doc, fpath = _load_model(model)
     for name, value in (set or {}).items():
         doc.set_parameter(name, value)
-    return {"model": doc.dumps(), "parameters": doc.parameters,
-            "resolved": doc.resolved_parameters()}
+    out = {"model": doc.dumps(), "parameters": doc.parameters,
+           "resolved": doc.resolved_parameters()}
+    if fpath is not None and set:
+        fpath.write_text(out["model"], encoding="utf-8")
+        out["path"] = str(fpath)
+    return out
 
 
 @tool("model_configurations")
@@ -174,35 +261,85 @@ def model_configurations(model: str, set: dict[str, dict[str, Any]] | None = Non
     product family. Each configuration is a named override set of
     existing parameters ('M3x10': {'L': 10}); the whole table re-resolves
     per variant so dependent expressions follow. Build any variant with
-    model ops' `config` argument. Returns the model text plus each
-    configuration's fully resolved parameter table — the design table,
-    as data."""
-    doc = Document.loads(model)
+    model ops' `config` argument. ``model`` is document text or a
+    file-backed model's path (persisted on update). Returns the model text
+    plus each configuration's fully resolved parameter table — the design
+    table, as data."""
+    doc, fpath = _load_model(model)
     for name, overrides in (set or {}).items():
         doc.set_configuration(name, overrides)
     for name in (delete or []):
         doc.configurations.pop(name, None)
-    return {"model": doc.dumps(),
-            "configurations": doc.configurations,
-            "resolved": {name: doc.resolved_parameters(name)
-                         for name in sorted(doc.configurations)}}
+    out = {"model": doc.dumps(),
+           "configurations": doc.configurations,
+           "resolved": {name: doc.resolved_parameters(name)
+                        for name in sorted(doc.configurations)}}
+    if fpath is not None and (set or delete):
+        fpath.write_text(out["model"], encoding="utf-8")
+        out["path"] = str(fpath)
+    return out
 
 
 @tool("feature_add")
 def feature_add(model: str, op: str, params: dict[str, Any] | None = None,
-                inputs: list[str] | None = None) -> dict[str, Any]:
-    """Append an intent-level feature. Returns the new model text and the stable
-    id assigned to the feature (never an ordinal index)."""
-    doc = Document.loads(model)
+                inputs: list[str] | None = None,
+                validate: bool = True) -> dict[str, Any]:
+    """Append an intent-level feature and (by default) BUILD the tree it just
+    extended: a feature the kernel will refuse is refused HERE, with the
+    kernel's structured reason — never a success now and a refusal three
+    tools later (#12). A refused feature is NOT added; the returned model is
+    unchanged. ``validate=false`` skips the build (batching many adds on a
+    slow model); the deferred truth then arrives at the next
+    model_measure/model_validate/model_export.
+
+    ``model`` is document text, or the PATH of a file-backed model
+    (model_new(path=...)): file-backed models are PERSISTED on every
+    successful add — the project viewer live-reloads, so the user watches
+    each feature land (#7) — and the result carries the viewer URL (#6).
+    Returns the new model text and the stable feature id (never an ordinal
+    index)."""
+    from gitcad.errors import GitcadError, KernelError
+    from gitcad.report.fingerprint import fingerprint
+
+    doc, fpath = _load_model(model)
+    before = doc.dumps()
     fid = doc.add(Feature(op=op, params=params or {}, inputs=inputs or []))
-    return {"model": doc.dumps(), "feature_id": fid}
+    out: dict[str, Any] = {"model": doc.dumps(), "feature_id": fid}
+    if validate:
+        kernel = get_kernel()
+        try:
+            doc.build(kernel)
+        except (GitcadError, ValueError, KeyError, NotImplementedError) as exc:
+            refusal: dict[str, Any] = {
+                "ok": False, "buildable": False,
+                "refused": {"feature_id": fid, "op": op},
+                "error": {"type": type(exc).__name__, "message": str(exc)},
+                "model": before,
+                "hint": ("the feature was NOT added — the returned model text "
+                         "is unchanged; fix the feature and re-add (or pass "
+                         "validate=false to batch unbuilt features "
+                         "deliberately)")}
+            if isinstance(exc, KernelError):
+                refusal["refusal"] = exc.as_dict()
+                refusal["fingerprint"] = fingerprint(exc.signature)
+            if fpath is not None:
+                refusal["path"] = str(fpath)
+            return refusal
+        out["buildable"] = True
+        out["geometry_verified"] = not kernel.name.startswith("null")
+    if fpath is not None:
+        fpath.write_text(out["model"], encoding="utf-8")
+        out["path"] = str(fpath)
+        out.update(_ensure_project_viewer(fpath))
+    return out
 
 
 @tool("model_measure")
 def model_measure(model: str) -> dict[str, Any]:
     """Build against the best available kernel and return mass properties per
-    feature — the deterministic oracle an agent verifies against."""
-    doc = Document.loads(model)
+    feature — the deterministic oracle an agent verifies against. ``model``
+    is document text or a file-backed model's path."""
+    doc, _ = _load_model(model)
     kernel = get_kernel()
     result = doc.build(kernel)
     return {
@@ -249,8 +386,9 @@ def model_mass(model: str, density_g_cm3: float = 1.0) -> dict[str, Any]:
     """Physical mass properties of the model's final body: volume (mm^3),
     mass (g) at the given density (g/cm^3), center of mass, and the
     unit-density inertia tensor about the COM. The engineering numbers a
-    drawing title block or a motion study starts from."""
-    doc = Document.loads(model)
+    drawing title block or a motion study starts from. ``model`` is document
+    text or a file-backed model's path."""
+    doc, _ = _load_model(model)
     kernel = get_kernel()
     result = doc.build(kernel)
     props = kernel.mass_props(result.final(doc))
@@ -266,8 +404,9 @@ def model_mass(model: str, density_g_cm3: float = 1.0) -> dict[str, Any]:
 def model_validate(model: str) -> dict[str, Any]:
     """Build and run geometric validity checks per feature (watertight,
     self-intersection, ...). ``geometry_verified: false`` means only the null
-    backend was available — structure was checked, geometry was NOT."""
-    doc = Document.loads(model)
+    backend was available — structure was checked, geometry was NOT.
+    ``model`` is document text or a file-backed model's path."""
+    doc, _ = _load_model(model)
     kernel = get_kernel()
     result = doc.build(kernel)
     out: dict[str, Any] = {}
@@ -286,8 +425,9 @@ def model_entities(model: str, feature_id: str, kind: str = "edge",
                    select: str | None = None) -> dict[str, Any]:
     """Stable entity ids + descriptors for a feature's topology (ADR-0003).
     ``select`` filters with the query DSL (e.g. "plane,zmax" = the back face;
-    "cylinder"; "line,zmin") instead of manual centroid filtering."""
-    doc = Document.loads(model)
+    "cylinder"; "line,zmin") instead of manual centroid filtering. ``model``
+    is document text or a file-backed model's path."""
+    doc, _ = _load_model(model)
     kernel = get_kernel()
     result = doc.build(kernel)
     if feature_id not in result.entities:
@@ -307,8 +447,9 @@ def model_entities(model: str, feature_id: str, kind: str = "edge",
 @tool("model_export")
 def model_export(model: str, path: str, fmt: str = "step") -> dict[str, Any]:
     """Build the model and export the final feature's shape to STEP or STL —
-    the mechanical manufacturing deliverable."""
-    doc = Document.loads(model)
+    the mechanical manufacturing deliverable. ``model`` is document text or
+    a file-backed model's path."""
+    doc, _ = _load_model(model)
     if not len(doc):
         raise ValueError("model has no features")
     kernel = get_kernel()
@@ -338,10 +479,11 @@ def model_drawing(model: str, path: str, title: str = "part", sheet: str = "A3",
     ``settings`` overrides title-block fields (owner, drawing_number,
     revision, date, author, approved_by, units, sheet_no, sheet_count) and
     may carry ``source_path`` to derive author/date/revision from the git
-    log of the part file — absent data renders blank, never invented."""
+    log of the part file — absent data renders blank, never invented.
+    ``model`` is document text or a file-backed model's path."""
     from gitcad.drawing import make_drawing
 
-    doc = Document.loads(model)
+    doc, _ = _load_model(model)
     if not len(doc):
         raise ValueError("model has no features")
     kernel = get_kernel()              # forge HLR (ADR-0020)

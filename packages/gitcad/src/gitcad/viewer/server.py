@@ -61,7 +61,17 @@ def _norm_mesh(mesh: dict) -> dict:
 
 
 def mesh_payload(doc: Document, kernel: Kernel) -> dict:
-    """Everything the 3D client needs, JSON-able."""
+    """Everything the 3D client needs, JSON-able.
+
+    An EMPTY document is a STATE, not an error (#6): model_new(path=...)
+    creates the file before the first feature and the auto-started viewer
+    opens on it — the page must say 'building', never 500."""
+    if not len(doc):
+        return {"kind": "model", "positions": [], "indices": [],
+                "bbox": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+                "stats": {"vertices": 0, "triangles": 0, "volume_mm3": 0.0,
+                          "kernel": kernel.name, "features": 0,
+                          "building": "no geometry written yet"}}
     result = doc.build(kernel)
     shape = result.final(doc)
     mesh = _norm_mesh(kernel.tessellate(shape))
@@ -372,8 +382,14 @@ def run_checks_for(path: Path, kernel: Kernel) -> dict:
         add("interference", check_interference(kernel, instances))
     elif kind == "model":
         doc = resolve_import_paths(Document.loads(text), path.parent)
-        shape = doc.build(kernel).final(doc)
-        add("geometry", kernel.validate(shape))
+        if len(doc):
+            shape = doc.build(kernel).final(doc)
+            add("geometry", kernel.validate(shape))
+        else:
+            # a just-created model (model_new(path=...)) has nothing to
+            # violate yet — 'building' is the honest answer, not a 500
+            results.append({"check": "geometry", "ok": True, "violations": [],
+                            "note": "empty model — no geometry written yet"})
 
     ok = all(r["ok"] for r in results)
     return {"kind": kind, "ok": ok, "results": results,

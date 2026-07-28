@@ -250,6 +250,10 @@ function upload(mesh){
   if(mesh.groups){
     const names = mesh.groups.map(g => `${g.name}(${g.part})`).join(" · ");
     hud.textContent = `assembly: ${names}\n${dims}\n${s.triangles} tris · kernel ${s.kernel} · drag orbit · wheel zoom`;
+  } else if (!s.triangles) {
+    // indistinguishable from broken is worse than empty: name the state
+    hud.textContent = `${s.features} features · building — no geometry written yet\n` +
+                      `kernel ${s.kernel}`;
   } else {
     hud.textContent = `${s.features} features · ${s.triangles} tris · vol ${s.volume_mm3} mm³ · ${dims}\n` +
                       `kernel ${s.kernel} · drag orbit · wheel zoom`;
