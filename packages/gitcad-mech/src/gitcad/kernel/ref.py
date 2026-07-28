@@ -321,13 +321,50 @@ def _guard_seam(cls):
             try:
                 return fn(self, *args, **kwargs)
             except AttributeError as exc:
-                kinds = ", ".join(sorted({type(a).__name__ for a in args
-                                          if hasattr(a, "volume")})) or "shape"
+                # Issue #9: `exc` itself ('Body' object has no attribute
+                # 'polys') is an internal of the implementation, not a fact
+                # about the model — it never reaches the caller. Name the
+                # MISMATCH instead: which representation, which op, which
+                # stage brings it. CPython fills `exc.obj` for real attribute
+                # lookups, which is exactly the operand whose representation
+                # fell short.
+                culprit = type(exc.obj).__name__ \
+                    if getattr(exc, "obj", None) is not None else None
+                shapes = {type(a).__name__ for a in args if hasattr(a, "volume")}
+                if culprit:
+                    shapes.add(culprit)
+                kinds = ", ".join(sorted(shapes)) or "shape"
+                if culprit == "Body":
+                    # the canonical B-rep — where every exactly-transformed
+                    # quadric/lathe lands (ADR-0021). Booleans over general
+                    # B-rep solids are the K7 program; everything else on a
+                    # Body is the canonical-form stage.
+                    stage = _K7 if name == "boolean" \
+                        else "K3.7 (canonical B-rep)"
+                    what = (f"a transformed solid lands in the canonical "
+                            f"B-rep (Body), and {name} has no path over "
+                            f"that representation")
+                    remedy = (f"re-order the recipe so {name} runs while the "
+                              "operand is still in its native representation "
+                              "(e.g. transform the result instead of the "
+                              "operand), or wait for the named stage")
+                elif culprit:
+                    stage = "unsupported representation"
+                    what = (f"the {culprit} representation has no {name} "
+                            "path for this combination of operands")
+                    remedy = ("rebuild the shape in a representation that "
+                              f"supports {name}")
+                else:
+                    stage = "unsupported representation"
+                    what = "no path exists for this combination of operands"
+                    remedy = None
                 raise KernelError(
                     f"ref kernel does not implement {name} on {kinds} yet "
-                    f"— unsupported representation ({exc})",
+                    f"— {what} — {stage}",
                     FailureSignature(op=name, diagnostic="NotYetImplemented",
-                                     kernel="ref"))
+                                     kernel="ref"),
+                    stage=stage, predicate="representation_supports_op",
+                    remedy=remedy)
         return inner
 
     for name in _SEAM_OPS:
@@ -923,10 +960,29 @@ class RefKernel:
         this only ever turns a refusal into a result, never the reverse."""
         from forgekernel import body as B
 
+        rep = type(shape).__name__
+        # Issue #9: the raw exception ("argument should be a string or a
+        # Rational instance…") reads as a type bug in the caller's arguments.
+        # The fact about the model is which HALF of the canonical route fell
+        # short: no converter, or an op the canonical form cannot take yet.
         try:
-            return make(B.to_body(shape))
-        except (ValueError, AttributeError, TypeError) as exc:
-            _nope(f"{op} on {type(shape).__name__} ({exc})", "K3.7 (canonical B-rep)")
+            body = B.to_body(shape)
+        except (ValueError, AttributeError, TypeError):
+            _nope(f"{op} on {rep}", "K3.7 (canonical B-rep)",
+                  predicate="representation_has_canonical_brep",
+                  remedy=f"a {rep} has no converter to the canonical B-rep "
+                         f"yet; rebuild the shape in a representation that "
+                         f"converts, or run {op} on the inputs that made it")
+        try:
+            return make(body)
+        except (ValueError, AttributeError, TypeError):
+            _nope(f"{op} on {rep}", "K3.7 (canonical B-rep)",
+                  predicate="canonical_brep_supports_op",
+                  remedy=f"{op} cannot complete exactly on the canonical "
+                         f"B-rep this {rep} converts to — a transformed "
+                         f"solid's exact coordinates can lie outside what "
+                         f"{op} encodes; run {op} before the transform and "
+                         "apply the placement downstream")
 
     def scale(self, shape, fx: float, fy=None, fz=None):
         from forgekernel import body as B
