@@ -132,9 +132,12 @@ silent wrong-volume bug this kernel has had was caught by an oracle, never by
 the suite.
 
 ### Deliberately deferred
-- **engrave** — text strokes rotate by arbitrary angles, which leave ℚ[√d]
-  (mixed radicals). Needs a bigger number field (K3.1) or a different
-  formulation. Honest refusal is correct for now.
+- **engrave** — text strokes rotate by arbitrary angles, which leave ℚ[√d].
+  K3.1 (ℚ(√p,√q), wired in 2026-07-28) does NOT fix this and was never going
+  to: it closes the case of two DIFFERENT constructible angles — a 45° body
+  cut by a 30° tool, which now computes exactly — while an arbitrary angle's
+  cos and sin are not algebraic of degree 4 over ℚ at all. This needs a
+  different formulation, not a bigger field. Honest refusal stays correct.
 - **freeform STEP topology (K3.7)** — still open (the real-world round-trip
   for SolidWorks exports; consumes K7's trimmed-patch type).
 - **NURBS booleans (K7)** — shipped in 0.9.8 for PatchSolid × PatchSolid and

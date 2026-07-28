@@ -163,6 +163,15 @@ def composed_operations(k, tmpdir: str) -> dict[str, Any]:
     real-use cases: transform-then-boolean (tool orientation), boolean
     where the TOOL was transformed, boolean-result reuse (cut → cut,
     cut → shell), and export/tessellate of a transformed or cut solid.
+
+    The two ``rotX then cut by rotY tool`` columns exist because this bench
+    reported "0 crashes" while two crashes and a wrong number were live. Every
+    tool here was axis-aligned or turned by the SAME angle as the body, so the
+    operands always shared one number field and the whole two-field family was
+    invisible: 45° lands in ℚ[√2] and 30° in ℚ[√3], and a boolean across them
+    reaches code that three separate places had written assuming one radical.
+    A grid that cannot see a family cannot score it — the denominator is part
+    of the claim.
     """
     import os
 
@@ -201,6 +210,13 @@ def composed_operations(k, tmpdir: str) -> dict[str, Any]:
         "cut by rot45 tool": lambda s: k.boolean(
             "cut", s, k.transform(rot(k.box(2, 2, 100), 45),
                                   translate=_mid(k, s))),
+        # two DIFFERENT quadratic fields in one boolean (K3.1)
+        "rot45 then cut by rot30 tool": lambda s: k.boolean(
+            "cut", rot(s, 45), k.transform(rot(k.box(2, 2, 100), 30),
+                                           translate=_mid(k, rot(s, 45)))),
+        "rot30 then cut by rot45 tool": lambda s: k.boolean(
+            "cut", rot(s, 30), k.transform(rot(k.box(2, 2, 100), 45),
+                                           translate=_mid(k, rot(s, 30)))),
         "cut by loft tool": lambda s: k.boolean("cut", s, loft_tool(s)),
         "cut then cut": lambda s: k.boolean(
             "cut", cutbox(s), k.transform(k.cylinder(1, 100),
@@ -229,9 +245,16 @@ _EXACT_FIELD_BOUNDARY = {
     ("sphere", "cut box"):
         "a square prism through a sphere has an arcsin in its volume — not "
         "algebraic, so no extension of ℚ[π] holds it",
-    ("chamfered box", "chamfer(all)"):
-        "a chamfered box's faces have normals of length √2, so chamfering "
-        "them again offsets a plane by an irrational distance",
+    # ("chamfered box", "chamfer(all)") WAS listed here, and it was WRONG.
+    # The stated reason — "faces have normals of length √2, so chamfering them
+    # again offsets a plane by an irrational distance" — is a FIELD
+    # LIMITATION, not an impossibility. Every other entry in this dict cites
+    # genuine transcendence (arcsin, arctan/Lindemann, Baker's ln(1+√2)); an
+    # irrational plane offset is simply what ℚ(√2,√d) is for. Wiring SurdVal's
+    # mixed-radical promotion into the biquadratic BiSurd (#127, 2026-07-28)
+    # made it compute: 7424.185080804593, confirmed against an independent MC
+    # oracle at 7424.256 (the oracle's own error on a case with a closed form
+    # was 0.189). A "permanent" label hid a closable gap from the roadmap.
     ("cone", "fillet(all)"):
         "a fillet arc off the axis contributes its TURN ANGLE linearly to "
         "∮r²dz; this cone's rim turns through π−arctan(5/2), and arctan(5/2) "

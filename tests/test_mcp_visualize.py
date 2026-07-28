@@ -155,6 +155,12 @@ def test_github_report_is_consent_gated_by_default() -> None:
 
 
 def test_update_apply_preview_does_not_run_pip(monkeypatch) -> None:
+    # pin BOTH ends, as test_update_check_reports_versions does. Pinning only
+    # the latest left `current` reading the ambient install, so on a checkout
+    # that is not pip-installed it came back "unknown", update_apply took the
+    # "already up to date" branch, and the test failed for a reason that has
+    # nothing to do with what it is testing.
+    monkeypatch.setattr(S, "_server_version", lambda: "0.0.1")
     monkeypatch.setattr(S, "_pypi_latest", lambda pkg="gitcad": "999.0.0")
     r = S.REGISTRY["update_apply"](confirm=False)
     assert r["ok"] and r.get("preview") is True and r["to"] == "999.0.0"

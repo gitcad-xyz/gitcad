@@ -119,6 +119,103 @@ Assemblies of rotated parts are where this bites in real use.
 > rational slot — the pre-existing latent bug this work exposed. The general
 > n-radical tower (rotated-assembly booleans) remains open.
 
+> **WIRED IN (2026-07-28).** `BiSurd` was already complete — arithmetic,
+> comparison, sign, inverse — and nothing ever CONNECTED it to `SurdVal`, so
+> every mixed-radical expression refused although its exact home was already
+> in the kernel.
+> `SurdVal._promote` now lifts any pair a coprime square-free pair of
+> generators can name — including pairs that share a factor, by CHANGING
+> generators (√2 with √6 is ℚ(√2,√3), where √6 is the third basis radical).
+> Measured: 2116 rotated-operand boolean pairs, **1860 compute, 256 refuse by
+> name, 0 crash**. The 45°-vs-30° cut in §2.3's own headline is now an
+> ordinary exact answer.
+>
+> What is left is genuinely degree 8: an axis like (1,2,0) needs √5, and
+> ℚ(√2,√3,√5) has no biquadratic normal form. So does ℚ(√6,√10) — degree 4,
+> but its radicals 6 = 2·3, 10 = 2·5, 15 = 3·5 pairwise share a prime, so no
+> two are coprime and `BiSurd`'s tag-matching coercion cannot name it.
+>
+> **The three defects this exposed, all the same shape.** Promotion made
+> previously-refused paths live, and code written when there was exactly one
+> field above ℚ met a second one:
+>
+> | site | symptom | why |
+> |---|---|---|
+> | `body._as_fraction` | **wrong number** — `cut(box@45, slab@60)` reported 960 for 960 − 20√3 | duck-typed `.b == 0` as "rational"; BiSurd carries `.a`/`.b` too, and `c√q + e√pq` was discarded |
+> | `notch.py` | crash — raw `TypeError` through the seam | `fractions.Fraction` where `exact.F` was meant |
+> | `io.py` `_num` | crash — a body that builds cannot be SAVED (ADR-0004) | fell through to `Fraction(v)`; now a `B:` encoding that demotes first |
+>
+> The first is the one that matters: the polygons were right and only the
+> number was wrong, which is the worst way for a CAD kernel to fail. It was
+> found by an independent Monte-Carlo oracle, not by any test, and the
+> capability bench reported "0 crashes" throughout because every tool in its
+> corpus was axis-aligned or turned by the same angle as the body. Two grid
+> columns and one invariant now cover the family:
+> `tests/invariants/test_reported_volume_matches_the_shape.py` compares the
+> reported volume against a float integral over the returned polygons, which
+> needs nobody to guess which configuration breaks.
+
+> **A rigid motion must not change what kind of thing a shape is
+> (2026-07-28).** The mirror-asymmetry list went **34 pairs → 5**, and the 29
+> that went had ONE cause, not 29. `RefKernel.mirror` handed back the generic
+> canonical `Body` for anything that was not already a `Solid`, while the
+> feature paths dispatch on representation — so a mirrored cylinder stopped
+> being a cylinder and `chamfer`/`fillet`/`shell` refused a shape they handle
+> perfectly well upright. `mirror` of a `Cyl` even surfaced as
+> `'Body' object has no attribute 'polys'`, a refusal whose text is an
+> internal error.
+>
+> The fix is structural rather than 29 special cases: every quadric family is
+> CLOSED under an axis reflection, so `mirrored` now lives on each of them
+> (forge `quadric.py`) — negate a coordinate, swap an interval's ends, swap a
+> frustum's radii, and for a `RoundedBox` the far corner becomes the new
+> origin. No arithmetic, no approximation. Measured after: **5 asymmetric
+> pairs, 0 crashes, 0 wrong numbers**, and both sides of every closed pair now
+> report the SAME volume exactly (cylinder chamfer 913.156 = 913.156).
+>
+> The 5 that remain are unions and drilled unions asked for an offset-family
+> op; the refusal there is about the operation over a composite, not about the
+> mirror.
+>
+> It also exposed one more newly-reachable gap, same class as the three above:
+> `quadric._member_volume` called `m.volume()` on a union member that had
+> already fallen through to a `Body`. Fixed by asking `body.volume` rather than
+> letting an `AttributeError` out through the seam.
+
+> **Then 5 → 0: the invariant used CONSTRUCTIVELY (2026-07-28).** The last five
+> were all one shape of problem — a ONE-SIDED recogniser. `_bossed_plate_spec`
+> knows a boss standing up on a plate; `_shell_drilled` knows a bore stack that
+> widens upward. Turn the part over and the same solid falls past them into a
+> generic refusal ("members touch", "a stack that narrows upward is the
+> mirrored construction"), although the answer is exact and reachable.
+>
+> `RefKernel._via_reflection` now computes **σ op(σS)** when the direct path
+> refuses. This is the mirror invariant used as a tool rather than only as an
+> assertion, and two properties make it sound rather than clever:
+>
+> * it runs ONLY after a refusal, so it cannot change an answer the kernel
+>   already gives — it can only turn a refusal into a number;
+> * uniform shell and all-edge fillet genuinely ARE equivariant (the thickness
+>   and radius carry no orientation). A theorem, not a heuristic. It is not
+>   offered when a face or edge SELECTION is given, because a reflection would
+>   have to carry the selection with it — a silent answer to a different
+>   question is worse than the refusal.
+>
+> A field wall is congruence-invariant, so the reflected shape leaves the field
+> too and the fallback finds nothing: `cone × fillet(all)` still refuses both
+> ways, and the refusal the caller sees is the one describing their own shape.
+>
+> Volume agreement across the mirror is guaranteed by construction here and so
+> proves nothing on its own. What it cannot catch is ORIENTATION — mirroring a
+> body flips every face sense and an inside-out solid has the same |V| — so all
+> five were checked for positive volume, `validate`, a correctly reflected
+> bounding box, and **1500/1500 point-membership agreement** under an
+> independent ray-cast against the tessellated bodies.
+>
+> `ASYMMETRIC_KNOWN` is now **empty**, and the note above it says to keep it
+> that way: an entry there is a shape the kernel can build one way up and not
+> the other, which is a thing it is wrong about *itself*.
+
 ---
 
 ## 3. Geometry capability (the actual roadmap)

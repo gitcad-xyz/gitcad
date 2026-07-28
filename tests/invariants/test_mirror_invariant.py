@@ -67,32 +67,30 @@ def _ops(k):
 
 #: (shape, op) pairs that build one way up and REFUSE mirrored — capability
 #: gaps, not wrong numbers (#89 part 3). Listed so a NEW asymmetry fails here.
-#: chamfer/loft is the one open WRONG NUMBER (#89 part 2) and is xfailed below.
-#: 34 pairs, measured 2026-07-28 — not hand-listed. Every one is a CURVED or
-#: composite representation whose mirror image the feature path cannot take;
-#: none is a wrong number. The list shrinks as ADR-0021 lands, and shrinking it
-#: is the point — do NOT grow it to silence a new failure without first
-#: proving the new case is a gap rather than a wrong answer.
-ASYMMETRIC_KNOWN = {
-    ("bored boss", "chamfer"), ("bored boss", "fillet"),
-    ("bored boss", "shell"),
-    ("cone", "chamfer"), ("cone", "shell"),
-    ("counterbore", "chamfer"), ("counterbore", "fillet"),
-    ("counterbore", "shell"),
-    ("cylinder", "chamfer"), ("cylinder", "cut"),
-    ("cylinder", "fillet"), ("cylinder", "shell"),
-    ("disjoint union (boss)", "chamfer"), ("disjoint union (boss)", "cut"),
-    ("disjoint union (boss)", "fillet"), ("disjoint union (boss)", "shell"),
-    ("drilled (blind)", "chamfer"), ("drilled (blind)", "fillet"),
-    ("drilled (blind)", "shell"),
-    ("drilled (through)", "chamfer"), ("drilled (through)", "cut"),
-    ("drilled (through)", "fillet"), ("drilled (through)", "shell"),
-    ("filleted box", "chamfer"), ("filleted box", "cut"),
-    ("filleted box", "fillet"), ("filleted box", "shell"),
-    ("revolve", "chamfer"), ("revolve", "cut"),
-    ("revolve", "fillet"), ("revolve", "shell"),
-    ("sphere", "chamfer"), ("sphere", "fillet"), ("sphere", "shell"),
-}
+#:
+#: EMPTY, measured 2026-07-28 — and getting here took two changes, neither of
+#: them a per-pair special case. It was 34.
+#:
+#: 29 went when ``mirror`` stopped throwing away the representation. It handed
+#: back the generic canonical ``Body`` for anything that was not already a
+#: ``Solid``, while the feature paths dispatch on representation — so a
+#: mirrored cylinder stopped being a cylinder and chamfer/fillet/shell refused
+#: a shape they handle perfectly well upright. Every quadric family is CLOSED
+#: under an axis reflection, so ``mirrored`` is now structural and exact on
+#: each of them (forge ``quadric.py``). A rigid motion must not change what
+#: kind of thing a shape is.
+#:
+#: The last 5 went when the kernel started using this very invariant
+#: CONSTRUCTIVELY. Several recognisers are one-sided — ``_bossed_plate_spec``
+#: knows a boss standing up — so when the direct path refuses,
+#: ``RefKernel._via_reflection`` computes σ op(σS). It runs only after a
+#: refusal, so it can never change an answer the kernel already gives.
+#:
+#: Keep it empty. An entry here is a shape the kernel can build one way up and
+#: not the other, which is a thing it is wrong about ITSELF. Do NOT add one to
+#: silence a failure without first proving the new case is a gap rather than a
+#: wrong answer.
+ASYMMETRIC_KNOWN: set = set()
 
 #: EMPTY, and it should stay that way. It briefly held ("loft", "chamfer"),
 #: which disagreed with its own mirror at 100.548 vs 98.593. Tracing that to

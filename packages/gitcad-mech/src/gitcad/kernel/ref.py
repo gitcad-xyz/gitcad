@@ -1403,6 +1403,20 @@ class RefKernel:
                                  kernel="ref"))
         if isinstance(shape, Solid):
             return self._fk.mirror(shape, axis)
+        # A reflection must not change WHAT KIND OF THING a shape is. Every
+        # quadric family is closed under an axis reflection — a mirrored
+        # cylinder is a cylinder, a mirrored frustum is a frustum with its
+        # radii swapped — and dropping to the canonical Body threw that away
+        # for nothing. The cost was not cosmetic: the feature paths dispatch on
+        # representation, so mirroring a Cyl made chamfer/fillet/shell refuse a
+        # shape they handle perfectly well upright. That was 30 of the 34 pairs
+        # in tests/invariants/test_mirror_invariant.py's ASYMMETRIC_KNOWN.
+        #
+        # The Body path stays for representations with no `mirrored` of their
+        # own; it is a fallback now rather than the only road.
+        own = getattr(shape, "mirrored", None)
+        if own is not None:
+            return own(axis)
         return self._via_body(
             "mirror", shape, lambda b: b.transformed(B.Affine.mirror(axis)))
 
@@ -1606,15 +1620,21 @@ class RefKernel:
                     bb_[1][k] <= ab[0][k] or ab[1][k] <= bb_[0][k]
                     for k in range(3))
             except MixedRadicals as exc:
-                d1, d2 = exc.radicals
-                _nope(f"boolean.cut(operands in ℚ[√{d1}] and ℚ[√{d2}])",
-                      "K3.1 (multi-radical tower)",
+                # .radicals is every radicand met, in order: two for a pair of
+                # SurdVals, three when a value meets a BiSurd field it is
+                # outside of, four for two different biquadratic fields. Most
+                # pairs now PROMOTE (K3.1 + generator change), so what is left
+                # here is a real degree-8 tower, not a naming accident.
+                ds = list(exc.radicals)
+                names = ", ".join(f"√{d}" for d in ds)
+                _nope(f"boolean.cut(operands over {names})",
+                      "K3.2 (degree-8 tower)",
                       predicate="mixed_radicals",
-                      measured={"radical_a": d1, "radical_b": d2},
-                      remedy=("both operands must live in ONE quadratic field "
-                              f"— rotate both by a multiple of the same angle "
-                              f"(√{d1} and √{d2} do not combine), or place "
-                              "the cut before the rotation"))
+                      measured={"radicals": ds},
+                      remedy=("the operands' coordinates must share one field "
+                              f"of degree ≤ 4 — {names} together need a bigger "
+                              "one. Rotate both by multiples of the same "
+                              "angle, or place the cut before the rotation"))
             if separated:
                 return a
             # A bore can also miss inside the bbox — down an L-prism's notch,
@@ -2814,7 +2834,57 @@ class RefKernel:
         return sorted(logical_edges(shape), key=lambda e: (
             tuple(e["dir"]), tuple(e["point"]), e["tmin"]))
 
+    def _via_reflection(self, op_name: str, shape, run):
+        """Answer an op the direct path refuses, by REFLECTING the question.
+
+        For an isometry σ and a shape-independent operation, op(σS) ≡ σ op(S).
+        That identity is the mirror invariant this kernel already asserts
+        (tests/invariants/test_mirror_invariant.py); here it is used
+        constructively. When a recogniser is one-sided — ``_bossed_plate_spec``
+        knows a boss standing UP, ``_shell_drilled`` a stack that widens
+        upward — the reflected shape is a shape it does know, so compute
+        ``σ op(σS)`` rather than refuse a question that has an exact answer.
+
+        Two properties make this safe rather than clever:
+
+        * it runs ONLY after the direct path has already refused, so it cannot
+          change any answer the kernel currently gives — only turn a refusal
+          into a number;
+        * uniform shell and all-edge fillet genuinely ARE equivariant (the
+          thickness and radius carry no orientation), which is a theorem, not
+          a heuristic. It is not offered where a face or edge SELECTION is
+          given, because a reflection would have to carry the selection too.
+
+        Returns None when the reflection refuses as well — then the original
+        refusal stands and is the one the caller sees, because it is the one
+        that describes the shape the caller actually passed.
+        """
+        if getattr(self, "_reflecting", False):
+            return None                       # never recurse on our own image
+        if getattr(shape, "mirrored", None) is None:
+            return None                       # no exact reflection to use
+        self._reflecting = True
+        try:
+            out = run(self.mirror(shape, "xy"))
+        except KernelError:
+            return None
+        finally:
+            self._reflecting = False
+        return self.mirror(out, "xy")
+
     def fillet(self, shape, edges, radius):
+        try:
+            return self._fillet_direct(shape, edges, radius)
+        except KernelError:
+            if edges:
+                raise                         # a selection does not reflect
+            out = self._via_reflection(
+                "fillet", shape, lambda s: self._fillet_direct(s, edges, radius))
+            if out is None:
+                raise
+            return out
+
+    def _fillet_direct(self, shape, edges, radius):
         from forgekernel.brep import Solid
         from forgekernel.kernel import fillet_box
         from forgekernel.quadric import FilletedBox
@@ -4494,6 +4564,18 @@ class RefKernel:
                               for f in void.faces)), "shell(drilled solid)")
 
     def shell(self, shape, remove_faces, thickness):
+        try:
+            return self._shell_direct(shape, remove_faces, thickness)
+        except KernelError:
+            if remove_faces:
+                raise                         # a selection does not reflect
+            out = self._via_reflection(
+                "shell", shape, lambda s: self._shell_direct(s, (), thickness))
+            if out is None:
+                raise
+            return out
+
+    def _shell_direct(self, shape, remove_faces, thickness):
         from forgekernel.brep import Solid
         from forgekernel.kernel import shell as fk_shell
 
