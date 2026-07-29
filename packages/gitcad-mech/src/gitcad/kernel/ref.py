@@ -3669,7 +3669,7 @@ class RefKernel:
         """
         from forgekernel.brep import Solid
         from forgekernel.quadric import Sphere, _exact_bbox
-        from forgekernel.sphercut import SphereCutRefused, cut_sphere_at_z
+        from forgekernel.sphercut import SphereCutRefused, cut_sphere_on_axis
 
         if not isinstance(a, Sphere) or not isinstance(tool, Solid):
             return None
@@ -3707,26 +3707,19 @@ class RefKernel:
             return None
 
         if axis != 2:
-            # A CUT ALONG x OR y IS NOT AVAILABLE, and conjugating through a
-            # quarter turn does not rescue it — which is worth recording,
-            # because the trick works everywhere else in this kernel and the
-            # instinct to reach for it here is right.
-            #
-            # A sphere absorbs every rotation, so `cut the turned ball at z,
-            # turn the answer back` is geometrically sound. What stops it is
-            # MEASUREMENT: `_sphere_pole_span` and the cap's moment term both
-            # integrate by Archimedes ALONG Z, so a face whose pole ends up on
-            # ±x has no volume term at all ("a pole-trimmed sphere face whose
-            # pole is off the z axis is outside what this term computes").
-            # Turning the answer back is exactly what puts it there.
-            #
-            # So this needs the z-axis assumption lifted out of the sphere
-            # TERMS, not another conjugation at the call site. Recorded in
-            # #144 rather than papered over: an equivariance argument that is
-            # sound about geometry and false about the code is worth a note.
+            # STILL Z-ONLY AT THE SEAM, and the reason moved rather than went
+            # away. #144 lifted the z assumption out of the sphere measurement
+            # TERMS — `_pole_axis` now reads the trim axis and both the volume
+            # and moment integrals follow it — so a face with a pole on ±x is
+            # measurable. What is not yet right is BUILDING one: relabelling a
+            # finished body's axes (`sphercut._permute_body`) produces a shell
+            # the answer audit rejects, and a construction that fails its own
+            # audit is exactly what should not reach a caller. The permutation
+            # is cyclic, so orientation is not the obvious culprit and it has
+            # not been diagnosed; guessing further would be guessing.
             return None
         try:
-            return _audited(cut_sphere_at_z(a, cut, keep_low),
+            return _audited(cut_sphere_on_axis(a, axis, cut, keep_low),
                             "boolean.cut", require_body=True)
         except SphereCutRefused:
             return None
