@@ -123,6 +123,15 @@ def operations(k, tmpdir: str) -> dict[str, Any]:
                                            rotate_deg=45),
         "mirror": lambda s: k.mirror(s, "xy"),
         "scale": lambda s: k.scale(s, 2),
+        # A HALF-SPACE tool — facing a part off, milling a flat on a round
+        # bar, slicing a ball. Every `cut` column above uses a SMALL tool
+        # passing through the middle, so the half-space family was unsampled
+        # and K2.x's first two rungs (a flat on a bar, a plane cutting a
+        # sphere) landed without moving a single cell. Same lesson as the
+        # two-field boolean: an instrument scores only what its corpus can
+        # reach, so widening the corpus is part of shipping the capability.
+        "cut by half-space": lambda s: k.boolean(
+            "cut", s, _half_space(k, s)),
         "cut cylinder": lambda s: k.boolean(
             "cut", s, k.transform(k.cylinder(1, 100), translate=_mid(k, s))),
         "cut box": lambda s: k.boolean(
@@ -144,6 +153,24 @@ def operations(k, tmpdir: str) -> dict[str, Any]:
 def _mid(k, s):
     (lo, hi) = k.bbox(s)
     return tuple((float(lo[i]) + float(hi[i])) / 2 for i in range(3))
+
+
+def _half_space(k, s):
+    """A tool that passes clean through the shape, its one live wall a
+    quarter of the way in from the +x side — a facing cut.
+
+    Deliberately a QUARTER rather than a half: at exactly half, a symmetric
+    part's answer is its own mirror image, so a construction that kept the
+    wrong side would still return the right volume.
+    """
+    (lo, hi) = k.bbox(s)
+    lo = [float(v) for v in lo]
+    hi = [float(v) for v in hi]
+    span = [hi[i] - lo[i] for i in range(3)]
+    x = lo[0] + span[0] * 3 / 4
+    big = max(span) * 4 + 10
+    return k.transform(k.box(big, big, big),
+                       translate=(x, lo[1] - big / 2, lo[2] - big / 2))
 
 
 def _far(k, s):

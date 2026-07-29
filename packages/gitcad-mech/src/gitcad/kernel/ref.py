@@ -1823,17 +1823,15 @@ class RefKernel:
             flat = self._flat_on_bar(a, b)
             if flat is not None:
                 return flat
-            # _cap_a_sphere (K2.x rung 2) is written and tested in forge, and
-            # is NOT wired in here yet — deliberately. forge's `body.volume`
-            # measures the pole-trimmed cap exactly (24 tests, closed form
-            # pi a^2 (3r-a)/3, exact at every rational height), but
-            # `body.centroid` has no moment term for it: its sphere branch
-            # covers a whole sphere and an octant only. Returning the body
-            # would therefore hand back a solid whose VOLUME is right and
-            # whose CENTRE OF MASS is refused — or, if that refusal were
-            # softened, silently wrong. That is the exact defect class this
-            # kernel exists to prevent, so the capability waits for the term.
-            # Blocker recorded in task #143.
+            # K2.x rung 2. This was held back for one commit: forge measured
+            # the pole-trimmed cap's VOLUME exactly and had no moment term for
+            # its CENTRE OF MASS, so wiring it would have returned a solid
+            # that was half-measured. The term landed (#143, verified against
+            # a Monte-Carlo centroid on an OFF-CENTRE sphere, since a centred
+            # one makes every c_k term invisible), so the capability follows.
+            capped = self._cap_a_sphere(a, b)
+            if capped is not None:
+                return capped
         if op == "cut":
             pocket = self._pocket_lathe(a, b)
             if pocket is not None:
@@ -3682,19 +3680,53 @@ class RefKernel:
         if tool.volume() != (tx1 - tx0) * (ty1 - ty0) * (tz1 - tz0):
             return None                       # the tool must BE its bbox
         # clean through in x and y, so only one z wall touches the ball
-        if not (tx0 <= a.cx - a.r and tx1 >= a.cx + a.r):
+        # ANY PRINCIPAL AXIS, not just z. A sphere is round, so a cut
+        # perpendicular to x is a cut perpendicular to z of the same ball
+        # turned a quarter — and `Sphere.rotated` absorbs every rotation
+        # exactly now, so the other two axes conjugate through it rather than
+        # needing their own construction. The bench's facing cut comes in
+        # along +x, which is exactly the case a z-only recogniser missed.
+        lo = (a.cx - a.r, a.cy - a.r, a.cz - a.r)
+        hi = (a.cx + a.r, a.cy + a.r, a.cz + a.r)
+        t_lo, t_hi = (tx0, ty0, tz0), (tx1, ty1, tz1)
+        axis = None
+        for i in range(3):
+            spans = [j for j in range(3) if j != i]
+            if not all(t_lo[j] <= lo[j] and t_hi[j] >= hi[j] for j in spans):
+                continue
+            lo_in = t_lo[i] > lo[i]
+            hi_in = t_hi[i] < hi[i]
+            if lo_in == hi_in:
+                continue                      # both walls cut, or neither
+            axis = i
+            # the wall that cuts says which side survives — the reading that
+            # was inverted in _flat_on_bar and returned every complement
+            cut, keep_low = ((t_lo[i], True) if lo_in else (t_hi[i], False))
+            break
+        if axis is None:
             return None
-        if not (ty0 <= a.cy - a.r and ty1 >= a.cy + a.r):
+
+        if axis != 2:
+            # A CUT ALONG x OR y IS NOT AVAILABLE, and conjugating through a
+            # quarter turn does not rescue it — which is worth recording,
+            # because the trick works everywhere else in this kernel and the
+            # instinct to reach for it here is right.
+            #
+            # A sphere absorbs every rotation, so `cut the turned ball at z,
+            # turn the answer back` is geometrically sound. What stops it is
+            # MEASUREMENT: `_sphere_pole_span` and the cap's moment term both
+            # integrate by Archimedes ALONG Z, so a face whose pole ends up on
+            # ±x has no volume term at all ("a pole-trimmed sphere face whose
+            # pole is off the z axis is outside what this term computes").
+            # Turning the answer back is exactly what puts it there.
+            #
+            # So this needs the z-axis assumption lifted out of the sphere
+            # TERMS, not another conjugation at the call site. Recorded in
+            # #144 rather than papered over: an equivariance argument that is
+            # sound about geometry and false about the code is worth a note.
             return None
-        lo_in = tz0 > a.cz - a.r
-        hi_in = tz1 < a.cz + a.r
-        if lo_in == hi_in:
-            return None                       # both walls cut, or neither
-        # the wall that cuts says which side survives — the same reading that
-        # was inverted in _flat_on_bar and returned every answer's complement
-        zc, keep_below = (tz0, True) if lo_in else (tz1, False)
         try:
-            return _audited(cut_sphere_at_z(a, zc, keep_below),
+            return _audited(cut_sphere_at_z(a, cut, keep_low),
                             "boolean.cut", require_body=True)
         except SphereCutRefused:
             return None
