@@ -86,6 +86,36 @@ def test_the_union_is_measurable_and_bounded():
     assert min(ca[0], cb[0]) < c[0] < max(ca[0], cb[0]), (c, ca, cb)
 
 
+@pytest.mark.parametrize("name", ["translate", "mirror", "scale"])
+def test_the_union_survives_being_moved(name):
+    """A rigid motion or a similarity must not cost the union its usability.
+
+    This is the composed grid's rule applied to the union's own answer: the
+    grid exists because `rotate 90` once scored green while the rotated solid
+    could no longer be an operand. When this union first landed, all three of
+    these refused — the members dispatch on representation and a member that
+    is a canonical `Body` has `transformed(Affine)` and none of the feature
+    families' `mirrored`/`scaled`/`translated`. It surfaced as "mirror on
+    Body, DisjointUnion yet", which reads as an unbuilt capability and was a
+    missing branch.
+
+    Volume is checked as well as survival, because a union that quietly
+    dropped a member would still return a solid.
+    """
+    k = get_kernel()
+    a = _cut_cylinder(k)
+    u = k.boolean("union", a, _far_box(k, a))
+    v0 = k.mass_props(u)["volume"]
+
+    moved = {"translate": lambda s: k.transform(s, translate=(1, 2, 3)),
+             "mirror": lambda s: k.mirror(s, "xy"),
+             "scale": lambda s: k.scale(s, 2)}[name](u)
+    # a similarity of ratio 2 multiplies volume by 8; an isometry by 1 —
+    # EXACTLY, since both operands were exact and both maps are exact
+    expected = v0 * 8 if name == "scale" else v0
+    assert k.mass_props(moved)["volume"] == expected
+
+
 def test_a_genuine_overlap_still_refuses():
     """The point is disjointness, not "unions are easy now".
 

@@ -1142,8 +1142,18 @@ class RefKernel:
         takes a vector, the quadric/composite types take (x, y, z)."""
         from forgekernel.brep import Solid
 
+        from forgekernel import body as B
+
         if isinstance(m, Solid):
             return self._fk.translate(m, *t)
+        if isinstance(m, B.Body):
+            # a union member may already BE the canonical form — an operation
+            # on one returns a Body — and a Body has no `translated`. Same
+            # dispatch hole `_member_volume` closed for measurement and
+            # `DisjointUnion.bbox` for bounds; here it surfaced as "transform
+            # on Body, DisjointUnion yet", which reads as an unbuilt
+            # capability rather than a missing branch.
+            return m.transformed(B.Affine.translation(*t))
         return m.translated(*t)
 
     @staticmethod
