@@ -324,6 +324,70 @@ Assemblies of rotated parts are where this bites in real use.
 > span, the volume term, the moment term, and the mesher — and only the fourth
 > was in a float path. Bench: single-op **352/360 → 353/360**.
 
+> **The denominator, measured — and "one problem, real mathematics" was wrong
+> about which problem (2026-07-28).** The claim four entries up — *"~77 of the
+> 101 remaining gaps: one problem, K2.x/K7, real mathematics"* — was reached by
+> reading refusal STRINGS. Instrumenting the operands instead
+> (`gitcad.bench.refusals`, which wraps `RefKernel.boolean`, keeps the operands
+> of the call that actually raised, and reads each one's surface inventory
+> through forge's `to_body`) splits the 101 into four families that are not
+> one problem and do not cost the same:
+>
+> | | cells | what it is |
+> |---|---|---|
+> | **plane × quadric, live** | **56** | a planar-walled operand meeting a **cylinder**. Conic intersections, elementary closed forms. |
+> | plane × quadric, wall candidates | 18 | a straight prism through the **sphere** or the **cone** — whose tier-1 cut is ALREADY a proven transcendence. |
+> | quadric × quadric (general SSI) | 6 | two cylinders. The only cells that are the hard problem. |
+> | never reaches a boolean | 21 | fillet (11), shell (8), `export_step` on a Body (2) — K5.2 / K4.2 / K3.7. |
+>
+> **Only 6 of the 101 are general SSI**, and all six are the same cell — `cut
+> then cut`, a drill crossing a body that already carries a cylindrical face.
+> The 56 live cells are the SAME geometry as K2.x rungs 1 and 2, which are
+> already built: a plane meets a cylinder in a conic.
+>
+> WHY THE STRINGS HID IT. Those 56 cells speak with **twelve distinct refusal
+> messages** across **four** stage tags — K2.1 (17), K2.2 (36), K2.3 (1), K3.7
+> (2) — because each was written where its guard sits rather than where its
+> mathematics sits: "bore crosses a lateral wall", "Body × Solid — the
+> canonical body carries Cylinder", "quadric operands (Cyl × Solid)", "quadric
+> operands (RevolveSolid × Solid)", "prism straddling a bore", "the prism
+> reaches the lathe's wall", "DisjointUnion+Solid whose members overlap".
+> Twelve phrasings, one conic — and the tags disagree with each other about
+> what stage the SAME geometry belongs to. A refusal vocabulary that names the
+> guard instead of the blocker will scatter one family across four rungs of the
+> roadmap, and no amount of reading them carefully reassembles it; only the
+> operands do.
+>
+> **52 of the 56 have the planar operand as the TOOL** (cut a curved body with a
+> straight-walled prism); the other 4 are the reverse and the most valuable in
+> real use — drilling a hole into an already-faceted part (`planar box`,
+> `chamfered box`, `shelled box`, `loft`, all `cut then cut`, all refusing
+> "bore crosses a lateral wall"). Widest single rung: **48 cells** need only
+> plane × Cylinder, generalising rung 1's `_flat_on_bar` past its narrow
+> recogniser (tool IS its own bounding box, covers the bar in z and y, exactly
+> one x wall crossing).
+>
+> THE 18 ARE NOT ROADMAP AND NOT TRACTABLE — they are unadjudicated. Structural
+> classification says the intersection CURVES are conics; it does not say the
+> VOLUME lands in an exact field, and for a straight prism through a sphere
+> (arcsin) or a cone (ln(1+√2), by Baker) `_EXACT_FIELD_BOUNDARY` already proves
+> it does not. Each needs deciding one way: a transfer proof moves it into
+> `_EXACT_FIELD_BOUNDARY_COMPOSED`, and a proof that does NOT transfer — a cone
+> on its side is not the upright integral — hands it back to the roadmap.
+> Counting them as tractable overstates the prize; counting them as gaps is the
+> error the `_EXACT_FIELD_BOUNDARY` comment already warns about.
+>
+> The `Body` count reproduces exactly: **76 of the 101 never involve a `Body`**,
+> 25 do (23 as a boolean operand, 2 as an `export_step` operand — and missing
+> that second pair is what made a first pass read 78). `Body` carries `.faces`,
+> `Solid` carries `.polys`. But the earlier reading of that number was the
+> mistake: the `Body`-operand family is not a family at all, it is a
+> REPRESENTATION cutting across all four rows above, which is why "convert the
+> Body back to a Solid" closed nothing and why "one problem" then over-corrected
+> in the other direction. **The probe is committed this time** — the previous
+> run's script was ad-hoc and did not survive the machine move, which is the
+> whole reason this had to be measured twice.
+
 ---
 
 ## 3. Geometry capability (the actual roadmap)
