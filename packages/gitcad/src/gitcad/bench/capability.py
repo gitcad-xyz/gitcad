@@ -264,10 +264,22 @@ def composed_operations(k, tmpdir: str) -> dict[str, Any]:
     }
 
 
-# Cells that are OUTSIDE ANY EXACT FIELD, permanently. These are not backlog
-# and never will be: under ADR-0019 the refusal IS the finished answer, and
-# counting them as gaps makes the matrix read as 345 achievable cells when it
-# is not. Each entry says why, in terms of the number that would be needed.
+# Cells that are OUTSIDE ANY EXACT FIELD. Counting them as gaps makes the
+# matrix read as 345 achievable cells when it is not, so they are scored
+# separately. Each entry says why, in terms of the number that would be needed.
+#
+# "PERMANENTLY" IS WHAT THIS COMMENT USED TO SAY, and it is wrong — the label
+# is conditional on the EXACT charter, not on mathematics. Every constant
+# named below is transcendental AND bracketable: an arcsin, a ln(1+√2), an
+# arctan, an arccos(1/√37). Under ADR-0019 a certified bracket is a proof, so
+# ADR-0023 (certified angles) turns all 14 of these into certified ANSWERS
+# rather than walls. They are outside the exact field and inside the
+# certified one, which are different claims and were being conflated.
+#
+# That makes twice this dict has hidden closable work behind the word
+# permanent — see the chamfered-box note below, which is the first time. The
+# lesson is the same both times: "no exact field holds this" is a statement
+# about ℚ[√d][π], and the charter has been larger than ℚ[√d][π] since K3.
 _EXACT_FIELD_BOUNDARY = {
     ("sphere", "cut box"):
         "a square prism through a sphere has an arcsin in its volume — not "

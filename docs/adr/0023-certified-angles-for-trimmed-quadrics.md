@@ -59,6 +59,26 @@ span is not a whole number of sectors "would need a new quadric measure that
 So this is not a routing job inside one rung. It is a change to how a trimmed
 quadric face states its extent.
 
+### Where the scope was originally set too narrow
+
+ADR-0019 introduced certified intervals as a **K3** need: "K1 and K2 hold to a
+hard rule … K3 breaks that comfort." That rule is still literally true — K2
+uses no floats, it *refuses* — but it framed exactness as settled for K2, and
+the coverage sweep says otherwise. K2's failure mode is not the one ADR-0019
+anticipated. It is not "the quantity cannot be represented at all"; it is
+**"the quantity can be represented only on a null set"**, which reads as
+success on a cell-counting instrument and as refusal to every user.
+
+ADR-0019 needs no revision for this. Its governing consequence —
+
+> The exact fields remain the default and the first choice; `CInterval` is used
+> only where no exact field reaches. A model that *could* be exact must not
+> silently fall back to an interval.
+
+— is exactly the constraint this ADR must honour, and is why the exact sector
+path stays primary and bit-identity is the acceptance criterion below. What
+changes is only the *reach* of the escape hatch, from K3 to K2.
+
 ## Decision
 
 **Carry the angular extent of a trimmed quadric face as a certified angle (an
@@ -108,6 +128,22 @@ own denominator.
 That is a second correction to the same dict, which already carries one: the
 `(chamfered box, chamfer(all))` entry was labelled permanent and was merely a
 field limitation. A "permanent" label has now hidden closable work twice.
+
+### ADR-0021's data model has to be restated with it
+
+ADR-0021 records the canonical B-rep as
+
+    Surface ∈ {Plane, Cylinder, Cone, Sphere}
+    Curve   ∈ {Line, Circle}
+
+and that has already drifted from `forgekernel.body`, which carries **five**
+surfaces — `Torus` is missing from the ADR entirely — and, more to the point
+here, carries **trims on the surface**: `SphereS.pole` and `Torus.(k0, span)`.
+Neither trim appears in ADR-0021's model, and the sector index this ADR
+replaces is precisely that unmodelled mechanism. So the change below is not
+additive to ADR-0021's schema; it edits a part of the B-rep that ADR-0021
+describes incompletely. Whichever ADR carries this decision to *accepted* must
+restate the model, listing the surface set and how a face states its extent.
 
 ### Breaking
 

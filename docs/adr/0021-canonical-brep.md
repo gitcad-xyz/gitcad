@@ -3,7 +3,7 @@
 Status: accepted (2026-07-24)
 Extends [ADR-0018](0018-native-kernel.md) (forge is the kernel) and
 [ADR-0020](0020-forge-sole-kernel.md) (forge is the *only* kernel). The
-exactness charter ([ADR-0019](0019-exactness-charter.md)) is unchanged and
+exactness charter ([ADR-0019](0019-certified-intervals.md)) is unchanged and
 governs everything below.
 
 ## Context

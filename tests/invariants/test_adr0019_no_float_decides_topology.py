@@ -151,12 +151,18 @@ def test_exact_comparisons_are_not_flagged(tmp_path) -> None:
 
 
 def test_the_exact_field_boundary_is_marked_permanent_not_backlog() -> None:
-    """Two cells are outside ANY exact field and always will be. Under
-    ADR-0019 the refusal IS the finished answer there, so counting them as gaps
-    makes the matrix read as 345 achievable cells when it is 343.
+    """These cells are outside any EXACT field, so counting them as ordinary
+    gaps makes the matrix read as more achievable cells than it has. Naming
+    them costs nothing and stops a future reader — human or agent — spending a
+    day trying to close a hole that is a wall.
 
-    Naming them costs nothing and stops a future reader — human or agent —
-    spending a day trying to close a hole that is a wall.
+    "AND ALWAYS WILL BE" is what this docstring used to add, and it was wrong.
+    Outside the exact field is not outside the CERTIFIED one: every constant
+    involved (arcsin, ln(1+√2), arctan, arccos(1/√37)) is transcendental and
+    every one is bracketable, so ADR-0023 turns each of these into a certified
+    answer. The assertion below is unchanged and still right — it pins the
+    classification the EXACT probe must give — but the label means "no exact
+    field holds this", not "unanswerable".
     """
     from gitcad.bench.capability import _EXACT_FIELD_BOUNDARY, probe
 
