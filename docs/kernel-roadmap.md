@@ -80,17 +80,30 @@ and 101 gaps fall into four families:
 
 | cells | family |
 |---:|---|
-| 30 | `boolean.cut` on quadric × quadric operands — real unwritten geometry (K2.x) |
-| 26 | a `Body` operand the boolean has no path over (ADR-0021) |
+| 30 | `boolean.cut` on quadric × quadric operands |
+| 26 | a `Body` operand the boolean has no path over |
 | 21 | `boolean.cut` on other operand pairs |
 | 19 | `fillet` / `shell` over composites and non-planar bases (K4.2 / K5.2) |
 
-The `Body`-operand family is the one that is about ARCHITECTURE rather than
-about missing mathematics, and it is what ADR-0021 exists to finish. Its
-remaining members are dominated by two cases the quadric families genuinely
-cannot express — a cylinder tilted onto the x axis (`Cyl` is +z by
-construction) and a rounded box turned 45° — which is the honest signal that
-`Body` itself has to become operable.)
+**The first three are ONE problem, and measuring said so against expectation.**
+The `Body`-operand family reads like an architecture gap — ADR-0021's canonical
+form not being a boolean operand — and the obvious cheap fix is to convert a
+`Body` back to a `Solid` and use the exact planar boolean that already exists.
+Instrumenting the actual refusals killed that plan: of the 25 `Body` operands
+the boolean turns away, **zero are all-planar.** Every one carries `Cylinder`,
+`Cone` or `SphereS` faces (177 planes, 110 cylinders, 56 sphere zones, 1 cone
+across them, and 16 have holed faces). Converting them to polygon soup is not
+possible without faceting, which the charter forbids.
+
+So ~77 of the 101 gaps are the same unwritten thing: **a general boolean over
+curved surfaces**, i.e. surface–surface intersection with exact trims. That is
+K2.x/K7 territory and real mathematics, not plumbing — which is what ADR-0018's
+staging said all along.
+
+The practical consequence is for the REFUSALS, not just the plan: a message
+that says "a transformed solid landed in the canonical B-rep" invites an agent
+to go looking for a representation fix that does not exist. It should name the
+surfaces that actually need intersecting.)
 
 The matrix does not yet probe the K7 freeform boolean cells (loft × loft
 and PatchSolid × PatchSolid land outside its 15 representations × 23 ops

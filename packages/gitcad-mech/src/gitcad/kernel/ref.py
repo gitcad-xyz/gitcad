@@ -1860,16 +1860,38 @@ class RefKernel:
         from forgekernel.body import Body as _CanonBody
 
         if isinstance(a, _CanonBody) or isinstance(b, _CanonBody):
+            # NAME THE SURFACES, not the container. This message used to stop
+            # at "landed in the canonical B-rep", which reads as a plumbing
+            # gap and sends a reader looking for a Body→Solid converter. There
+            # isn't one to find: instrumenting all 25 of these refusals showed
+            # ZERO all-planar Body operands — every one carries Cylinder, Cone
+            # or SphereS faces, so what is missing is the intersection of
+            # those surfaces with the tool's, and no amount of re-plumbing
+            # produces it. Faceting them would, and the charter forbids that.
+            #
+            # So report the curved surfaces actually present. An agent can act
+            # on "these two cylinders have to be intersected"; it cannot act on
+            # "wrong container".
+            kinds: set[str] = set()
+            for x in (a, b):
+                if isinstance(x, _CanonBody):
+                    kinds |= {type(f.surface).__name__ for f in x.faces
+                              if type(f.surface).__name__ != "Plane"}
+            curved_note = (", ".join(sorted(kinds)) if kinds
+                           else "no curved faces")
             _nope(f"boolean.{op} on {type(a).__name__} × {type(b).__name__} "
-                  "— a transformed solid landed in the canonical B-rep "
-                  "(Body)", _K7,
-                  predicate="canonical_brep_boolean_unbuilt",
-                  remedy="quarter-turns about z, principal quarter-turns of "
-                         "a sphere, and any rotation about a z-axisymmetric "
-                         "solid's own axis all PRESERVE the native "
-                         "representation — re-order the recipe to keep "
-                         "boolean operands native (e.g. rotate the boolean's "
-                         "result instead of its operand)")
+                  f"— the canonical body carries {curved_note}, and their "
+                  "intersection with the tool is not built", "K2.2",
+                  predicate="curved_surface_intersection_unbuilt",
+                  measured={"curved_surfaces": sorted(kinds)},
+                  remedy="this is the general curved-surface boolean (K2.x), "
+                         "not a representation problem — converting the Body "
+                         "back to a polygon soup would need faceting, which "
+                         "ADR-0019 forbids. Until it lands: keep the operands "
+                         "NATIVE, since mirror, any exact rotation a family "
+                         "absorbs, and any uniform scale all preserve the "
+                         "representation now — or apply the transform to the "
+                         "boolean's RESULT instead of its operand")
         # RoundedBox, RevolveSolid and DisjointUnion belong on this list too:
         # they have no `.polys`, so falling through to the planar BSP engine
         # surfaced raw CPython text ("'RoundedBox' object has no attribute

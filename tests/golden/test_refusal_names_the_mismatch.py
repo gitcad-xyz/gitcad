@@ -74,8 +74,17 @@ def test_boolean_on_a_transformed_body_names_the_mismatch(k, tilted) -> None:
     # the mismatch, by name: the op and BOTH operand representations
     assert "boolean" in msg
     assert "Body" in msg and "Solid" in msg, msg
-    # the stage that brings it: booleans over general B-rep solids are K7
-    assert err.stage and "K7" in err.stage, err.stage
+    # THE STAGE MOVED, and the move is the point (2026-07-28). This asserted
+    # K7 — the freeform NURBS boolean — on the reading that a Body operand is
+    # a general-B-rep problem. Instrumenting all 25 such refusals showed what
+    # the Bodies actually carry: Cylinder, Cone and SphereS faces, never a
+    # freeform patch and never all-planar. What is missing is the QUADRIC
+    # surface intersection, which is K2.x. Pointing at K7 sent a reader to the
+    # wrong backlog item; pointing at "canonical B-rep" sent them looking for
+    # a Body→Solid converter that cannot exist without faceting.
+    assert err.stage and "K2" in err.stage, err.stage
+    assert "Cylinder" in msg, "name the surface that needs intersecting"
+    assert err.measured.get("curved_surfaces"), err.measured
     assert err.remedy, "a refusal an agent can act on carries a remedy"
 
 

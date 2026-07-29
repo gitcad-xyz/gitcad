@@ -272,6 +272,31 @@ Assemblies of rotated parts are where this bites in real use.
 > says the composed backlog was never purely a mathematics problem: a large
 > slice of it was the kernel forgetting what it was holding.
 >
+> **A measurement that killed the obvious next plan (2026-07-28).** With the
+> three transform families done, the composed grid's biggest addressable
+> family looked like the 26 cells refusing with "a transformed solid landed in
+> the canonical B-rep (Body)". That reads as ARCHITECTURE — ADR-0021's
+> canonical form not being a boolean operand — and the cheap fix writes itself:
+> convert the `Body` back to a `Solid` and use the exact planar boolean that
+> already exists.
+>
+> Instrumenting the actual refusals killed it. Of the 25 `Body` operands the
+> boolean turns away, **zero are all-planar**: 177 planes, 110 cylinders, 56
+> sphere zones and 1 cone across them, 16 with holed faces. There is no
+> polygon soup to convert to without faceting, which ADR-0019 forbids. So the
+> `Body`-operand family is not architecture at all — it is the same general
+> curved-surface boolean as the 30-cell quadric×quadric family, and together
+> with the 21 other boolean pairs that is **~77 of the 101 remaining gaps: one
+> problem, K2.x/K7, real mathematics.**
+>
+> The cost of NOT measuring would have been a day building a converter that
+> closes zero cells. The cost of the wrong REFUSAL is the same mistake handed
+> to every future reader, so the message now names the curved surfaces it
+> actually found and points at K2.x
+> (`tests/golden/test_refusal_names_the_real_blocker.py`, which also checks the
+> remedy's factual claims are true — a refusal that gives advice which does not
+> work is worse than a blunt one).
+>
 > Three further defects surfaced, each by the probe and not by the suite:
 > `kernel.rotate` typed coordinates as ℚ[√1] even at 90° (so a quarter-turned
 > drilled plate lost `fillet` — the byte-canonical form of this is docket S1);

@@ -160,11 +160,24 @@ def test_a_translated_axis_stack_stays_an_axis_stack(k) -> None:
 
 def test_a_tilted_lathe_still_refuses_downstream_naming_the_canonical_form(
         k) -> None:
-    """Rotation about x genuinely leaves the axisymmetric family: the
-    conversion to the canonical B-rep stays, and the boolean refusal must
-    name THAT — not call the operand a quadric."""
+    """Rotation about x genuinely leaves the axisymmetric family, so the
+    conversion to the canonical B-rep stays — and the refusal must name what
+    would actually fix it.
+
+    That wording moved on 2026-07-28. It used to stop at "canonical B-rep",
+    which is true but reads as a plumbing gap and invites a Body→Solid
+    converter; measuring all 25 such refusals found zero all-planar Body
+    operands, so no converter can exist without faceting. The refusal now
+    names the CURVED SURFACES it found and points at K2.x, the quadric
+    boolean. The original intent is unchanged and still asserted: it must
+    describe the canonical body, not blame whichever quadric shares the call.
+    """
     s = RevolveSolid(STEPPED, 0, 0)
     out = k.transform(s, rotate_axis=(1, 0, 0), rotate_deg=90)
     assert isinstance(out, RevolveSolid) is False
-    with pytest.raises(KernelError, match="canonical B-rep"):
+    with pytest.raises(KernelError) as exc:
         k.boolean("cut", out, Cyl(0, 0, 1, -50, 100))
+    msg = str(exc.value)
+    assert "canonical body" in msg, msg          # still names the container
+    assert "Cylinder" in msg, msg                # and now the surface too
+    assert exc.value.stage.startswith("K2"), exc.value.stage
