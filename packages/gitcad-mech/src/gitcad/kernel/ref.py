@@ -1813,6 +1813,28 @@ class RefKernel:
             if rb is not None:
                 return rb
         if op == "cut":
+            # A FLAT MILLED ON A ROUND BAR, before the pocket path. The pocket
+            # guard refuses "the prism reaches the lathe's wall", which is
+            # right for a pocket sunk INTO a lathe and wrong here: reaching the
+            # outer wall is what a flat IS. The plane is parallel to the axis,
+            # so the intersection is a pair of straight lines up the wall — no
+            # ellipse, no transcendence — and the answer is exact wherever the
+            # chord meets the circle at a twelfth (K2.x's first rung).
+            flat = self._flat_on_bar(a, b)
+            if flat is not None:
+                return flat
+            # _cap_a_sphere (K2.x rung 2) is written and tested in forge, and
+            # is NOT wired in here yet — deliberately. forge's `body.volume`
+            # measures the pole-trimmed cap exactly (24 tests, closed form
+            # pi a^2 (3r-a)/3, exact at every rational height), but
+            # `body.centroid` has no moment term for it: its sphere branch
+            # covers a whole sphere and an octant only. Returning the body
+            # would therefore hand back a solid whose VOLUME is right and
+            # whose CENTRE OF MASS is refused — or, if that refusal were
+            # softened, silently wrong. That is the exact defect class this
+            # kernel exists to prevent, so the capability waits for the term.
+            # Blocker recorded in task #143.
+        if op == "cut":
             pocket = self._pocket_lathe(a, b)
             if pocket is not None:
                 return pocket
@@ -3635,6 +3657,112 @@ class RefKernel:
         # drilled plate. Same faces, two mouths and no floor.
         return _pocket_into_body(B.to_body(a).faces, foot, za, zb, open_top,
                                  through=open_bot and open_top)
+
+    def _cap_a_sphere(self, a, tool):
+        """A half-space tool slicing a ball flat (K2.x rung 2).
+
+        Strictly easier than the flat on a bar and exact in strictly more
+        places: a plane meets a sphere in a CIRCLE always, and the removed
+        cap's volume pi a^2 (3r - a) / 3 carries no arc angle, so every
+        RATIONAL cut height works. There is no twelfth constraint here — that
+        one is a property of arcs, not of quadric booleans generally.
+
+        Returns None when this is not that family.
+        """
+        from forgekernel.brep import Solid
+        from forgekernel.quadric import Sphere, _exact_bbox
+        from forgekernel.sphercut import SphereCutRefused, cut_sphere_at_z
+
+        if not isinstance(a, Sphere) or not isinstance(tool, Solid):
+            return None
+        tb = _exact_bbox(tool)
+        if tb is None:
+            return None
+        (tx0, ty0, tz0), (tx1, ty1, tz1) = tb
+        if tool.volume() != (tx1 - tx0) * (ty1 - ty0) * (tz1 - tz0):
+            return None                       # the tool must BE its bbox
+        # clean through in x and y, so only one z wall touches the ball
+        if not (tx0 <= a.cx - a.r and tx1 >= a.cx + a.r):
+            return None
+        if not (ty0 <= a.cy - a.r and ty1 >= a.cy + a.r):
+            return None
+        lo_in = tz0 > a.cz - a.r
+        hi_in = tz1 < a.cz + a.r
+        if lo_in == hi_in:
+            return None                       # both walls cut, or neither
+        # the wall that cuts says which side survives — the same reading that
+        # was inverted in _flat_on_bar and returned every answer's complement
+        zc, keep_below = (tz0, True) if lo_in else (tz1, False)
+        try:
+            return _audited(cut_sphere_at_z(a, zc, keep_below),
+                            "boolean.cut", require_body=True)
+        except SphereCutRefused:
+            return None
+
+    def _flat_on_bar(self, a, tool):
+        """A half-space tool milling ONE flat on a round bar (K2.x rung 1).
+
+        Returns the Body, or None when this is not that family — the caller
+        then carries on to the paths that are right for whatever it is.
+
+        The family, stated exactly so the recogniser cannot drift: ``a`` is a
+        plain ``Cyl``; the tool is its own bounding box (a plain prism); the
+        tool covers the bar completely in z and in the direction across the
+        cut, so nothing of the tool's own boundary lands inside the bar except
+        the one wall; and that one wall crosses the bar. Anything else — a
+        tool that stops inside the material, two walls crossing, a tool that
+        misses — is somebody else's case and returns None.
+        """
+        from forgekernel.brep import Solid
+        from forgekernel.exact import as_fraction
+        from forgekernel.flat import FlatRefused, flat_cut
+        from forgekernel.quadric import Cyl, _exact_bbox
+
+        if not isinstance(a, Cyl) or not isinstance(tool, Solid):
+            return None
+        tb = _exact_bbox(tool)
+        if tb is None:
+            return None
+        (tx0, ty0, tz0), (tx1, ty1, tz1) = tb
+        # the tool must BE its bounding box, or it removes less than a
+        # half-space does and the flat is not the answer
+        if tool.volume() != (tx1 - tx0) * (ty1 - ty0) * (tz1 - tz0):
+            return None
+        if not (tz0 <= a.z0 and tz1 >= a.z1):
+            return None                       # must pass clean through in z
+        if not (ty0 <= a.cy - a.r and ty1 >= a.cy + a.r):
+            return None                       # and clean through across y
+
+        # exactly one x wall may cross the bar; the other must clear it
+        lo_in = tx0 > a.cx - a.r
+        hi_in = tx1 < a.cx + a.r
+        if lo_in == hi_in:
+            return None                       # both cross, or neither does
+        # WHICH WALL CROSSES SAYS WHICH SIDE SURVIVES. If the tool's LOW wall
+        # is the one inside the bar, the tool fills x >= tx0 and the material
+        # left is x <= tx0. Reading it the other way round swapped every
+        # answer with its complement — r/2 returned the volume for -r/2 — and
+        # both are plausible numbers for the same call, which is why the
+        # closed form is checked per depth rather than once.
+        h = (tx0 - a.cx) if lo_in else (tx1 - a.cx)
+        keep_low = lo_in
+        if not keep_low:
+            # keep x >= h: the same cut mirrored. Mirror is exact and
+            # representation-preserving now, so conjugate through it rather
+            # than write a second construction that can drift from the first
+            mirrored = Cyl(-a.cx, a.cy, a.r, a.z0, a.z1)
+            try:
+                out = flat_cut(mirrored, -h)
+            except FlatRefused:
+                return None
+            from forgekernel import body as B
+
+            return _audited(out.transformed(B.Affine.mirror("x")),
+                            "boolean.cut", require_body=True)
+        try:
+            return _audited(flat_cut(a, h), "boolean.cut", require_body=True)
+        except FlatRefused:
+            return None                       # not exact here; let the guards speak
 
     def _pocket_lathe(self, a, tool):
         """Cut an axis-aligned rectangular prism into a solid of revolution."""
