@@ -1880,6 +1880,29 @@ class RefKernel:
         from forgekernel.body import Body as _CanonBody
 
         if isinstance(a, _CanonBody) or isinstance(b, _CanonBody):
+            # ASK WHETHER THEY OVERLAP BEFORE REFUSING OVER THE INTERSECTION.
+            # The message below says "their intersection with the tool is not
+            # built" — and for operands that do not touch, there is no
+            # intersection to build. Volume is additive over disjoint sets, so
+            # the union is exact with no quadric algebra at all, and
+            # `DisjointUnion` exists for exactly this. It was unreachable here
+            # only because `_exact_bbox` had no Body branch, so the separation
+            # predicate it falls back on could never fire for the commonest
+            # operand in the composed grid.
+            #
+            # This is the sphere cap's lesson again in a different place: the
+            # guard was right about the general case and fired before anything
+            # asked whether this was the general case. `DisjointUnion`'s own
+            # constructor is the proof — it raises on a genuine overlap — so a
+            # failure here falls through to the honest refusal below rather
+            # than being caught and softened.
+            if op == "union":
+                from forgekernel.quadric import DisjointUnion
+
+                try:
+                    return _audited(DisjointUnion([a, b]), "boolean.union")
+                except ValueError:
+                    pass                      # genuinely overlapping: say so
             # NAME THE SURFACES, not the container. This message used to stop
             # at "landed in the canonical B-rep", which reads as a plumbing
             # gap and sends a reader looking for a Body→Solid converter. There

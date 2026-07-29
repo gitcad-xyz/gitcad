@@ -388,6 +388,49 @@ Assemblies of rotated parts are where this bites in real use.
 > run's script was ad-hoc and did not survive the machine move, which is the
 > whole reason this had to be measured twice.
 
+> **Sharpening that measurement, and the first rung off it (2026-07-29).** The
+> entry above says 48 of the live cells "need only plane × Cylinder". True but
+> too coarse, and the coarseness pointed at the wrong work. What decides the
+> cost is not which quadric is present but **what curve the plane meets it in**,
+> and that depends on the ANGLE between the plane and the quadric's axis:
+>
+> | | cells | curve |
+> |---|---|---|
+> | plane ∥ or ⟂ to the axis | **42** | straight lines, or a circle |
+> | plane oblique to the axis | 14 | a genuine **ellipse** — the "Conic sections" row below |
+>
+> A first pass split these by "is the operand axis-aligned" and got 19/37 — the
+> wrong answer, because a prism ROTATED ABOUT z still has walls parallel to a
+> z-axis cylinder and still cuts it in straight lines. The 45°/30° tool columns
+> are not the hard case; they are rung 1 with the wall offset in ℚ[√2] or ℚ[√3].
+> The genuinely oblique 14 are the skewed loft tool (7), the filleted box (5,
+> whose edge fillets are cylinders on all three axes, so a z-rotated plane is
+> oblique to two of them), and the chamfered box and loft under a drill.
+>
+> **The first rung taken off it closes 6 cells and is not geometry at all.**
+> `cut then union` on every cylinder-bearing representation refused with "the
+> canonical body carries Cylinder, and their intersection with the tool is not
+> built" — of a tool sitting **10 units clear of the body**. Volume is additive
+> over disjoint sets, `DisjointUnion` already exists for precisely this and
+> already measures a `Body` member (`_member_volume` has handled one, with a
+> comment anticipating it, all along). The single thing missing was that
+> `_exact_bbox` had no `Body` branch, so the separation predicate
+> `_classify_pair` falls back on could never fire for the commonest operand in
+> the composed grid.
+>
+> That is the sphere cap's lesson in a second place: **a guard correct about the
+> general case, fired before anything asked whether this was the general case.**
+> The refusal named an intersection that was empty. Worth noticing that both
+> instances were found by measuring, not by reading the code.
+>
+> The new bound is deliberately a **sound outer** one and lives in its own
+> function (`_body_outer_bbox`) rather than widening `_exact_bbox`. Separation
+> is the one question an over-estimate cannot get wrong; `_flat_on_bar` asks
+> `_exact_bbox` whether a tool COVERS a bar, and a loose answer there would
+> approve a cut that misses. It is exact, not `body.bbox`, which is explicitly
+> a float bound — a rounded coordinate must not decide a topological question
+> (ADR-0019). Bench: **composed 174/285 → 180/285**, 101 gaps → 95.
+
 ---
 
 ## 3. Geometry capability (the actual roadmap)
