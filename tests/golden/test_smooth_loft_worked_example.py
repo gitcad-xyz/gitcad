@@ -40,6 +40,7 @@ from forgekernel.trimshell import TrimmedShell
 
 from gitcad.errors import KernelError
 from gitcad.kernel.ref import RefKernel
+from gitcad.kernel import source_form  # ADR-0022
 
 V_TRUE = F(766, 35)                      # 8 · ∫₀¹ (1 + 3s/2 − s³/2)² ds
 
@@ -71,7 +72,7 @@ def test_seam_loft_of_three_sections_is_the_smooth_solid(k, barrel) -> None:
     # 3+ sections without ruled=True routes to the natural-cubic LoftSolid —
     # distinct geometry from the ruled prismatoid stack, whose volume would be
     # two frustums 2·(1/3)(4 + 16 + 8) = 56/3 ≠ 766/35.
-    assert isinstance(barrel, LoftSolid)
+    assert isinstance(source_form(barrel), LoftSolid)
     assert barrel.volume() == V_TRUE                 # exact Fraction, not approx
     assert barrel.volume() != F(56, 3)               # smooth ≠ ruled
     mp = k.mass_props(barrel)

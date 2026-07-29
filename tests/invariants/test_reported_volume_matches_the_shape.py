@@ -38,8 +38,17 @@ def k():
 def _soup_volume(solid) -> float | None:
     """Float divergence-theorem volume over a polygon soup, or None if the
     shape is not one (a Cyl, a Body, a TubeSolid — those have no soup to
-    disagree with and are covered by their own goldens)."""
-    polys = getattr(solid, "polys", None)
+    disagree with and are covered by their own goldens).
+
+    ADR-0022: the seam returns a canonical Body, so the soup is reached through
+    `source_form`. Without that every case returned None, the `checked > 60`
+    guard below fired, and this invariant reported a collapsed corpus — which is
+    exactly what that guard is for. The PROPERTY here is unchanged; only the
+    route to the polygons is.
+    """
+    from gitcad.kernel import source_form
+
+    polys = getattr(source_form(solid), "polys", None)
     if not polys:
         return None
     tot = 0.0

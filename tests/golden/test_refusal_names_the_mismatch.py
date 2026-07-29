@@ -40,6 +40,7 @@ pytest.importorskip("forgekernel")
 
 from gitcad.errors import KernelError
 from gitcad.kernel.ref import RefKernel
+from gitcad.kernel import source_form  # ADR-0022
 
 # Fragments of raw Python diagnostics that must never reach a caller.
 RAW_LEAKS = ("has no attribute", "object at 0x", "as_integer_ratio",
@@ -103,7 +104,7 @@ def side_plane_prism(k):
                          {"kind": "line", "to": [-30, 30]}]}
     p = k.transform(k.extrude(prof, 40.0), rotate_axis=(1, 1, 1),
                     rotate_deg=240.0, translate=(0, -20, 0))
-    assert type(p).__name__ == "Solid", (
+    assert type(source_form(p)).__name__ == "Solid", (
         "precondition: a side-plane sketch is still a planar Solid; only its "
         "coordinates left the rationals")
     return p

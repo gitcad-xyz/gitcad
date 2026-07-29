@@ -21,6 +21,7 @@ from forgekernel.brep import Solid
 from forgekernel.quadric import Cone, Cyl, RevolveSolid, RoundedBox
 from gitcad.errors import KernelError
 from gitcad.kernel.ref import RefKernel
+from gitcad.kernel import source_form  # ADR-0022
 
 
 @pytest.fixture(scope="module")
@@ -47,7 +48,7 @@ BORES = [
 def test_a_coaxial_bore_stays_a_solid_of_revolution(label, build, want) -> None:
     s = build()
     out = _bore(k := RefKernel(), s)
-    assert isinstance(out, RevolveSolid)
+    assert isinstance(source_form(out), RevolveSolid)
     v = k.mass_props(out)["volume"]
     if want is not None:
         assert v == pytest.approx(want)
@@ -61,7 +62,7 @@ def test_a_blind_coaxial_bore_is_still_a_solid_of_revolution(k) -> None:
     solid. A d=10 x 12 cylinder bored r=1 from z=6 up loses exactly 6 pi."""
     tool = k.transform(k.cylinder(1, 100), translate=(0, 0, 6))
     out = k.boolean("cut", Cyl(0, 0, 5, 0, 12), tool)
-    assert isinstance(out, RevolveSolid)
+    assert isinstance(source_form(out), RevolveSolid)
     assert k.mass_props(out)["volume"] == pytest.approx(math.pi * (300 - 6))
 
 
@@ -103,7 +104,7 @@ def test_a_union_with_a_far_away_box_is_a_disjoint_union(label, build) -> None:
     s = build()
     far = k.transform(k.box(2, 2, 2), translate=(500, 500, 500))
     out = k.boolean("union", s, far)
-    assert isinstance(out, DisjointUnion)
+    assert isinstance(source_form(out), DisjointUnion)
     assert k.mass_props(out)["volume"] == pytest.approx(
         k.mass_props(s)["volume"] + 8)
 
@@ -203,7 +204,7 @@ def test_cutting_a_drilled_solid_keeps_its_bores(k) -> None:
     plate = DrilledSolid(Solid.box(40, 20, 5), [Cyl(20, 10, 4, 0, 5)])
     tool = k.transform(k.box(2, 2, 100), translate=(4, 4, -50))
     out = k.boolean("cut", plate, tool)
-    assert isinstance(out, DrilledSolid) and len(out.bores) == 1
+    assert isinstance(source_form(out), DrilledSolid) and len(source_form(out).bores) == 1
     assert k.mass_props(out)["volume"] == pytest.approx(
         k.mass_props(plate)["volume"] - 4 * 5)
 
@@ -220,7 +221,7 @@ def test_cutting_a_disjoint_union_distributes_over_its_members(k) -> None:
     # something it never meets
     tool = k.transform(k.box(2, 2, 3), translate=(1, 1, 0))
     out = k.boolean("cut", boss, tool)
-    assert isinstance(out, DisjointUnion) and len(out.members) == 2
+    assert isinstance(source_form(out), DisjointUnion) and len(source_form(out).members) == 2
     assert k.mass_props(out)["volume"] == pytest.approx(
         k.mass_props(boss)["volume"] - 4 * 3)
 
@@ -231,8 +232,8 @@ def test_a_rounded_box_has_no_sharp_edge_to_blend(k) -> None:
     from forgekernel.quadric import RoundedBox
 
     rb = RoundedBox(20, 20, 20, 3)
-    assert k.fillet(rb, [], 1) is rb
-    assert k.chamfer(rb, [], 1) is rb
+    assert source_form(k.fillet(rb, [], 1)) is rb
+    assert source_form(k.chamfer(rb, [], 1)) is rb
 
 
 @pytest.mark.parametrize("depth", [1, 3, 4, 6, 11])
@@ -262,7 +263,7 @@ def test_a_bore_through_a_cone_apex_cannot_ADD_material(k) -> None:
     V = pi * int_0^8 ((5 - z/2)^2 - 1) dz = 224 pi / 3 < 250 pi / 3."""
     uncut = k.mass_props(Cone(0, 0, 5, 0, 0, 10))["volume"]
     out = k.boolean("cut", Cone(0, 0, 5, 0, 0, 10), Cyl(0, 0, 1, -5, 15))
-    assert isinstance(out, RevolveSolid)
+    assert isinstance(source_form(out), RevolveSolid)
     got = k.mass_props(out)["volume"]
     assert got == pytest.approx(math.pi * 224 / 3)
     assert got < uncut
@@ -395,7 +396,7 @@ def test_a_union_falls_through_to_the_seams_own_distribution(k) -> None:
     # pi (2^2 - 1^2) x (9 - 4.5) more material gone, nothing else moved.
     wider = k.transform(k.cylinder(2, 100), translate=(15, 15, 4.5))
     widened = k.boolean("cut", boss, wider)
-    assert isinstance(widened, DisjointUnion)
+    assert isinstance(source_form(widened), DisjointUnion)
     assert k.mass_props(boss)["volume"] - k.mass_props(widened)["volume"] \
         == pytest.approx(math.pi * 3 * 4.5)
 
@@ -466,7 +467,7 @@ def test_a_compound_whose_volume_matches_its_bbox_is_not_a_box(k) -> None:
     # be baited through the seam: this reports its true point-set volume (an L
     # of area 14, four deep) rather than the 64 a poly soup summed to.
     assert tool.volume() == 14 * 4
-    assert k._box_check(tool) is None          # and the predicate still sees it
+    assert k._box_check(source_form(tool)) is None          # and the predicate still sees it
     base = RoundedBox(12, 10, 6, 2)            # top flat [2,10] x [2,8]
     before = float(k.mass_props(base)["volume"])
     with pytest.raises(KernelError, match="quadric operands"):
@@ -547,7 +548,7 @@ def test_a_tool_that_provably_misses_gives_the_solid_back(k) -> None:
     plate = k.boolean("cut", Solid.box(40, 20, 5),
                       k.transform(k.cylinder(4, 5), translate=(20, 10, 0)))
     far = k.transform(k.box(5, 5, 5), translate=(100, 100, 100))
-    assert k.boolean("cut", plate, far) is plate
+    assert source_form(k.boolean("cut", plate, far)) is source_form(plate)
 
 
 NOTCH_L = {"start": [0, 0], "segments": [
@@ -566,7 +567,7 @@ def test_a_bore_down_a_notch_gives_the_solid_back_rather_than_refusing(k) -> Non
     prism = k.extrude(NOTCH_L, 8)
     assert float(k.mass_props(prism)["volume"]) == 30 * 10 * 8 + 10 * 20 * 8
     bore = k.transform(k.cylinder(1, 100), translate=(15, 15, 4))
-    assert k.boolean("cut", prism, bore) is prism
+    assert source_form(k.boolean("cut", prism, bore)) is source_form(prism)
 
     # ...and a bore that DOES meet the material still cuts, to the millimetre:
     # the tool spans z 4..104 and the prism z 0..8, so the depth is 4
@@ -598,7 +599,7 @@ def test_the_miss_predicate_is_tight_at_the_wall(k, label, c, r, misses) -> None
     from gitcad.kernel.ref import _disc_misses_solid
 
     prism = k.extrude(NOTCH_L, 8)
-    assert _disc_misses_solid(prism, Q(c[0]), Q(c[1]), Q(str(r))) is misses
+    assert _disc_misses_solid(source_form(prism), Q(c[0]), Q(c[1]), Q(str(r))) is misses
 
 
 # --- review round 8: the box predicate, again --------------------------------
@@ -648,6 +649,7 @@ def test_a_pocket_tool_is_a_box_by_its_point_set_not_by_a_property(
     # The honest boxes still measure 64; the impostors now measure their TRUE
     # point-set volume, because compound() fuses. Both must still be classified
     # correctly — the predicate cannot lean on the volume either way.
+    tool = source_form(tool)   # ADR-0022: a private predicate wants the form
     assert _is_axis_box(k, tool, _exact_bbox(tool)) is is_box
     if is_box:
         assert tool.volume() == 4 * 4 * 4

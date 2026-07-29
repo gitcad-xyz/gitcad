@@ -24,6 +24,21 @@ def inertia(kernel, shape) -> dict[str, Any]:
                                         polyhedron_mass_properties)
         from forgekernel.brep import Solid as _Solid
 
+        from gitcad.kernel import source_form
+
+        # ADR-0022: the seam hands back a canonical Body, so ask for the form
+        # it was built from rather than isinstance-checking the public type.
+        #
+        # NOTE the pre-existing hole this exposed rather than caused. The `else`
+        # below routes to `kernel.mass_props`, which returns volume/centroid and
+        # NO inertia tensor — so `inertia()` raised KeyError('ixx') for every
+        # representation that was not a Solid or a PatchSolid, and always has.
+        # A box was a Solid so the test suite never saw it; the moment a box
+        # arrived as a Body it did. The exact tensor still needs a canonical
+        # path (ADR-0022's "reachable THROUGH Body, not around it"); until it
+        # has one, unwrapping keeps every shape that worked before working.
+        shape = source_form(shape)
+
         if isinstance(shape, _Solid):
             mp = polyhedron_mass_properties(shape)
             exact = True
@@ -118,6 +133,9 @@ def thickness_analysis(kernel, shape, min_wall: float = 1.0) -> dict[str, Any]:
         from forgekernel.brep import Solid as _Solid
     except ImportError:                      # pragma: no cover
         _Solid = ()
+    from gitcad.kernel import source_form
+
+    shape = source_form(shape)               # ADR-0022: unwrap the canonical Body
     if not isinstance(shape, _Solid):
         raise NotImplementedError(
             "thickness_analysis: planar forge solids only")

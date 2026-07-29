@@ -22,6 +22,7 @@ forgekernel = pytest.importorskip("forgekernel")
 
 from gitcad.errors import KernelError            # noqa: E402
 from gitcad.kernel.ref import RefKernel          # noqa: E402
+from gitcad.kernel import source_form  # ADR-0022
 
 
 def _sq(h):
@@ -156,5 +157,5 @@ def test_planar_step_still_imports_as_solid(tmp_path) -> None:
     path = str(tmp_path / "box.step")
     k.export_step(box, path)
     s = k.import_step(path)
-    assert isinstance(s, Solid)
+    assert isinstance(source_form(s), Solid)
     assert k.mass_props(s)["volume"] == pytest.approx(24.0)

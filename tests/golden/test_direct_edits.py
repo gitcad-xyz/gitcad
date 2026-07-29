@@ -42,6 +42,7 @@ from forgekernel.quadric import PiVal, RevolveSolid
 from forgekernel.surd import SurdVal
 from gitcad.errors import KernelError
 from gitcad.kernel.ref import RefKernel
+from gitcad.kernel import source_form  # ADR-0022
 
 
 @pytest.fixture(scope="module")
@@ -129,7 +130,7 @@ def test_offset_lateral_wall_replays_the_clearance_guard(k) -> None:
 def test_delete_bore_wall_heals_by_undrilling_exactly(k) -> None:
     d = _drilled_plate(k)
     out = k.delete_face(d, [_face(k, d, surface="cylinder")])
-    assert isinstance(out, Solid)
+    assert isinstance(source_form(out), Solid)
     assert out.volume() == Q(8000)
 
 
@@ -474,7 +475,7 @@ def test_delete_all_blends_sharpens_to_the_exact_box(k) -> None:
               if d["surface"].startswith("blend")]
     assert len(blends) == 20                              # 12 edges + 8 corners
     out = k.delete_face(fb, blends)
-    assert isinstance(out, Solid)
+    assert isinstance(source_form(out), Solid)
     assert out.volume() == Q(4000)
     assert not out.watertight_violations()
 

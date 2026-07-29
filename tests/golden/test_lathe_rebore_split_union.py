@@ -33,6 +33,7 @@ from forgekernel.quadric import Cone, Cyl, DisjointUnion, RevolveSolid
 from gitcad.document import Document, Feature
 from gitcad.errors import KernelError
 from gitcad.kernel.ref import RefKernel
+from gitcad.kernel import source_form  # ADR-0022
 
 
 @pytest.fixture()
@@ -51,7 +52,7 @@ def test_widening_a_tubes_bore_is_still_a_tube(k) -> None:
     the guard used to read the inner wall as material and refuse."""
     out = k.boolean("cut", _tube(), k.transform(k.cylinder(8, 40),
                                                 translate=(0, 0, -10)))
-    assert isinstance(out, RevolveSolid)
+    assert isinstance(source_form(out), RevolveSolid)
     assert k.mass_props(out)["volume"] == pytest.approx(
         math.pi * (15 * 15 - 8 * 8) * 20)
 
@@ -61,7 +62,7 @@ def test_counterboring_a_tube_steps_its_bore(k) -> None:
     (a shoulder at the tool's floor) and stays one closed profile."""
     out = k.boolean("cut", _tube(), k.transform(k.cylinder(8, 15),
                                                 translate=(0, 0, 10)))
-    assert isinstance(out, RevolveSolid)
+    assert isinstance(source_form(out), RevolveSolid)
     assert k.mass_props(out)["volume"] == pytest.approx(
         math.pi * ((15 * 15 - 5 * 5) * 20 - (8 * 8 - 5 * 5) * 10))
 
@@ -72,7 +73,7 @@ def test_relieving_the_middle_of_an_existing_bore(k) -> None:
     "open at neither end" without looking for the bore."""
     out = k.boolean("cut", _tube(), k.transform(k.cylinder(8, 10),
                                                 translate=(0, 0, 5)))
-    assert isinstance(out, RevolveSolid)
+    assert isinstance(source_form(out), RevolveSolid)
     assert k.mass_props(out)["volume"] == pytest.approx(
         math.pi * ((15 * 15 - 5 * 5) * 20 - (8 * 8 - 5 * 5) * 10))
 
@@ -83,7 +84,7 @@ def test_boring_past_a_cone_apex_truncates_it(k) -> None:
     result is a ring z in [0, 8]: V = pi * int_0^8 (r(z)^2 - 1) dz =
     224 pi / 3 — LESS than the uncut 250 pi / 3, as cutting must be."""
     out = k.boolean("cut", Cone(0, 0, 5, 0, 0, 10), Cyl(0, 0, 1, -5, 15))
-    assert isinstance(out, RevolveSolid)
+    assert isinstance(source_form(out), RevolveSolid)
     assert k.mass_props(out)["volume"] == pytest.approx(math.pi * 224 / 3)
     assert k.mass_props(out)["volume"] < math.pi * 250 / 3
 
@@ -126,7 +127,7 @@ def _split_tool(k, s, offset, keep):
 def test_a_z_split_of_a_stepped_shaft_truncates_the_profile(k, keep, want) -> None:
     s = RevolveSolid(STEPPED, 0, 0)
     out = k.boolean("intersect", s, _split_tool(k, s, 6, keep))
-    assert isinstance(out, RevolveSolid)
+    assert isinstance(source_form(out), RevolveSolid)
     assert k.mass_props(out)["volume"] == pytest.approx(want)
 
 
@@ -134,7 +135,7 @@ def test_a_z_split_through_a_cone_slant_is_exact(k) -> None:
     """r(z) = 2 + 3z/10; keep below z=4: V = pi * 688/25."""
     s = Cone(0, 0, 2, 5, 0, 10)
     out = k.boolean("intersect", s, _split_tool(k, s, 4, "below"))
-    assert isinstance(out, RevolveSolid)
+    assert isinstance(source_form(out), RevolveSolid)
     assert k.mass_props(out)["volume"] == pytest.approx(math.pi * 688 / 25)
 
 
@@ -150,7 +151,7 @@ def test_the_document_split_op_works_on_a_revolve(k) -> None:
     doc.add(Feature(op="split", params={"normal": "z", "offset": 6,
                                         "keep": "below"}, inputs=[rid]))
     out = doc.build(k).final(doc)
-    assert isinstance(out, RevolveSolid)
+    assert isinstance(source_form(out), RevolveSolid)
     assert k.mass_props(out)["volume"] == pytest.approx(
         math.pi * (16 * 5 + 49 * 1))
 
@@ -184,7 +185,7 @@ def test_an_overlapping_coaxial_collar_unions_exactly(k) -> None:
     body = RevolveSolid([(0, 0), (15, 0), (15, 20), (0, 20)], 0, 0)
     collar = k.transform(k.cylinder(16, 3), translate=(0, 0, 18))
     out = k.boolean("union", body, collar)
-    assert isinstance(out, RevolveSolid)
+    assert isinstance(source_form(out), RevolveSolid)
     assert k.mass_props(out)["volume"] == pytest.approx(
         math.pi * (225 * 20 + 256 * 1 + (256 - 225) * 2))
 
@@ -195,7 +196,7 @@ def test_a_buried_coaxial_collar_unions_to_the_body_itself(k) -> None:
     body = RevolveSolid([(0, 0), (15, 0), (15, 20), (0, 20)], 0, 0)
     collar = k.transform(k.cylinder(10, 4), translate=(0, 0, 8))
     out = k.boolean("union", body, collar)
-    assert isinstance(out, RevolveSolid)
+    assert isinstance(source_form(out), RevolveSolid)
     assert k.mass_props(out)["volume"] == pytest.approx(math.pi * 225 * 20)
 
 
@@ -206,7 +207,7 @@ def test_a_tangent_coaxial_collar_still_takes_the_disjoint_path(k) -> None:
     body = RevolveSolid([(0, 0), (15, 0), (15, 20), (0, 20)], 0, 0)
     collar = k.transform(k.cylinder(16, 3), translate=(0, 0, 20))
     out = k.boolean("union", body, collar)
-    assert isinstance(out, DisjointUnion)
+    assert isinstance(source_form(out), DisjointUnion)
 
 
 def test_an_overlapping_noncoaxial_union_refuses_without_claiming_disjoint(k) -> None:

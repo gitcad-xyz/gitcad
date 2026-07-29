@@ -121,7 +121,14 @@ def collect() -> list[dict]:
         try:
             return real(self, op, a, b)
         except KernelError:
-            last["operands"] = (op, a, b)
+            # ADR-0022: `RefKernel.boolean` is already wrapped by the seam
+            # guard, so this spy sits OUTSIDE it and receives the public
+            # `Body`s, not the forms the boolean actually dispatched on.
+            # Classifying those would report every operand as a canonical body
+            # and lose the whole distinction this probe exists to draw.
+            from gitcad.kernel import source_form
+
+            last["operands"] = (op, source_form(a), source_form(b))
             raise
 
     RefKernel.boolean = spy

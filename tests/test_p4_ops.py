@@ -9,6 +9,7 @@ import pytest
 from gitcad.document import Document, Feature
 from gitcad.errors import GitcadError
 from gitcad.kernel.null import NullKernel
+from gitcad.kernel import source_form  # ADR-0022
 
 
 def _doc_with(op: str, params: dict) -> Document:
@@ -183,8 +184,8 @@ def test_draft_cylinder_wall_is_a_cone() -> None:
 
     k = RefKernel()
     c = k.draft(k.cylinder(5, 8), [], tan=Q(1, 4))
-    assert isinstance(c, Cone) and (c.r1, c.r2) == (5, 3)
-    vol = AxisStack(c.cx, c.cy, [c]).volume()
+    assert isinstance(source_form(c), Cone) and (source_form(c).r1, source_form(c).r2) == (5, 3)
+    vol = AxisStack(source_form(c).cx, source_form(c).cy, [source_form(c)]).volume()
     assert vol == PiVal(0, Q(8) * (25 + 15 + 9) / 3) == PiVal(0, Q(392, 3))
     # parting line: two frustums meeting (widest) at the parting plane
     s = k.draft(k.cylinder(5, 8), [], tan=Q(1, 4), parting_z=3)

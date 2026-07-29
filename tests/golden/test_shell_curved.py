@@ -21,6 +21,7 @@ pytest.importorskip("forgekernel")
 from forgekernel.brep import Solid
 from forgekernel.quadric import Cone, Cyl, DrilledSolid, RevolveSolid
 from gitcad.kernel.ref import RefKernel
+from gitcad.kernel import source_form  # ADR-0022
 
 
 @pytest.fixture(scope="module")
@@ -141,8 +142,8 @@ def test_a_sphere_has_no_edges_to_blend(k) -> None:
     from forgekernel.quadric import Sphere
 
     s = Sphere(0, 0, 0, 6)
-    assert k.fillet(s, [], 1) is s
-    assert k.chamfer(s, [], 1) is s
+    assert source_form(k.fillet(s, [], 1)) is s
+    assert source_form(k.chamfer(s, [], 1)) is s
 
 
 def test_a_hollow_ball_is_the_difference_of_two_spheres(k) -> None:

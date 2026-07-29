@@ -1,10 +1,14 @@
 # ADR-0023 — certified angles for trimmed quadric faces
 
-Status: proposed (2026-07-29)
+Status: accepted (2026-07-29)
 Extends [ADR-0019](0019-certified-intervals.md) (certified intervals) and
 [ADR-0021](0021-canonical-brep.md) (one canonical B-rep). Supersedes nothing:
 the exactness charter is unchanged, and this is an application of the escape
 hatch ADR-0019 already built rather than a loosening of it.
+
+**Restates** ADR-0021's surface/trim schema, which had drifted from the code
+(see *ADR-0021's data model* below). ADR-0021's decision — one canonical B-rep,
+representations as constructors — is untouched.
 
 ## Context
 
@@ -129,21 +133,43 @@ That is a second correction to the same dict, which already carries one: the
 `(chamfered box, chamfer(all))` entry was labelled permanent and was merely a
 field limitation. A "permanent" label has now hidden closable work twice.
 
-### ADR-0021's data model has to be restated with it
+### ADR-0021's data model, restated
 
-ADR-0021 records the canonical B-rep as
+ADR-0021 records the canonical B-rep as `Surface ∈ {Plane, Cylinder, Cone,
+Sphere}` and `Curve ∈ {Line, Circle}`. That had already drifted: `Torus` is
+absent from the ADR, `Sphere` is `SphereS`, and — the part that matters here —
+the model says nothing about how a face states **which part** of its surface it
+occupies, although two surfaces already carry that on themselves. As accepted,
+the schema is:
 
-    Surface ∈ {Plane, Cylinder, Cone, Sphere}
-    Curve   ∈ {Line, Circle}
+```
+Body    = [Face]
+Face    = (Surface, [Loop], sense)     # sense: outward normal == surface normal?
+Loop    = [Edge]                       # first loop outer, rest are holes
+Edge    = (Curve, v0, v1)              # v0 == v1 for a full circle
+Surface ∈ { Plane(n, d)
+          , Cylinder(p, d, r)
+          , Cone(p, d, tan_half)
+          , SphereS(c, r, pole)        # pole: TRIM — which side of the one rim
+          , Torus(c, d, R, a, k0, span)  # (k0, span): TRIM — sector extent
+          }
+Curve   ∈ { Line(p, d), Circle(c, n, ref, r) }
+```
 
-and that has already drifted from `forgekernel.body`, which carries **five**
-surfaces — `Torus` is missing from the ADR entirely — and, more to the point
-here, carries **trims on the surface**: `SphereS.pole` and `Torus.(k0, span)`.
-Neither trim appears in ADR-0021's model, and the sector index this ADR
-replaces is precisely that unmodelled mechanism. So the change below is not
-additive to ADR-0021's schema; it edits a part of the B-rep that ADR-0021
-describes incompletely. Whichever ADR carries this decision to *accepted* must
-restate the model, listing the surface set and how a face states its extent.
+**A trim is carried on the surface, not inferred from the loops**, because one
+rim bounds a quadric in two ways and the loops cannot say which (ADR-0021's own
+`_sphere_zone` note records the same ambiguity for a two-rim sphere face). This
+ADR keeps that rule and changes only the *number kind* a trim may hold:
+
+```
+trim extent ::= (k0, span)             # exact, integer sectors — unchanged
+              | CInterval [θ0, θ1]     # certified, this ADR
+```
+
+The exact form remains the default and the only form used where the endpoints
+land on sectors, per ADR-0019's rule that a model which *could* be exact must
+not silently fall back to an interval. Adding the second form is the whole
+technical content of this ADR; everything else follows from it.
 
 ### Breaking
 

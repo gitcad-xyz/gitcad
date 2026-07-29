@@ -54,6 +54,7 @@ from forgekernel import body as B
 from forgekernel.quadric import Cone, RevolveSolid
 from gitcad.errors import KernelError
 from gitcad.kernel.ref import RefKernel
+from gitcad.kernel import source_form  # ADR-0022
 
 
 @pytest.fixture(scope="module")
@@ -86,7 +87,7 @@ def test_chamfering_a_tapering_cone_is_exact_in_the_surd_field(k) -> None:
 
     cone = Cone(0, 0, 6, 2, 0, 10)
     out = k.chamfer(cone, (), 1)
-    assert isinstance(out, RevolveSolid)
+    assert isinstance(source_form(out), RevolveSolid)
 
     s29 = SurdVal(0, 1, 29)
     expect = [(Fraction(0), Fraction(0)),
@@ -95,7 +96,7 @@ def test_chamfering_a_tapering_cone_is_exact_in_the_surd_field(k) -> None:
               (2 + s29 * Fraction(2, 29), 10 - s29 * Fraction(5, 29)),
               (Fraction(1), Fraction(10)),
               (Fraction(0), Fraction(10))]
-    got = list(out.loop)
+    got = list(source_form(out).loop)
     assert len(got) == len(expect)
     # the loop may be rotated/reversed by RevolveSolid's normalisation; compare
     # as a cyclic sequence of exact points
@@ -157,7 +158,7 @@ def test_a_pythagorean_slant_costs_no_radical_at_all(k) -> None:
     cone = Cone(0, 0, 8, 4, 0, 3)
     out = k.chamfer(cone, (), 1)
     assert all(isinstance(r, Fraction) and isinstance(z, Fraction)
-               for r, z in out.loop), out.loop
+               for r, z in source_form(out).loop), source_form(out).loop
     removed = (_pi_coeff(B.volume(B.to_body(cone)))
                - _pi_coeff(B.volume(B.to_body(out))))
     assert removed == Fraction(111, 25) + Fraction(59, 25)

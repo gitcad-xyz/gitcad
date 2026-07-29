@@ -8,12 +8,13 @@ import pytest
 pytest.importorskip("forgekernel")
 
 from gitcad.kernel.ref import RefKernel  # noqa: E402
+from gitcad.kernel import source_form  # ADR-0022
 
 F = Fraction
 
 
 def _face_index(kernel, shape, axis, coord):
-    ordered = sorted(shape.logical_faces().items(),
+    ordered = sorted(source_form(shape).logical_faces().items(),
                      key=lambda kv: (kv[0][1], kv[0][0]))
     for i, ((pk, _), frags) in enumerate(ordered):
         n = pk[:3]

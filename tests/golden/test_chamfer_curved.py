@@ -20,6 +20,7 @@ pytest.importorskip("forgekernel")
 from forgekernel.brep import Solid
 from forgekernel.quadric import Cyl, DisjointUnion, DrilledSolid, RevolveSolid
 from gitcad.kernel.ref import RefKernel
+from gitcad.kernel import source_form  # ADR-0022
 
 
 @pytest.fixture(scope="module")
@@ -36,7 +37,7 @@ def test_chamfering_a_cylinder_removes_the_analytic_ring(k) -> None:
     of triangular section: 2*pi*r_bar*A with r_bar = (4+5+5)/3 and A = 1/2."""
     cyl = Cyl(0, 0, 5, 0, 12)
     out = k.chamfer(cyl, (), 1.0)
-    assert isinstance(out, RevolveSolid)
+    assert isinstance(source_form(out), RevolveSolid)
     removed = _vol(k, cyl) - _vol(k, out)
     assert removed == pytest.approx(2 * (2 * math.pi * (14 / 3) * 0.5))
 
@@ -53,8 +54,8 @@ def test_chamfering_a_tube_chamfers_the_bore_rims_too(k) -> None:
 def test_chamfering_a_drilled_solid_keeps_its_bores(k) -> None:
     plate = DrilledSolid(Solid.box(40, 20, 5), [Cyl(20, 10, 4, 0, 5)])
     out = k.chamfer(plate, (), 1.0)
-    assert isinstance(out, DrilledSolid)
-    assert len(out.bores) == 1
+    assert isinstance(source_form(out), DrilledSolid)
+    assert len(source_form(out).bores) == 1
     assert _vol(k, out) < _vol(k, plate)
 
 
@@ -70,8 +71,8 @@ def test_chamfering_a_disjoint_union_chamfers_every_member(k) -> None:
     """A chamfer only REMOVES material, so disjoint members stay disjoint."""
     boss = DisjointUnion([Solid.box(30, 30, 3), Cyl(15, 15, 4, 3, 9)])
     out = k.chamfer(boss, (), 0.5)
-    assert isinstance(out, DisjointUnion)
-    assert len(out.members) == 2
+    assert isinstance(source_form(out), DisjointUnion)
+    assert len(source_form(out).members) == 2
     assert _vol(k, out) < _vol(k, boss)
 
 

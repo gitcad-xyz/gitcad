@@ -1,8 +1,38 @@
 # ADR-0022 — A feature layer above the kernel, and `Body` as the only public return type
 
-Status: **accepted** (design; implementation is #125)
+Status: **accepted**. A and B implemented 2026-07-29 (#125); C not started.
 Date: 2026-07-25
 Supersedes: nothing. Extends ADR-0021 (canonical B-rep).
+
+> **Implementation note (2026-07-29).** Decisions **A** (`Body` is the only type
+> the seam returns) and **B** (the `_repr` hint, spelled `Body.repr_hint`) are
+> live. Decision **C** — features as named, re-playable operations with their
+> own lineage ids — is **not** started; nothing below should be read as claiming
+> it. The measurement this ADR demanded first was run and its answer decided the
+> design: `to_body` succeeds for all 15 corpus representations and agrees with
+> every one of the 13 closed forms **exactly**, but conversion costs *more* than
+> the operation it replaces for all 15 — 3-10x typically, 400x for a filleted
+> box. So the hint is load-bearing exactly as predicted here, not an
+> optimisation, and B is not optional.
+>
+> The consolidation was made answer-preserving rather than merely tested: the
+> seam recovers the source form on the way in, so every internal computation is
+> byte-identical to what it was before. Two things that took finding — the
+> conversion must happen only at the OUTERMOST seam frame (ops call each other,
+> and handing an inner call a canonical `Body` made `shell` invent refusals and
+> `_exact_bbox` return `None` into a tuple unpack), and `tessellate` must never
+> take the hint path, which is the defect this ADR was written from.
+>
+> Verified: single-op 353/360 and composed 180/285, both **unchanged**, which is
+> this ADR's "does not add capability" claim in the only form that can be
+> checked. The hint-may-never-change-the-answer oracle it asks for is
+> `tests/invariants/test_a_repr_hint_never_changes_the_answer.py`.
+>
+> The `isinstance` chains it hoped to collapse have **not** collapsed — 175 of
+> them remain inside `ref.py`, now reached through the recovered form. Migrating
+> them op by op under the differential oracle is the remaining work, and doing
+> it that way is deliberate: all at once would produce a refactor nobody can
+> bisect.
 
 ## Context
 

@@ -18,6 +18,17 @@ Durable, human-owned: invariants, seams, ADRs. Disposable, agent-generated:
 issues, snapshot tests, patches. Let the second pile grow freely — as long as it
 can be deleted wholesale without losing the definition of correct.
 
+## What the kernel seam returns (ADR-0021/0022)
+
+Every `Kernel` operation returns a canonical **`Body`** and nothing else. The
+feature representations (`Cyl`, `DrilledSolid`, `RoundedBox`, …) are private
+construction strategies; a `Body` carries the one it came from as
+`repr_hint`, and **the hint may change the cost of an answer, never the
+answer**. Inside the seam, `gitcad.kernel.source_form(shape)` recovers it.
+
+Never `isinstance`-check a kernel output against a representation. That made a
+capability depend on how a shape was *built* rather than on the shape.
+
 ## The six seams (ADR-0002)
 
 `Kernel`, `IdentityService`, `DocumentModel`, `Renderer`, `DrawingEngine`,

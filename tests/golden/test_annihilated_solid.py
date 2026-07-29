@@ -30,6 +30,7 @@ pytest.importorskip("forgekernel")
 
 from gitcad.errors import KernelError
 from gitcad.kernel.ref import RefKernel
+from gitcad.kernel import source_form  # ADR-0022
 
 
 @pytest.fixture(scope="module")
@@ -87,6 +88,6 @@ def test_a_nonempty_zero_volume_solid_still_fails_validate(k) -> None:
     from forgekernel.brep import Solid
 
     box = k.box(4, 4, 4)
-    flat = Solid([p for p in box.polys][:2])   # two faces of a box: not a solid
+    flat = Solid([p for p in source_form(box).polys][:2])   # two faces of a box: not a solid
     rep = k.validate(flat)
     assert not rep.ok

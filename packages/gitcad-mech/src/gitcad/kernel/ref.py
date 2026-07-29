@@ -11,6 +11,7 @@ else refuses honestly, naming the stage that brings it. The scorecard
 from __future__ import annotations
 
 import math
+import threading
 from fractions import Fraction
 from typing import Any
 
@@ -535,6 +536,76 @@ def _exact_scalar_mismatch(exc: TypeError) -> str | None:
     return next((s for s in _EXACT_SCALARS if f"'{s}'" in msg), None)
 
 
+#: Scalars and containers a seam op may legitimately return — a `bbox` tuple, a
+#: `mass_props` dict, an `entities` list, an export's path. Never shapes, so
+#: `_as_public` must leave them alone rather than ask `to_body` about them.
+_NOT_A_SHAPE = (bool, int, float, complex, str, bytes, dict, list, tuple, set,
+                frozenset)
+
+
+def _as_public(out):
+    """ADR-0022 A: the seam returns a ``Body`` and nothing else.
+
+    The eleven feature representations stay — they are how exactness is
+    achieved cheaply — but they stop being the public taxonomy. What a caller
+    receives no longer depends on HOW the shape was built, which was ADR-0022's
+    second observed defect: a plate with a hole supported different operations
+    depending on whether it was drilled or built another way, so an agent could
+    not predict from the geometry what would work.
+
+    The source form rides along as `repr_hint` (see `_from_public`), which is
+    what makes this a consolidation of the interface and not a loss of
+    capability.
+    """
+    from forgekernel import body as B
+
+    if out is None or isinstance(out, _NOT_A_SHAPE) or isinstance(out, B.Body):
+        return out
+    try:
+        canon = B.to_body(out)
+    except Exception:                                       # noqa: BLE001
+        # A representation with no canonical form yet (a PatchSolid, a
+        # TrimmedShell) keeps crossing as itself. Silently returning it is
+        # right: ADR-0022 is an interface change and must not turn a working
+        # op into a refusal on the way past.
+        return out
+    return B.Body(canon.faces, out)
+
+
+def _from_public(x):
+    """ADR-0022 B: recover the hint so the exact fast path is still reachable.
+
+    THIS IS WHAT MAKES THE CHANGE ANSWER-PRESERVING RATHER THAN MERELY TESTED.
+    Every op below still dispatches on representation, and handing it back the
+    very object it would have received means the computation is byte-identical
+    to what it was before ADR-0022 — not equivalent, identical. The migration
+    of those `isinstance` chains to `Body` can then proceed one op at a time
+    under the differential oracle, instead of all at once behind a refactor
+    nobody can bisect.
+
+    It also gives the oracle ADR-0022 asks for directly: strip the hints and
+    the corpus must produce the same geometry, because a hint may change only
+    the cost.
+    """
+    from forgekernel import body as B
+
+    if isinstance(x, B.Body) and x.repr_hint is not None:
+        return x.repr_hint
+    return x
+
+
+#: Re-entrancy depth, per thread. `_as_public` must convert only on the way out
+#: to a caller OUTSIDE the kernel: seam ops call each other (a half-space tool
+#: is `transform(box(...))`, a pocket asks its own `bbox`), and handing those
+#: inner calls a canonical Body instead of the form they expect changes what the
+#: internal helpers dispatch on. That is not a type error you find at the
+#: boundary — it surfaced as `_exact_bbox` returning None into a tuple unpack,
+#: and as `shell` inventing new refusals about disjoint-union members touching.
+#: Converting at depth 0 only means every internal computation is byte-identical
+#: to what it was before ADR-0022.
+_seam_depth = threading.local()
+
+
 def _guard_seam(cls):
     """Turn a representation mismatch into an HONEST REFUSAL at the seam.
 
@@ -566,8 +637,17 @@ def _guard_seam(cls):
     def wrap(name, fn):
         @functools.wraps(fn)
         def inner(self, *args, **kwargs):
+            # ADR-0022, both halves, at the one choke point every seam op
+            # already passes through: recover the source form on the way in so
+            # the exact paths are untouched, and hand back a Body on the way
+            # out so the representation never becomes public API.
+            args = tuple(_from_public(a) for a in args)
+            kwargs = {k: _from_public(v) for k, v in kwargs.items()}
+            depth = getattr(_seam_depth, "n", 0)
+            _seam_depth.n = depth + 1
             try:
-                return fn(self, *args, **kwargs)
+                out = fn(self, *args, **kwargs)
+                return _as_public(out) if depth == 0 else out
             except TypeError as exc:
                 scalar = _exact_scalar_mismatch(exc)
                 if scalar is None:
@@ -633,6 +713,8 @@ def _guard_seam(cls):
                                      kernel="ref"),
                     stage=stage, predicate="representation_supports_op",
                     remedy=remedy)
+            finally:
+                _seam_depth.n = depth
         return inner
 
     for name in _SEAM_OPS:

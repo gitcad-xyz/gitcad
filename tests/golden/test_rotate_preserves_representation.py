@@ -32,6 +32,7 @@ from forgekernel.quadric import (AxisStack, Cyl, DisjointUnion, DrilledSolid,
                                  RevolveSolid, Sphere)
 from gitcad.errors import KernelError
 from gitcad.kernel.ref import RefKernel
+from gitcad.kernel import source_form  # ADR-0022
 
 STEPPED = [(0, 0), (4, 0), (4, 5), (7, 5), (7, 9), (0, 9)]
 
@@ -53,7 +54,7 @@ def test_a_quarter_turned_cylinder_is_a_cylinder_with_its_centre_moved(
     (10, 0) after a 90-degree turn about z. Wrong geometry, silently."""
     c = k.transform(k.cylinder(2, 5), translate=(10, 0, 0))
     out = k.transform(c, rotate_axis=(0, 0, 1), rotate_deg=deg)
-    assert isinstance(out, Cyl)
+    assert isinstance(source_form(out), Cyl)
     mp = k.mass_props(out)
     assert (mp["cx"], mp["cy"]) == pytest.approx(want)
     assert mp["volume"] == pytest.approx(math.pi * 4 * 5)
@@ -81,22 +82,22 @@ def test_a_non_quarter_z_rotation_of_an_off_axis_cylinder_is_not_dropped(
 def test_rotating_a_lathe_about_its_own_axis_changes_nothing(k, deg) -> None:
     s = RevolveSolid(STEPPED, 0, 0)
     out = k.transform(s, rotate_axis=(0, 0, 1), rotate_deg=deg)
-    assert isinstance(out, RevolveSolid)
-    assert out.loop == s.loop and (out.cx, out.cy) == (s.cx, s.cy)
+    assert isinstance(source_form(out), RevolveSolid)
+    assert source_form(out).loop == source_form(s).loop and (source_form(out).cx, source_form(out).cy) == (source_form(s).cx, source_form(s).cy)
     # ...and it is still a boolean operand afterwards (the one-way door)
     bored = k.boolean("cut", out, k.transform(k.cylinder(1, 100),
                                               translate=(0, 0, -50)))
-    assert isinstance(bored, RevolveSolid)
+    assert isinstance(source_form(bored), RevolveSolid)
 
 
 def test_a_quarter_turned_off_axis_lathe_keeps_its_representation(k) -> None:
     s = RevolveSolid(STEPPED, 3, 0)
     out = k.transform(s, rotate_axis=(0, 0, 1), rotate_deg=90)
-    assert isinstance(out, RevolveSolid)
-    assert (out.cx, out.cy) == (0, 3)
+    assert isinstance(source_form(out), RevolveSolid)
+    assert (source_form(out).cx, source_form(out).cy) == (0, 3)
     bored = k.boolean("cut", out, k.transform(k.cylinder(1, 100),
                                               translate=(0, 3, -50)))
-    assert isinstance(bored, RevolveSolid)
+    assert isinstance(source_form(bored), RevolveSolid)
 
 
 def test_a_quarter_turned_lathe_still_exports_step(k, tmp_path) -> None:
@@ -114,21 +115,21 @@ def test_a_quarter_turned_lathe_still_exports_step(k, tmp_path) -> None:
 def test_a_quarter_turned_drilled_plate_keeps_its_bores(k) -> None:
     plate = k.boolean("cut", k.box(20, 20, 5), k.transform(
         k.cylinder(2, 5), translate=(10, 10, 0)))
-    assert isinstance(plate, DrilledSolid)
+    assert isinstance(source_form(plate), DrilledSolid)
     out = k.transform(plate, rotate_axis=(0, 0, 1), rotate_deg=90)
-    assert isinstance(out, DrilledSolid)
+    assert isinstance(source_form(out), DrilledSolid)
     assert k.mass_props(out)["volume"] == pytest.approx(
         20 * 20 * 5 - math.pi * 4 * 5)
-    (bore,) = out.bores
-    assert (float(bore.cx), float(bore.cy)) == pytest.approx((-10.0, 10.0))
+    (bore,) = source_form(out).bores
+    assert (float(source_form(bore).cx), float(source_form(bore).cy)) == pytest.approx((-10.0, 10.0))
 
 
 def test_a_quarter_turned_disjoint_union_rotates_member_wise(k) -> None:
     boss = k.boolean("union", k.box(30, 30, 3), k.transform(
         k.cylinder(4, 6), translate=(15, 15, 3)))
-    assert isinstance(boss, DisjointUnion)
+    assert isinstance(source_form(boss), DisjointUnion)
     out = k.transform(boss, rotate_axis=(0, 0, 1), rotate_deg=90)
-    assert isinstance(out, DisjointUnion)
+    assert isinstance(source_form(out), DisjointUnion)
     assert k.mass_props(out)["volume"] == pytest.approx(
         30 * 30 * 3 + math.pi * 16 * 6)
     assert k.mass_props(out)["centroid"][0] == pytest.approx(
@@ -138,8 +139,8 @@ def test_a_quarter_turned_disjoint_union_rotates_member_wise(k) -> None:
 def test_a_quarter_turned_sphere_moves_its_centre_exactly(k) -> None:
     s = k.transform(k.sphere(3), translate=(5, 0, 0))
     out = k.transform(s, rotate_axis=(0, 1, 0), rotate_deg=90)
-    assert isinstance(out, Sphere)
-    assert (float(out.cx), float(out.cy), float(out.cz)) == \
+    assert isinstance(source_form(out), Sphere)
+    assert (float(source_form(out).cx), float(source_form(out).cy), float(source_form(out).cz)) == \
         pytest.approx((0.0, 0.0, -5.0))
 
 
@@ -148,9 +149,9 @@ def test_a_translated_axis_stack_stays_an_axis_stack(k) -> None:
     stack must not fall through the canonical form for a move."""
     stack = k.boolean("union", k.cylinder(5, 4), k.transform(
         k.cylinder(3, 6), translate=(0, 0, 4)))
-    assert isinstance(stack, AxisStack)
+    assert isinstance(source_form(stack), AxisStack)
     out = k.transform(stack, translate=(2, 3, 1))
-    assert isinstance(out, AxisStack)
+    assert isinstance(source_form(out), AxisStack)
     assert k.mass_props(out)["volume"] == pytest.approx(
         math.pi * (25 * 4 + 9 * 6))
     assert k.mass_props(out)["centroid"][0] == pytest.approx(2.0)
@@ -174,7 +175,7 @@ def test_a_tilted_lathe_still_refuses_downstream_naming_the_canonical_form(
     """
     s = RevolveSolid(STEPPED, 0, 0)
     out = k.transform(s, rotate_axis=(1, 0, 0), rotate_deg=90)
-    assert isinstance(out, RevolveSolid) is False
+    assert isinstance(source_form(out), RevolveSolid) is False
     with pytest.raises(KernelError) as exc:
         k.boolean("cut", out, Cyl(0, 0, 1, -50, 100))
     msg = str(exc.value)
