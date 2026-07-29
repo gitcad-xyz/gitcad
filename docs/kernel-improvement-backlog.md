@@ -431,6 +431,53 @@ Assemblies of rotated parts are where this bites in real use.
 > a float bound — a rounded coordinate must not decide a topological question
 > (ADR-0019). Bench: **composed 174/285 → 180/285**, 101 gaps → 95.
 
+> **The exact path has finished as a growth route, and the measurement that
+> shows it is a third denominator (2026-07-29).** The capability matrix scores
+> a CELL green when one representative solid meets one representative
+> operation. It has never asked what fraction of the PARAMETER SPACE behind
+> that cell answers — and for the exact rungs the two numbers are not close.
+> `gitcad.bench.coverage` sweeps the parameter instead of the grid:
+>
+> | family | parameter coverage |
+> |---|---|
+> | face off a box (planar control) | 77/77 **100%** |
+> | cap on a sphere (rung 2) | 33/33 **100%** |
+> | drill a plate, bore fully inside | 41/41 **100%** |
+> | pocket into a bar | 39/39 **100%** |
+> | flat on a bar (rung 1) | 3/33 — **9%** |
+> | **slot through a bar — the composed grid's own `cut box` shape** | 0/25 — **0%** |
+> | bore across a plate wall (the 17-cell family) | 8/33, and all 8 are positions where it does **not** cross — the crossing set is **0%** |
+>
+> **The discriminator is not which quadric is involved, nor which curve the
+> surfaces meet in. It is whether the cut leaves a circular SEGMENT.** A full
+> disc removed, a polygon pocket, or a plane cutting a sphere all have
+> polynomial closed forms and answer everywhere. A chord across a disc leaves
+> `r²(t − sin t cos t)` with `t = arccos(h/r)`, and by Niven that is exact only
+> at twelfths — a finite set inside a continuum.
+>
+> This retires the plan the entry above set up. "42 of 56 cells need only lines
+> and circles" is true and now clearly the wrong thing to have measured: the
+> grid's own `cut box` column is a slot through a bar, which answers at **zero**
+> offsets, and the 17-cell bore-crosses-a-wall family answers at zero crossing
+> positions. Building either exactly would close cells on the matrix and ship a
+> capability that refuses on essentially every real input. **A green cell whose
+> family is at 0% is a demonstration, not a feature.**
+>
+> Note carefully what this does NOT say. Exactness is not failing generally —
+> four of the seven families above are at 100%, and they are most of what the
+> kernel actually ships. What has ended is exactness as a way to reach the
+> REMAINING work, because everything left in the composed boolean grid is
+> segment-producing.
+>
+> The remedy was decided three ADRs ago and needs no charter change: ADR-0019
+> already restates the rule as *every topological decision is made from a
+> certified sign*, where certified includes "proven by a bracket". `CInterval`,
+> the `provenance` tag on `mass_props`, and shapes already shipping as
+> `certified` (`TubeSolid`, `TrimmedShell`) were all built. The single missing
+> piece was trigonometry — an arc angle has no algebraic home but a perfectly
+> good rational enclosure — and forge `f61e2aa` adds certified `arccos`/`sin`/
+> `cos`. Routing the segment-bearing rungs through it is the roadmap now.
+
 ---
 
 ## 3. Geometry capability (the actual roadmap)
