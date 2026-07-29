@@ -58,6 +58,34 @@ format are **never** auto-merged. Circuit breakers halt-and-page on quota breach
 Base suite runs with **no kernel installed** (null backend). Mark geometry tests
 `@pytest.mark.occt`.
 
+## Working on this repo locally
+
+`forgekernel` must be installed **editable from a sibling `forge` checkout**,
+not from PyPI — the released wheel lacks `as_fraction` and gitcad will not
+import against it. Kernel work usually spans both repos and lands as two
+commits; if you reset one, reset the other.
+
+```
+python -m venv .venv && .venv/bin/pip install -e ../forge \
+    -e packages/gitcad-core -e packages/gitcad-mech \
+    -e packages/gitcad-ecad -e packages/gitcad
+.venv/bin/python -m pytest tests -q
+```
+
+Install **all four** gitcad packages. With only `core` + `mech` the suite still
+runs and reports green while ~54 files fail to collect on missing
+`gitcad.ecad` / `gitcad.bench` / `gitcad.mcp`, which reads as a pass.
+
+Three benches, and they answer different questions — see
+`docs/kernel-improvement-backlog.md` §2 for what each one got wrong before it
+existed:
+
+- `python -m gitcad.bench.capability` — which cells work (the headline pair).
+- `python -m gitcad.bench.refusals` — what KIND of problem each gap is.
+- `python -m gitcad.bench.coverage` — what fraction of the PARAMETER SPACE a
+  green cell actually covers. A green cell whose family is at 0% is a
+  demonstration, not a feature.
+
 ## Making a major architecture change
 
 1. Write an ADR superseding the old decision.
