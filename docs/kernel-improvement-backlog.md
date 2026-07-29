@@ -306,6 +306,24 @@ Assemblies of rotated parts are where this bites in real use.
 > arithmetic route #127 missed — which `AttributeError`ed on a sphere rotated
 > about an oblique axis, where the centre lands in ℚ(√2,√3).
 
+> **K2.x rung 2 is now live on every principal axis** (#143 + #144), and the
+> way it got there is worth keeping. A plane cutting a sphere always gives a
+> circle and a cap of elementary volume `πa²(3r−a)/3`, so it is exact for
+> every rational cut height — no twelfth constraint, unlike rung 1's flat on a
+> bar, whose area carries an arc angle. The z case worked first. The x and y
+> cases were then blocked behind a `if axis != 2: return None` guard for two
+> rounds, and the reason it survived the first round is the lesson: `_audited`
+> refused the permuted body, so the construction looked wrong. It was not.
+> `sphercut._permute_body` had been correct all along; what still assumed z was
+> the **coarse display mesh** — the sphere band stitched its pole and its rings
+> along z whatever `SphereS.pole` said, leaving 34 unpaired directed edges. An
+> audit that bundles the exact body with its float rendering will blame the
+> body for the rendering's fault, and that is how a correct construction stays
+> switched off. Nothing exact was ever at risk: meshing is the one place
+> ADR-0019 permits floats. Four sites held the same z assumption — the pole
+> span, the volume term, the moment term, and the mesher — and only the fourth
+> was in a float path. Bench: single-op **352/360 → 353/360**.
+
 ---
 
 ## 3. Geometry capability (the actual roadmap)

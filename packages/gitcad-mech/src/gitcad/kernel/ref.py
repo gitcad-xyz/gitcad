@@ -3706,18 +3706,16 @@ class RefKernel:
         if axis is None:
             return None
 
-        if axis != 2:
-            # STILL Z-ONLY AT THE SEAM, and the reason moved rather than went
-            # away. #144 lifted the z assumption out of the sphere measurement
-            # TERMS — `_pole_axis` now reads the trim axis and both the volume
-            # and moment integrals follow it — so a face with a pole on ±x is
-            # measurable. What is not yet right is BUILDING one: relabelling a
-            # finished body's axes (`sphercut._permute_body`) produces a shell
-            # the answer audit rejects, and a construction that fails its own
-            # audit is exactly what should not reach a caller. The permutation
-            # is cyclic, so orientation is not the obvious culprit and it has
-            # not been diagnosed; guessing further would be guessing.
-            return None
+        # ANY PRINCIPAL AXIS now. This carried a `if axis != 2: return None`
+        # guard through two rounds. #143 lifted z out of the measurement terms
+        # and #144 out of the mesher — and the guard survived the first because
+        # `_audited` still refused an x-cut, which read as "the construction is
+        # wrong". It was not: `_permute_body` had been correct the whole time,
+        # and the only thing failing was the coarse DISPLAY MESH, whose sphere
+        # band was still stitched along z. That is the lesson worth keeping —
+        # an audit that bundles the exact body with its float rendering will
+        # blame the body for the rendering's fault. Nothing exact was ever at
+        # risk here; meshing is the one place ADR-0019 permits floats.
         try:
             return _audited(cut_sphere_on_axis(a, axis, cut, keep_low),
                             "boolean.cut", require_body=True)
