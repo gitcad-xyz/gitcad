@@ -488,24 +488,35 @@ Assemblies of rotated parts are where this bites in real use.
 > | | single-op | composed |
 > |---|---|---|
 > | exact / certified | 354/360 | 180/285 |
-> | **sampled** (ADR-0024) | +1 | **+52** |
-> | answerable total | 355/360 | **232/285** |
-> | gaps | 2 | 50 |
+> | **sampled** (ADR-0024) | +4 | **+84** |
+> | answerable total | 358/360 | **264/285** |
+> | gaps | 0 | 21 |
+> | permanent exact-field | 2 | 0 |
 >
-> **The sampled tier (ADR-0024) closed the boolean rows** — plane×quadric over
-> `Body`, the transcendental walls (a prism through a sphere/cone, once
-> "permanent"), and quadric×quadric SSI. A Monte-Carlo answer with a 3σ error
-> and a `sampled` label, opt-in (default off), never blended into the exact
-> count. It measures the TRUE solid by analytic point membership, not a mesh —
-> the correctness crux, since sampling a tessellation measures the tessellation.
+> **The sampled tier (ADR-0024) closed the boolean rows AND shell** —
+> plane×quadric over `Body`, the transcendental walls (a prism through a
+> sphere/cone, once "permanent"), quadric×quadric SSI, and `shell` (a wall of
+> thickness t is the membership "inside AND within t of the surface"). A
+> Monte-Carlo answer with a 3σ error and a `sampled` label, opt-in (default
+> off), never blended into the exact count. It measures the TRUE solid by
+> analytic point membership, not a mesh — the correctness crux, since sampling a
+> tessellation measures the tessellation. **Single-op has zero gaps now.**
 >
-> **The 50 remaining composed gaps are the NON-boolean rows** — `fillet`
-> (K5.2), `shell` (K4.2), and `export_step`. Sampling does not reach them, and
-> the reason is structural, not effort: a fillet rounds an edge and a shell
-> hollows a wall — they CONSTRUCT new surface that no membership test on the
-> inputs produces. There is nothing to sample. Closing them needs approximate
-> surface construction (a mesh fillet / offset shell), which is a separate
-> decision — the sampled-boolean tier is not it.
+> **The 21 remaining composed gaps are genuine CONSTRUCTION gaps, not measure
+> gaps:**
+> - `cut then fillet` (13) — a sampled fillet is deliberately withheld. A mesh
+>   fillet's error is SYSTEMATIC (resolution: 17% at r=3, 2.2% at r=1), not the
+>   statistical error the half-width reports, so it would lie about its
+>   accuracy — the one thing ADR-0024 forbids as loudly as a bare float. Needs
+>   an offset-surface construction that can bound it.
+> - `cut then export_step` (4) — a real non-manifold shell in a specific cut,
+>   not an export gap.
+> - `shell`/`fillet` of a `SampledSolid` (rest) — no exact b-rep to take a
+>   surface distance against.
+>
+> So four of the table's six rows (the boolean families + shell) are answered,
+> each labelled exact / certified / sampled; fillet and the export topology
+> remain, for principled reasons rather than effort.
 
 Ranked by how many refusals each removes.
 
