@@ -1612,6 +1612,28 @@ class RefKernel:
             "mirror", shape, lambda b: b.transformed(B.Affine.mirror(axis)))
 
     def boolean(self, op: str, a, b):
+        """Exact, then certified, then — opt-in — SAMPLED (ADR-0024).
+
+        The exact and certified logic lives in `_boolean_impl`. This thin
+        wrapper is where the sampled tier catches EVERY refusal, not only the
+        two Body/quadric sites: a drill crossing a lateral wall, a prism meeting
+        the lathe's wall, and the general curved-surface boolean all raise from
+        their own specialised paths, and a top-level retry is the one place that
+        sees them all. Gated on `allow_sampled` (default off), so the default
+        contract — exact, certified, or an honest refusal — is untouched.
+        """
+        try:
+            return self._boolean_impl(op, a, b)
+        except KernelError as exc:
+            diag = getattr(getattr(exc, "signature", None), "diagnostic", "")
+            if (diag == "NotYetImplemented"
+                    and getattr(self, "allow_sampled", False)):
+                sampled = self._sampled_boolean(op, a, b)
+                if sampled is not None:
+                    return sampled
+            raise
+
+    def _boolean_impl(self, op: str, a, b):
         from forgekernel.brep import Solid
         from forgekernel.quadric import (AxisStack, Cone, Cyl, DrilledSolid,
                                          Sphere)
@@ -5077,6 +5099,18 @@ class RefKernel:
             out = self._via_reflection(
                 "shell", shape, lambda s: self._shell_direct(s, (), thickness))
             if out is None:
+                # ADR-0024: a shell is a clean membership — inside the solid AND
+                # within `thickness` of the surface — so the sampled tier
+                # answers it correctly (verified against an exact box shell
+                # within 3σ), unlike a fillet, whose blend surface a mesh cannot
+                # bound honestly. Opt-in and reported as sampled, same as the
+                # sampled boolean.
+                if getattr(self, "allow_sampled", False):
+                    from forgekernel.sampled import sampled_shell
+                    try:
+                        return sampled_shell(shape, thickness)
+                    except Exception:         # noqa: BLE001
+                        pass
                 raise
             return out
 
