@@ -2227,9 +2227,9 @@ class RefKernel:
     def _mass_props(self, shape) -> dict[str, float]:
         from forgekernel import body as B
         from forgekernel.brep import Solid as _Solid
-        from forgekernel.sampled import SampledSolid
+        from forgekernel.sampled import SampledSolid, _MorphResult
 
-        if isinstance(shape, SampledSolid):
+        if isinstance(shape, (SampledSolid, _MorphResult)):
             # SAMPLED (ADR-0024): a Monte-Carlo boolean the exact and certified
             # paths could not reach. Report the estimate with its 3σ half-width
             # and the `sampled` label, so no consumer reads a statistical
@@ -2362,9 +2362,9 @@ class RefKernel:
     def bbox(self, shape):
         from forgekernel import body as B
         from forgekernel.brep import Solid as _Solid
-        from forgekernel.sampled import SampledSolid
+        from forgekernel.sampled import SampledSolid, _MorphResult
 
-        if isinstance(shape, SampledSolid):
+        if isinstance(shape, (SampledSolid, _MorphResult)):
             lo, hi = shape.bbox()               # the operands' exact bounds
             return (tuple(lo), tuple(hi))
 
@@ -2532,8 +2532,8 @@ class RefKernel:
         return out
 
     def validate(self, shape) -> ValidationReport:
-        from forgekernel.sampled import SampledSolid
-        if isinstance(shape, SampledSolid):
+        from forgekernel.sampled import SampledSolid, _MorphResult
+        if isinstance(shape, (SampledSolid, _MorphResult)):
             # A sampled solid has NO exact b-rep to audit (ADR-0024). Report
             # that honestly: the volume is positive by Monte-Carlo, and the
             # provenance says the geometry was not exactly checked — never
@@ -3248,6 +3248,21 @@ class RefKernel:
             out = self._via_reflection(
                 "fillet", shape, lambda s: self._fillet_direct(s, edges, radius))
             if out is None:
+                # ADR-0024, opt-in: a fillet-all is a voxel morphological
+                # open-then-close (round convex edges, then concave), whose
+                # only error is the voxel resolution — bounded HONESTLY by
+                # surface_area·h and reported as the half-width. Unlike the
+                # withdrawn single-normal opening, this carries no systematic
+                # bias hiding under its bar; verified within bound against an
+                # exact RoundedBox. Coarse (the bound is conservative) but never
+                # a lie about its own accuracy.
+                if (getattr(self, "allow_sampled", False)
+                        and not isinstance(radius, (tuple, list))):
+                    from forgekernel.sampled import sampled_fillet
+                    try:
+                        return sampled_fillet(shape, radius)
+                    except Exception:         # noqa: BLE001
+                        pass
                 raise
             return out
 
