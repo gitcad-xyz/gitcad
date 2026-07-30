@@ -206,6 +206,32 @@ total coverage, and the composed grid's remaining boolean gaps stop being a
 list of rungs that cannot be finished. `gitcad.bench.coverage` is the
 acceptance instrument: the number to move is the percentage, not the cell.
 
+## Implementation progress
+
+Following the CLAUDE.md major-change process. Steps 1–2 done (this ADR; the
+loop is at Tier 0 for kernel semantics by rule anyway). Step 3 in progress:
+
+- **done, forge `f61e2aa`** — certified trigonometry (`arccos`, `sin`, `cos`),
+  with the enclosure verified against identities rather than a double, since
+  the brackets are ~1e-40 and a `float` carries ~1e-16.
+- **done, forge `15db93b`** — the arc-span foundation: `arc_cos_sin` (exact at
+  any angle), `arc_span_certified`, and `certified_bracket` (a float proposes,
+  exact comparison disposes). Validated against `_arc_quarters` across all 84
+  start/span combinations on the twelfth grid.
+- **done (measured)** — the generalised flat geometry is exact and manifold at
+  every rational depth: 0 unpaired edges at h = 1, 5/2, 3, −1, 7/3 on a
+  radius-5 bar. So only the MEASURE is missing, not the construction. This is
+  the fact that makes the rest tractable.
+- **next** — the measure. `volume` accumulates a `PiPoly` per face, so a
+  certified term means widening that accumulator through the whole integral,
+  and `_audited` calls `body.volume` on **every** construction — a half-done
+  version puts an unaudited answer in reach, which is the one thing this
+  kernel exists to prevent. Then `centroid`, then `vector_area` (which already
+  returns `None` for "not checked" and must keep saying so rather than
+  guessing).
+- **then** — shadow-run (step 4): every currently-exact result bit-identical,
+  and `gitcad.bench.coverage` moves rung 1 off 9%.
+
 ## Alternatives considered
 
 **Keep building exact rungs.** Rejected by measurement: the next three
