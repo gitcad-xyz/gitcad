@@ -1622,6 +1622,18 @@ class RefKernel:
         sees them all. Gated on `allow_sampled` (default off), so the default
         contract — exact, certified, or an honest refusal — is untouched.
         """
+        # A SAMPLED operand can only be combined by sampling — it has no exact
+        # b-rep for any exact path to consume — so route it straight to the
+        # sampled tier rather than letting it fall through to an
+        # unrecognised-type error the wrapper below cannot see (that error is an
+        # AttributeError the seam guard converts ABOVE this method).
+        from forgekernel.sampled import SampledSolid, _MorphResult
+        if isinstance(a, (SampledSolid, _MorphResult)) or \
+                isinstance(b, (SampledSolid, _MorphResult)):
+            if getattr(self, "allow_sampled", False):
+                sampled = self._sampled_boolean(op, a, b)
+                if sampled is not None:
+                    return sampled
         try:
             return self._boolean_impl(op, a, b)
         except KernelError as exc:
@@ -6603,8 +6615,29 @@ class RefKernel:
         """
         from forgekernel.stepbody import write_step_body
 
-        text = self._via_body("export_step", shape,
-                              lambda b: write_step_body(b))
+        try:
+            text = self._via_body("export_step", shape,
+                                  lambda b: write_step_body(b))
+        except KernelError:
+            # ADR-0024, opt-in: the exact B-rep writer could not emit this
+            # shape — a sampled cut with no b-rep, or a valid body whose arc
+            # edge-keying the writer cannot yet pair. Fall back to a FACETED
+            # STEP (a SHELL_BASED_SURFACE_MODEL of the tessellation), which is a
+            # valid, openable, to-tolerance file. It is faceted, not the exact
+            # surface — the honest downgrade, taken only when asked and only
+            # when the exact path refused.
+            if not getattr(self, "allow_sampled", False):
+                raise
+            from forgekernel import body as B
+            from forgekernel.sampled import (SampledSolid, _MorphResult,
+                                             write_step_faceted)
+            if isinstance(shape, (SampledSolid, _MorphResult)):
+                mesh = shape.tessellate()
+            else:
+                mesh = B.tessellate(
+                    shape if isinstance(shape, B.Body) else B.to_body(shape),
+                    0.2)
+            text = write_step_faceted(mesh)
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
 
