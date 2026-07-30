@@ -1497,6 +1497,34 @@ class RefKernel:
 
         return self._via_body(f"transform({what})", shape, make)
 
+    def _sampled_boolean(self, op, a, b):
+        """The LAST-RESORT boolean (ADR-0024): a Monte-Carlo `SampledSolid`.
+
+        Reached only after every exact and certified path above has declined,
+        so a shape that could be exact never gets here. Returns None when the
+        operands cannot even be sampled (something with no mesh and no analytic
+        membership), so the honest stage-named refusal below still fires for
+        those. The result is labelled `sampled` at every measure; `_audited`
+        does not run on it, because there is no exact b-rep to check.
+        """
+        # OPT-IN. The default kernel contract is exact, certified, or an honest
+        # refusal — a sampled answer is a different KIND of thing (statistical,
+        # not enclosing), so it must never appear unless a caller asked for it.
+        # `allow_sampled` is off by default; the capability bench turns it on
+        # and reports those cells as their own `sampled` tier (ADR-0024). This
+        # keeps every golden refusal contract and the exact/certified paths
+        # untouched, and keeps the sampler's cost off the common path.
+        if not getattr(self, "allow_sampled", False):
+            return None
+        if op not in ("cut", "union", "intersect"):
+            return None
+        try:
+            from forgekernel.sampled import SampledSolid
+
+            return SampledSolid.boolean(op, a, b)
+        except Exception:                             # noqa: BLE001
+            return None
+
     def _via_body(self, op: str, shape, make):
         """ADR-0021 fallback: run an operation on the canonical B-rep when the
         representation has no specialised path. Native paths keep priority —
@@ -2017,6 +2045,9 @@ class RefKernel:
                     return _audited(DisjointUnion([a, b]), "boolean.union")
                 except ValueError:
                     pass                      # genuinely overlapping: say so
+            sampled = self._sampled_boolean(op, a, b)
+            if sampled is not None:
+                return sampled
             # NAME THE SURFACES, not the container. This message used to stop
             # at "landed in the canonical B-rep", which reads as a plumbing
             # gap and sends a reader looking for a Body→Solid converter. There
@@ -2054,6 +2085,9 @@ class RefKernel:
         # surfaced raw CPython text ("'RoundedBox' object has no attribute
         # 'polys'") as the kernel's diagnostic instead of naming the stage.
         if isinstance(a, curved) or isinstance(b, curved):
+            sampled = self._sampled_boolean(op, a, b)
+            if sampled is not None:
+                return sampled
             _nope(f"boolean.{op} on quadric operands "
                   f"({type(a).__name__} × {type(b).__name__})", "K2.2",
                   **_quadric_pair_reason(op, a, b))
@@ -2171,6 +2205,17 @@ class RefKernel:
     def _mass_props(self, shape) -> dict[str, float]:
         from forgekernel import body as B
         from forgekernel.brep import Solid as _Solid
+        from forgekernel.sampled import SampledSolid
+
+        if isinstance(shape, SampledSolid):
+            # SAMPLED (ADR-0024): a Monte-Carlo boolean the exact and certified
+            # paths could not reach. Report the estimate with its 3σ half-width
+            # and the `sampled` label, so no consumer reads a statistical
+            # answer as an exact or certified one. The centroid is sampled too.
+            v = shape.volume()
+            cx, cy, cz = shape.centroid_f()
+            return _mp(v.to_float(), cx, cy, cz, provenance="sampled",
+                       volume_halfwidth=float(v.width) / 2)
 
         if isinstance(shape, _Solid) and not shape.polys:
             # The EMPTY solid — cut(a, a), cut by a superset, a disjoint
@@ -2295,6 +2340,11 @@ class RefKernel:
     def bbox(self, shape):
         from forgekernel import body as B
         from forgekernel.brep import Solid as _Solid
+        from forgekernel.sampled import SampledSolid
+
+        if isinstance(shape, SampledSolid):
+            lo, hi = shape.bbox()               # the operands' exact bounds
+            return (tuple(lo), tuple(hi))
 
         if isinstance(shape, _Solid) and not shape.polys:
             # The empty solid contains no points, so it has no bounding box —
@@ -2460,6 +2510,23 @@ class RefKernel:
         return out
 
     def validate(self, shape) -> ValidationReport:
+        from forgekernel.sampled import SampledSolid
+        if isinstance(shape, SampledSolid):
+            # A sampled solid has NO exact b-rep to audit (ADR-0024). Report
+            # that honestly: the volume is positive by Monte-Carlo, and the
+            # provenance says the geometry was not exactly checked — never
+            # claim `ok` on a manifold check that did not run.
+            # `SampledSolid.volume()` is a CInterval, so its sign is a proper
+            # interval query (positive when the whole 3σ bracket clears zero) —
+            # no float decides anything here. A sampled solid with a volume
+            # bracket that straddles zero is a degenerate near-empty result and
+            # correctly reports not-ok.
+            v = shape.volume()
+            return ValidationReport(
+                ok=(v.lo > 0),
+                checks={"method": "monte-carlo", "provenance": "sampled",
+                        "geometry_checked": False},
+                violations=[])
         from forgekernel.quadric import Cyl, DrilledSolid
 
         from forgekernel.quadric import (AxisStack, Cone, DisjointUnion,

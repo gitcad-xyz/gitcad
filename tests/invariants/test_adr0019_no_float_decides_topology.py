@@ -150,31 +150,38 @@ def test_exact_comparisons_are_not_flagged(tmp_path) -> None:
     assert _offenders(src) == []
 
 
-def test_the_exact_field_boundary_is_marked_permanent_not_backlog() -> None:
+def test_the_exact_field_boundary_is_never_an_ordinary_gap() -> None:
     """These cells are outside any EXACT field, so counting them as ordinary
     gaps makes the matrix read as more achievable cells than it has. Naming
-    them costs nothing and stops a future reader — human or agent — spending a
-    day trying to close a hole that is a wall.
+    them costs nothing and stops a future reader spending a day trying to close
+    a hole that is a wall.
 
-    "AND ALWAYS WILL BE" is what this docstring used to add, and it was wrong.
-    Outside the exact field is not outside the CERTIFIED one: every constant
-    involved (arcsin, ln(1+√2), arctan, arccos(1/√37)) is transcendental and
-    every one is bracketable, so ADR-0023 turns each of these into a certified
-    answer. The assertion below is unchanged and still right — it pins the
-    classification the EXACT probe must give — but the label means "no exact
-    field holds this", not "unanswerable".
+    WHAT "WALL" MEANS HAS CHANGED TWICE, and this test now records the second.
+    "Always will be" was the first error: outside the exact field is not outside
+    the CERTIFIED one (ADR-0023). ADR-0024 is the second: a prism through a
+    sphere or cone is a BOOLEAN, and the sampled tier answers any boolean with a
+    labelled Monte-Carlo result. So a boundary cell is now either `sampled` (the
+    transcendental-volume booleans — arcsin, ln(1+√2)) or `exact-field` (what is
+    genuinely not sampleable, e.g. a fillet's turn angle, which is not a set
+    operation). It is NEVER an ordinary gap and NEVER a crash — that is the
+    durable invariant, and it is what pins the classification.
     """
     from gitcad.bench.capability import _EXACT_FIELD_BOUNDARY, probe
 
     grid = probe()["grid"]
     for (shape, op), why in _EXACT_FIELD_BOUNDARY.items():
-        assert grid[shape][op] == "exact-field", (
-            f"{shape}/{op} is no longer classified as a permanent boundary — "
-            "either it was fixed (delete the entry) or the probe regressed")
+        assert grid[shape][op] in ("exact-field", "sampled"), (
+            f"{shape}/{op} is classified {grid[shape][op]!r} — a boundary cell "
+            "must be a permanent exact-field wall or a sampled answer, never an "
+            "ordinary gap")
         assert why, "a boundary entry must say WHICH number it would need"
     counts = {}
     for row in grid.values():
         for v in row.values():
             counts[v] = counts.get(v, 0) + 1
     assert counts.get("CRASH", 0) == 0, "a raw exception through the seam"
-    assert counts["exact-field"] == len(_EXACT_FIELD_BOUNDARY)
+    # every boundary cell is accounted for as one of the two honest outcomes
+    boundary_cells = sum(
+        1 for (s, o) in _EXACT_FIELD_BOUNDARY
+        if grid[s][o] in ("exact-field", "sampled"))
+    assert boundary_cells == len(_EXACT_FIELD_BOUNDARY)

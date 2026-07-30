@@ -398,8 +398,19 @@ def _probe(k, make_ops, boundary) -> dict:
                 row[oname] = {"NotYetImplemented": "refused",
                               "BadInput": "bad-input"}.get(diag, "refused")
                 detail[(sname, oname)] = str(exc)
-                if (sname, oname) in boundary:
-                    # a permanent, correct answer — not a gap to be closed
+                if row[oname] == "refused" and _sampled_answers(k, fn, shape):
+                    # ADR-0024: the exact/certified paths refused, but the
+                    # SAMPLED tier answers it. A distinct outcome, never blended
+                    # into `ok` — a sampled cell is a Monte-Carlo answer with a
+                    # reported error, not an exact or certified one. This is
+                    # tried BEFORE the exact-field label, because those
+                    # transcendental walls (a prism through a sphere) are
+                    # exactly what sampling now answers — they stop being
+                    # permanent and become sampled.
+                    row[oname] = "sampled"
+                elif (sname, oname) in boundary:
+                    # outside every exact field AND not sampleable — the refusal
+                    # is the finished answer here
                     row[oname] = "exact-field"
                     detail[(sname, oname)] = boundary[(sname, oname)]
             except NotImplementedError as exc:
@@ -413,8 +424,23 @@ def _probe(k, make_ops, boundary) -> dict:
             "shapes": list(shapes), "ops": list(ops)}
 
 
+def _sampled_answers(k, fn, shape) -> bool:
+    """Does the SAMPLED tier (ADR-0024) answer this cell that exact/certified
+    refused? Turns the kernel's opt-in sampling on for one call and asks whether
+    the op now returns. Off again immediately, so nothing else is affected."""
+    prev = getattr(k, "allow_sampled", False)
+    try:
+        k.allow_sampled = True
+        fn(shape)
+        return True
+    except Exception:                             # noqa: BLE001
+        return False
+    finally:
+        k.allow_sampled = prev
+
+
 _MARK = {"ok": "✅", "refused": "🚧", "bad-input": "·", "CRASH": "💥",
-         "exact-field": "∎", "n/a": "—"}
+         "exact-field": "∎", "sampled": "≈", "n/a": "—"}
 
 
 def tally(result: dict) -> dict[str, int]:
@@ -428,11 +454,17 @@ def tally(result: dict) -> dict[str, int]:
 def summary(result: dict) -> str:
     t = tally(result)
     total = sum(t.values()) or 1
-    return (f"{t.get('ok', 0)}/{total} "
-            f"({float(100 * t.get('ok', 0) / total):.0f}%) working, "
+    exact = t.get("ok", 0)
+    sampled = t.get("sampled", 0)
+    # exact/certified and sampled are reported SEPARATELY — blending them would
+    # be the dishonesty ADR-0024 warns about (a sampled cell is not an exact
+    # one). The parenthetical is exact+sampled, the honest "answerable" total.
+    return (f"{exact}/{total} "
+            f"({float(100 * exact / total):.0f}%) exact/certified, "
+            f"{sampled} sampled (ADR-0024), "
             f"{t.get('refused', 0)} gaps, "
-            f"{t.get('exact-field', 0)} at the exact-field boundary "
-            f"(permanent), {t.get('CRASH', 0)} crashes")
+            f"{t.get('exact-field', 0)} at the exact-field boundary, "
+            f"{t.get('CRASH', 0)} crashes")
 
 
 def headline(single: dict, composed: dict) -> str:
