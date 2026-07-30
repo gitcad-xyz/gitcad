@@ -246,7 +246,38 @@ loop is at Tier 0 for kernel semantics by rule anyway). Step 3 in progress:
   settles near 1e-16 anyway. The default is the achievable 1e-15, about 1e-13
   relative on a bar's volume: comparable to a double's error but *proven* to
   enclose. Tighter costs bisection and is available via `width=`.
+- **done, forge (centroid)** — `_centroid_offgrid` gives the certified families
+  a centre of mass, not just a volume. The band moment carries the (D/2) term
+  the on-grid formula drops (on-grid arcs are quarter-turns, D=0; a flat's arc
+  is not), Monte-Carlo verified to the noise floor. So rung 1 is now a
+  *complete* answer through the seam: certified volume + real centroid.
+- **done, forge (wall primitives)** — `arcsin`, `ln`, `arctan`, `exp` certified,
+  which turn `_EXACT_FIELD_BOUNDARY`'s transcendental "walls" (arcsin, ln(1+√2),
+  arctan) from permanent refusals into bracketable answers. **The arithmetic is
+  built; the geometry is not** — closing those cells still needs the
+  sphere-minus-prism and cone-minus-prism *bodies* constructed (trimmed
+  spherical/conical patches, arc-trimmed walls), which is SSI-adjacent work.
+- **done, seam** — `revolve cut by half-space` closed (single-op 353→354): a
+  straight-walled revolve is coerced to a `Cyl` so the flat recognises it.
 - **then** — shadow-run (step 4) across the model corpus, then cut over.
+
+## Where the composed grid stands, honestly (2026-07-30)
+
+The measure and its primitives are the *bounded* part of ADR-0023 and are
+largely done. The composed grid is still **180/285** because closing those cells
+needs the **bodies built**, not just measured, and that splits into work of very
+different cost:
+
+- **wall cells (sphere/cone through a prism)** — the primitives exist; the
+  bodies (trimmed quadric patches) do not. Bounded but substantial per family.
+- **~50 plane×quadric over `Body`** — needs the general boolean written once
+  against `Body`, which is the ADR-0022 `isinstance`-chain migration (still 175
+  chains in `ref.py`, to move op-by-op under the differential oracle).
+- **6 quadric×quadric (SSI)** — genuinely unbounded on the exact path; the
+  cylinder×cylinder intersection is a space curve with no elementary form. This
+  is where "certified" and "sampled" (ADR-0019's proposed third tier) diverge.
+- **K4.2 shell (8), K5.2 blends (11)** — independent of ADR-0023; known
+  algorithms, multi-session, and K5.2 is the roadmap's largest single block.
 
 ## Alternatives considered
 
