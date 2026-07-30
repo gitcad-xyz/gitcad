@@ -2192,10 +2192,13 @@ class RefKernel:
                 # midpoint plus the proven half-width, LABELLED, exactly as the
                 # TubeSolid path does, so no consumer reads it as exact.
                 #
-                # The centroid has no certified route yet, so it is a FLAGGED
-                # non-answer (NaN — the empty-solid and TrimmedShell precedent)
-                # rather than a fabricated location. Substituting the bbox
-                # centre here is the very bug the comment above records.
+                # The centroid IS available for the ADR-0023 families now
+                # (`_centroid_offgrid`, Monte-Carlo verified) — it is a float
+                # like every centroid, since a centre of mass is a ratio that
+                # leaves the field. Where the off-grid centroid does not reach
+                # (a sphere/cone face off the grid), it raises and the centroid
+                # is a FLAGGED non-answer (NaN — the TrimmedShell precedent),
+                # never a fabricated bbox centre.
                 try:
                     cx, cy, cz = B.centroid(shape)
                     return _mp(vol.to_float(), cx, cy, cz,
