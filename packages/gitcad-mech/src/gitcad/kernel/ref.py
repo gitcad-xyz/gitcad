@@ -3884,6 +3884,34 @@ class RefKernel:
         except SphereCutRefused:
             return None
 
+    @staticmethod
+    def _as_plain_cyl(a):
+        """``a`` as a plain ``Cyl`` if it geometrically IS one, else ``a``.
+
+        A straight-walled ``RevolveSolid`` — profile a rectangle from r=0 to R
+        over z0..z1 — is a cylinder that happens to have been built on the lathe.
+        `_flat_on_bar` recognises only the ``Cyl`` type, so a half-space cutting
+        such a revolve refused ("the prism reaches the lathe's wall") for a flat
+        that is exactly the rung-1 family. Coercing here is representation-only:
+        the geometry is identical, and a non-cylindrical revolve is left alone.
+        """
+        from forgekernel.quadric import Cyl, RevolveSolid
+
+        if isinstance(a, Cyl):
+            return a
+        if not isinstance(a, RevolveSolid):
+            return a
+        loop = list(a.loop)
+        rs = sorted({r for r, _ in loop})
+        zs = sorted({z for _, z in loop})
+        # exactly two radii {0, R} and two z-levels, every vertex at a corner:
+        # a plain rectangle spun into a cylinder
+        if (len(rs) == 2 and rs[0] == 0 and len(zs) == 2
+                and all((r in rs and z in zs) for r, z in loop)
+                and len(loop) == 4):
+            return Cyl(a.cx, a.cy, rs[1], zs[0], zs[1])
+        return a
+
     def _flat_on_bar(self, a, tool):
         """A half-space tool milling ONE flat on a round bar (K2.x rung 1).
 
@@ -3903,6 +3931,7 @@ class RefKernel:
         from forgekernel.flat import FlatRefused, flat_cut
         from forgekernel.quadric import Cyl, _exact_bbox
 
+        a = self._as_plain_cyl(a)
         if not isinstance(a, Cyl) or not isinstance(tool, Solid):
             return None
         tb = _exact_bbox(tool)
