@@ -187,7 +187,29 @@ def _audited(body, op: str, *, require_body: bool = False):
         # None still means NOT CHECKED, never passed: a sphere or torus in
         # the shell, or an odd-twelfth #123 wall whose normal has irrational
         # length (2−√3 for a crossing at 60°).
-        va = B.vector_area(subject)
+        try:
+            va = B.vector_area(subject)
+        except ValueError:
+            # An arc off the twelfth grid (ADR-0023). Letting this become "not
+            # checked" was the easy option and would have shipped a NEW
+            # capability with a weaker audit than everything around it — this is
+            # the only one of the four checks that sees a reversed face, since
+            # such a face still pairs every edge and can still leave the volume
+            # positive. So ask the certified form instead of giving up.
+            va = B.vector_area_certified(subject)
+            if va is not None:
+                # A CERTIFIED zero is a bracket that CONTAINS zero, so the test
+                # inverts: report a defect only where the sign is certified
+                # NON-zero. Using `c != 0` here — which is what the exact branch
+                # effectively does — would flag every interval of nonzero width
+                # and fail every off-grid body.
+                nonzero = [c for c in va if c.lo > 0 or c.hi < 0]
+                if nonzero:
+                    bad.append(
+                        "the shell is not closed: sum of Area*n is certified "
+                        f"({', '.join(f'{float(c.mid):.6g}' for c in va)}), "
+                        "and at least one component is provably not zero")
+                va = None                   # already judged; skip the exact test
         if va is not None and any(c.sign() != 0 for c in va):
             bad.append("the shell is not closed: sum of Area*n is "
                        f"({', '.join(f'{float(c):.6g}' for c in va)}), "
@@ -2163,8 +2185,30 @@ class RefKernel:
             # cone decomposition. This used to substitute the BBOX CENTRE and
             # flag it with a key no caller read — for an L-bracket that is off
             # by a fifth of the part, reported as fact.
+            vol = B.volume(shape)
+            if hasattr(vol, "width"):
+                # CERTIFIED (ADR-0023): a body carrying an arc off the twelfth
+                # grid — a flat milled at an arbitrary depth. Report the
+                # midpoint plus the proven half-width, LABELLED, exactly as the
+                # TubeSolid path does, so no consumer reads it as exact.
+                #
+                # The centroid has no certified route yet, so it is a FLAGGED
+                # non-answer (NaN — the empty-solid and TrimmedShell precedent)
+                # rather than a fabricated location. Substituting the bbox
+                # centre here is the very bug the comment above records.
+                try:
+                    cx, cy, cz = B.centroid(shape)
+                    return _mp(vol.to_float(), cx, cy, cz,
+                               provenance="certified",
+                               volume_halfwidth=float(vol.width) / 2)
+                except ValueError:
+                    nan = float("nan")
+                    return _mp(vol.to_float(), nan, nan, nan,
+                               provenance="certified",
+                               volume_halfwidth=float(vol.width) / 2,
+                               centroid_unavailable=True)
             cx, cy, cz = B.centroid(shape)
-            return _mp(float(B.volume(shape)), cx, cy, cz)
+            return _mp(float(vol), cx, cy, cz)
         from forgekernel.quadric import Cyl, DrilledSolid
         from forgekernel.curve import TubeSolid
 

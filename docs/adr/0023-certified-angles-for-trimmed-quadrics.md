@@ -222,15 +222,31 @@ loop is at Tier 0 for kernel semantics by rule anyway). Step 3 in progress:
   every rational depth: 0 unpaired edges at h = 1, 5/2, 3, −1, 7/3 on a
   radius-5 bar. So only the MEASURE is missing, not the construction. This is
   the fact that makes the rest tractable.
-- **next** — the measure. `volume` accumulates a `PiPoly` per face, so a
-  certified term means widening that accumulator through the whole integral,
-  and `_audited` calls `body.volume` on **every** construction — a half-done
-  version puts an unaudited answer in reach, which is the one thing this
-  kernel exists to prevent. Then `centroid`, then `vector_area` (which already
-  returns `None` for "not checked" and must keep saying so rather than
-  guessing).
-- **then** — shadow-run (step 4): every currently-exact result bit-identical,
-  and `gitcad.bench.coverage` moves rung 1 off 9%.
+- **done, forge `4f35f01`** — the measure, and **rung 1 is 33/33 (100%) in the
+  parameter space**, from 3/33. `_needs_certified` routes before any arithmetic
+  runs, so on-grid bodies stay byte-identical. The exact per-face term is tried
+  first and bracketed, so new arithmetic runs only where no exact term exists;
+  all 15 corpus representations agree exact-vs-certified. `vector_area_certified`
+  keeps the orientation oracle at full strength — the only one of the audit's
+  four checks that sees a reversed face — and its test inverts correctly, since
+  a certified zero is a bracket *containing* zero.
+- **still open** — the **centroid** has no certified route, so it crosses the
+  seam as `NaN` with `centroid_unavailable` (the `TrimmedShell` precedent; a
+  Monte-Carlo check confirmed the flag is the honest answer rather than a wrong
+  number). The **bore-across-a-wall** family is unchanged at 24%, because it
+  refuses inside `DrilledSolid`'s wall check rather than here; the **slot**
+  family moved 0% → 4%. Each needs its own wiring.
+- **performance, since it nearly sank this.** Bisecting `arccos` to 1e-40 costs
+  ~133 exact-rational `cos` evaluations with compounding denominators: one flat
+  volume took **51 seconds**. A float proposing and exact arithmetic disposing
+  needs two, and with memoisation (~80 calls per body for ~12 distinct angles)
+  and 22 series terms instead of 30 it is **24 ms**.
+- **the honest precision limit.** The bracket is centred on `math.acos`, so the
+  float's own error is the floor — requesting 1e-25 fails verification and
+  settles near 1e-16 anyway. The default is the achievable 1e-15, about 1e-13
+  relative on a bar's volume: comparable to a double's error but *proven* to
+  enclose. Tighter costs bisection and is available via `width=`.
+- **then** — shadow-run (step 4) across the model corpus, then cut over.
 
 ## Alternatives considered
 
