@@ -482,6 +482,31 @@ Assemblies of rotated parts are where this bites in real use.
 
 ## 3. Geometry capability (the actual roadmap)
 
+> **Tiered state after ADR-0023 + ADR-0024 (2026-07-30).** The grid is now
+> reported in three tiers, because blending them lies:
+>
+> | | single-op | composed |
+> |---|---|---|
+> | exact / certified | 354/360 | 180/285 |
+> | **sampled** (ADR-0024) | +1 | **+52** |
+> | answerable total | 355/360 | **232/285** |
+> | gaps | 2 | 50 |
+>
+> **The sampled tier (ADR-0024) closed the boolean rows** — plane×quadric over
+> `Body`, the transcendental walls (a prism through a sphere/cone, once
+> "permanent"), and quadric×quadric SSI. A Monte-Carlo answer with a 3σ error
+> and a `sampled` label, opt-in (default off), never blended into the exact
+> count. It measures the TRUE solid by analytic point membership, not a mesh —
+> the correctness crux, since sampling a tessellation measures the tessellation.
+>
+> **The 50 remaining composed gaps are the NON-boolean rows** — `fillet`
+> (K5.2), `shell` (K4.2), and `export_step`. Sampling does not reach them, and
+> the reason is structural, not effort: a fillet rounds an edge and a shell
+> hollows a wall — they CONSTRUCT new surface that no membership test on the
+> inputs produces. There is nothing to sample. Closing them needs approximate
+> surface construction (a mesh fillet / offset shell), which is a separate
+> decision — the sampled-boolean tier is not it.
+
 Ranked by how many refusals each removes.
 
 | Item | Unlocks | Notes |
