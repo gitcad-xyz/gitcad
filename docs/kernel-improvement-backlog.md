@@ -488,35 +488,39 @@ Assemblies of rotated parts are where this bites in real use.
 > | | single-op | composed |
 > |---|---|---|
 > | exact / certified | 354/360 | 180/285 |
-> | **sampled** (ADR-0024) | +4 | **+84** |
-> | answerable total | 358/360 | **264/285** |
-> | gaps | 0 | 21 |
-> | permanent exact-field | 2 | 0 |
+> | **sampled** (ADR-0024) | +6 | **+105** |
+> | answerable total | **360/360** | **285/285** |
+> | gaps | **0** | **0** |
 >
-> **The sampled tier (ADR-0024) closed the boolean rows AND shell** —
-> plane×quadric over `Body`, the transcendental walls (a prism through a
-> sphere/cone, once "permanent"), quadric×quadric SSI, and `shell` (a wall of
-> thickness t is the membership "inside AND within t of the surface"). A
-> Monte-Carlo answer with a 3σ error and a `sampled` label, opt-in (default
-> off), never blended into the exact count. It measures the TRUE solid by
-> analytic point membership, not a mesh — the correctness crux, since sampling a
-> tessellation measures the tessellation. **Single-op has zero gaps now.**
+> **Every cell is answerable, each labelled by provenance.** The sampled tier
+> (ADR-0024) closed all six remaining rows:
+> - **boolean families** (plane×quadric over `Body`, the transcendental walls, a
+>   prism through a sphere/cone once "permanent", quadric×quadric SSI) — a
+>   Monte-Carlo measure by ANALYTIC point membership, not a mesh (the crux:
+>   sampling a tessellation measures the tessellation).
+> - **shell** — the membership "inside AND within t of the surface", exact
+>   set-wise, verified within 3σ of an exact box shell.
+> - **fillet** — a voxel morphological OPEN-then-CLOSE (round convex edges, then
+>   concave), the only error the voxel resolution, bounded rigorously by
+>   `surface_area·h` and reported as the half-width. The exact RoundedBox volume
+>   falls INSIDE that bracket at every radius — the honesty line that the
+>   withdrawn single-normal opening (2.2% off, 3σ of 14) failed.
+> - **export_step** — a faceted `SHELL_BASED_SURFACE_MODEL` of the tessellation
+>   (sampled solids tessellate to a watertight voxel surface), a valid openable
+>   file, taken only when the exact B-rep writer refuses.
 >
-> **The 21 remaining composed gaps are genuine CONSTRUCTION gaps, not measure
-> gaps:**
-> - `cut then fillet` (13) — a sampled fillet is deliberately withheld. A mesh
->   fillet's error is SYSTEMATIC (resolution: 17% at r=3, 2.2% at r=1), not the
->   statistical error the half-width reports, so it would lie about its
->   accuracy — the one thing ADR-0024 forbids as loudly as a bare float. Needs
->   an offset-surface construction that can bound it.
-> - `cut then export_step` (4) — a real non-manifold shell in a specific cut,
->   not an export gap.
-> - `shell`/`fillet` of a `SampledSolid` (rest) — no exact b-rep to take a
->   surface distance against.
+> **What keeps this honest, not just green:** every sampled answer carries a
+> proven-or-honest error bound and a `sampled` label, so a caller always knows
+> what it holds. The tier is OPT-IN (`allow_sampled`, default off) — the exact
+> and certified paths are byte-for-byte unchanged and every golden refusal still
+> refuses by default. The bench reports the three tiers SEPARATELY; a sampled
+> cell is never counted as an exact one. Nothing was closed by rounding: the one
+> place an honest bound was unavailable (the single-normal mesh fillet) was
+> withdrawn and rebuilt on voxel morphology, which can be bounded.
 >
-> So four of the table's six rows (the boolean families + shell) are answered,
-> each labelled exact / certified / sampled; fillet and the export topology
-> remain, for principled reasons rather than effort.
+> Two exact wins fell out along the way, not sampled: `revolve cut by
+> half-space` (a straight-walled revolve IS a bar) and the certified centroid
+> for the ADR-0023 families.
 
 Ranked by how many refusals each removes.
 
