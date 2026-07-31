@@ -16,19 +16,65 @@ from gitcad.seams import Kernel, Shape
 _VOL_TOL = 1e-6  # mm^3 — below this, "intersection" is contact/noise
 
 
+def _sampled_verdict(kernel, sa, sb, na, nb, tol, overlaps, where,
+                     violations, undetermined) -> bool:
+    """Try a SAMPLED intersect for a pair the exact engine refused (ADR-0024).
+
+    Returns True if it produced a verdict (recorded into the caller's dicts),
+    False to fall through to UNDETERMINED. Fail-closed by the bracket: a clash
+    needs the overlap's lower bound above tol; a clear needs its upper bound
+    below; anything straddling is left UNDETERMINED, never a false pass.
+    """
+    prev = getattr(kernel, "allow_sampled", False)
+    key = f"{na}<->{nb}"
+    try:
+        kernel.allow_sampled = True
+        common = kernel.boolean("intersect", sa, sb)
+        mp = kernel.mass_props(common)
+    except Exception:                                 # noqa: BLE001
+        return False
+    finally:
+        kernel.allow_sampled = prev
+    vol = float(mp.get("volume", 0.0))
+    hw = float(mp.get("volume_halfwidth", 0.0))
+    lo, hi = vol - hw, vol + hw
+    if lo > tol:                                      # provably a clash
+        overlaps[key] = round(vol, 4)
+        where[key] = {"sampled": True, "halfwidth_mm3": round(hw, 4)}
+        violations.append(
+            f"interference:{na}<->{nb}:overlap~{float(vol):.3f}mm3 "
+            f"(sampled +-{float(hw):.3f}, ADR-0024)")
+        return True
+    if hi <= tol:                                     # provably clear
+        if vol > _VOL_TOL:
+            overlaps[key] = round(vol, 4)
+        return True
+    return False                                      # straddles -> undetermined
+
+
 def check_interference(
     kernel: Kernel,
     instances: dict[str, tuple[Shape, tuple[float, float, float], float]],
     *,
     ignore: set[frozenset[str]] | None = None,
     tol_mm3: float | None = None,
+    sampled: bool = False,
 ) -> ValidationReport:
     """``instances``: name -> (shape, translate, rotate_z_deg). ``ignore``:
     pairs (as frozensets of names) intentionally in contact/overlap.
     ``tol_mm3``: allowed overlap volume per pair (None = exact, the strict
     default; a clash budget like 1.0 matches common enclosure practice).
     The pairwise overlap matrix is always reported — a passing check still
-    shows HOW CLOSE it passed."""
+    shows HOW CLOSE it passed.
+
+    ``sampled`` (ADR-0024): when the exact intersect refuses — which it does for
+    ANY curved pair (a shaft in a bore, a boss on a wall), the reason "does it
+    fit?" was previously unanswerable for real machine parts — fall back to a
+    Monte-Carlo intersect with a reported error bracket. The verdict stays
+    FAIL-CLOSED: a clash only when the bracket's LOWER bound clears the
+    tolerance, clear only when its UPPER bound is under it, and UNDETERMINED
+    when the bracket straddles — so sampling never turns an unproven clearance
+    into a false pass, it only answers the pairs the exact engine cannot."""
     ignore = ignore or set()
     tol = _VOL_TOL if tol_mm3 is None else tol_mm3
 
@@ -60,6 +106,10 @@ def check_interference(
             try:
                 common = kernel.boolean("intersect", placed[na], placed[nb])
             except KernelError as exc:
+                if sampled and _sampled_verdict(
+                        kernel, placed[na], placed[nb], na, nb, tol,
+                        overlaps, where, violations, undetermined):
+                    continue
                 # A pair the kernel cannot evaluate is UNDETERMINED, never
                 # clear. Reporting ok for it would repeat, one layer up, the
                 # exact defect that motivated this branch: an unsound AABB

@@ -1194,6 +1194,14 @@ class RefKernel:
 
     name = "ref-k2-exact"
 
+    # ADR-0024: the SAMPLED tier is opt-in and OFF by default. The exact and
+    # certified paths, and every honest refusal, are unchanged unless a caller
+    # sets this True — then curved-workpiece booleans, fillet/shell of a
+    # non-planar base, and `export_step` of a shape with no exact writer fall
+    # back to a Monte-Carlo answer LABELLED `sampled` (with a reported error
+    # bound), and `check_interference(..., sampled=True)` can answer curved fits.
+    allow_sampled = False
+
     # Evidence channel for the last import (#135): what was dropped, what was
     # healed and its certificate. The importer's ImportReport reads this after
     # a build — intent lives in the feature params (ADR-0022), evidence here.
@@ -1934,10 +1942,13 @@ class RefKernel:
                       "be proven separate",
                       "K2.3 (general quadric union)",
                       predicate="union_members_provably_disjoint",
-                      remedy="coaxial overlapping solids of revolution fuse "
-                             "exactly through their shared profile; move the "
-                             "parts apart, make them coaxial, or wait for "
-                             "the general union")
+                      remedy="the general overlapping-solid union is not built "
+                             "exactly. The one exact case is two COAXIAL solids "
+                             "of revolution, which fuse through their shared "
+                             "(r, z) profile — not applicable to, e.g., a boss "
+                             "on a plate. Model the fused result directly, or "
+                             "enable the sampled tier (k.allow_sampled=True) "
+                             "for a Monte-Carlo union labelled 'sampled'")
         if op == "cut":
             # #123 — a box tool whose FOOTPRINT STRADDLES a bore. It has to be
             # tried before the representation-specific paths below, because
@@ -2755,8 +2766,26 @@ class RefKernel:
         # method does not accept a deflection at all, so the seam fell through
         # to `shape.tessellate()` and the caller's argument was silently
         # DISCARDED — asking a planar solid for a fine mesh got the default.
-        return self._via_body("tessellate", shape,
-                              lambda b: B.tessellate(b, deflection))
+        try:
+            return self._via_body("tessellate", shape,
+                                  lambda b: B.tessellate(b, deflection))
+        except KernelError as orig:
+            # A representation with NO canonical-B-rep converter (an AxisStack
+            # from a coaxial union) is a display dead-end — measurable, never
+            # renderable. A watertight VOXEL SURFACE from its exact membership
+            # fixes that, but it is BLOCKY and its enclosed volume is only
+            # approximate — so it is OPT-IN (allow_sampled), same as every other
+            # approximate answer (ADR-0024). By default tessellate still REFUSES
+            # rather than hand back a mesh whose STL volume could be mistaken for
+            # truth (W10). Even opt-in, a shape voxel_mesh cannot classify keeps
+            # the ORIGINAL honest refusal, never voxel_mesh's raw ValueError.
+            if not getattr(self, "allow_sampled", False):
+                raise
+            from forgekernel.sampled import voxel_mesh
+            try:
+                return voxel_mesh(shape)
+            except Exception:                         # noqa: BLE001
+                raise orig
 
     # -- honest refusals (each names its stage) -------------------------------
 
@@ -6690,7 +6719,7 @@ class RefKernel:
         try:
             text = self._via_body("export_step", shape,
                                   lambda b: write_step_body(b))
-        except KernelError:
+        except KernelError as _orig_export:
             # ADR-0024, opt-in: the exact B-rep writer could not emit this
             # shape — a sampled cut with no b-rep, or a valid body whose arc
             # edge-keying the writer cannot yet pair. Fall back to a FACETED
@@ -6702,13 +6731,23 @@ class RefKernel:
                 raise
             from forgekernel import body as B
             from forgekernel.sampled import (SampledSolid, _MorphResult,
-                                             write_step_faceted)
-            if isinstance(shape, (SampledSolid, _MorphResult)):
-                mesh = shape.tessellate()
-            else:
-                mesh = B.tessellate(
-                    shape if isinstance(shape, B.Body) else B.to_body(shape),
-                    0.2)
+                                             voxel_mesh, write_step_faceted)
+            try:
+                if isinstance(shape, (SampledSolid, _MorphResult)):
+                    mesh = shape.tessellate()
+                else:
+                    try:
+                        mesh = B.tessellate(
+                            shape if isinstance(shape, B.Body)
+                            else B.to_body(shape), 0.2)
+                    except Exception:                 # noqa: BLE001
+                        # no canonical converter (AxisStack): voxel-surface it
+                        mesh = voxel_mesh(shape)
+            except Exception:                         # noqa: BLE001
+                # nothing can mesh it (a FilletedChamferedBox with no
+                # membership): keep the ORIGINAL honest refusal, never a raw
+                # error from the fallback.
+                raise _orig_export
             text = write_step_faceted(mesh)
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
