@@ -3342,6 +3342,17 @@ class RefKernel:
                 FailureSignature(op=op, diagnostic="BadInput", kernel="ref"),
                 stage="input", predicate="edges_are_indices",
                 remedy="pass integer indices from entities(shape,'edge')['index']")
+        # NEGATIVE indices are not valid selection handles — entities() indices
+        # are 0..n-1 — but Python would silently WRAP `edges[-1]` to a real
+        # edge and blend the wrong one (a silent wrong part). Reject them.
+        neg = [e for e in edges if e < 0]
+        if neg:
+            raise KernelError(
+                f"{op}: edge index {neg[0]} is negative — selections are the "
+                "non-negative 'index' values from entities(shape,'edge')",
+                FailureSignature(op=op, diagnostic="BadInput", kernel="ref"),
+                stage="input", predicate="edges_in_range",
+                remedy="pass a non-negative index from entities(shape,'edge')")
 
     def fillet(self, shape, edges, radius):
         self._check_edge_indices("fillet", edges)
@@ -4559,6 +4570,17 @@ class RefKernel:
                 FailureSignature(op="chamfer", diagnostic="BadInput", kernel="ref"))
         out = shape
         for idx in edges:
+            if idx >= len(all_edges):
+                # an out-of-range index leaked a raw IndexError through the seam
+                # — the bare exception the seam exists to prevent. Refuse cleanly
+                # (fillet already does at its own range guard).
+                raise KernelError(
+                    f"chamfer: edge index {idx} is out of range — this shape "
+                    f"has {len(all_edges)} edges (0..{len(all_edges) - 1})",
+                    FailureSignature(op="chamfer", diagnostic="BadInput",
+                                     kernel="ref"),
+                    stage="input", predicate="edges_in_range",
+                    remedy="use an index from entities(shape,'edge')['index']")
             e = all_edges[idx]
             # EXACTLY, on both counts: which axis an edge runs along and which
             # bbox face its midpoint lies on together decide WHICH EDGES get
