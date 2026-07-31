@@ -666,6 +666,24 @@ def _guard_seam(cls):
             args = tuple(_from_public(a) for a in args)
             kwargs = {k: _from_public(v) for k, v in kwargs.items()}
             depth = getattr(_seam_depth, "n", 0)
+            # A None SHAPE from a USER call (depth 0) is never valid — it is
+            # almost always a refused result passed onward after its KernelError
+            # was swallowed. That used to reach `to_body(None)` and leak a raw
+            # ValueError plus a MISLABELLED "NotYetImplemented / unsupported
+            # representation" capability error. Fail as clean BadInput at the
+            # door. Only the FIRST positional is checked — that is the shape for
+            # every shape-consuming op — because a later positional None is a
+            # legitimate value elsewhere (draft's angle_deg=None when tan is
+            # given). `boolean` guards its own two operands below. Depth 0 only,
+            # so internal re-entrant calls are untouched.
+            if depth == 0 and args and args[0] is None:
+                raise KernelError(
+                    f"{name}: received a None argument — likely a refused "
+                    "result passed onward after its KernelError was swallowed; "
+                    "check the earlier op before reusing its output",
+                    FailureSignature(op=name, diagnostic="BadInput",
+                                     kernel="ref"),
+                    stage="input", predicate="argument_is_not_none")
             _seam_depth.n = depth + 1
             try:
                 out = fn(self, *args, **kwargs)
@@ -1622,6 +1640,13 @@ class RefKernel:
         sees them all. Gated on `allow_sampled` (default off), so the default
         contract — exact, certified, or an honest refusal — is untouched.
         """
+        if a is None or b is None:
+            raise KernelError(
+                f"boolean.{op}: a None operand — likely a refused result "
+                "reused after its KernelError was swallowed",
+                FailureSignature(op=f"boolean.{op}", diagnostic="BadInput",
+                                 kernel="ref"),
+                stage="input", predicate="operands_are_not_none")
         # A SAMPLED operand can only be combined by sampling — it has no exact
         # b-rep for any exact path to consume — so route it straight to the
         # sampled tier rather than letting it fall through to an
@@ -2449,13 +2474,22 @@ class RefKernel:
                 pass
         if kind == "edge" and isinstance(shape, _Solid):
             # K5.0: deterministic straight-edge enumeration for planar
-            # solids (fillet/chamfer selection targets)
-            return [{"curve": "line",
+            # solids (fillet/chamfer selection targets).
+            #
+            # `index` is the SELECTION HANDLE, and its absence was a real trap:
+            # `fillet`/`chamfer` want integer edge indices, but the descriptors
+            # carried none, so the natural pipeline `k.fillet(s, entities(s,
+            # "edge"), r)` fed dicts where ints belong and crashed with a raw
+            # TypeError. The index is the position in this same deterministic
+            # order the selected-edge paths use, so a caller can filter these
+            # dicts and pass `[e["index"] for e in kept]`.
+            return [{"index": i,
+                     "curve": "line",
                      "dir": [float(v) for v in e["dir"]],
                      "point": [float(v) for v in e["point"]],
                      "centroid": _edge_midpoint(e),
                      "length": _edge_length(e)}
-                    for e in self._sorted_edges(shape)]
+                    for i, e in enumerate(self._sorted_edges(shape))]
         if kind != "face":
             raise NotImplementedError("ref enumerates faces and edges only")
         from forgekernel.quadric import MiteredSweep, RoundedBox, SphereOverlap
@@ -2679,6 +2713,13 @@ class RefKernel:
         from forgekernel import body as B
 
         deflection = _check_deflection("tessellate", deflection)
+        from forgekernel.sampled import SampledSolid, _MorphResult
+        if isinstance(shape, (SampledSolid, _MorphResult)):
+            # ADR-0024: a sampled solid has no exact b-rep, but it can produce a
+            # watertight VOXEL SURFACE of its membership — blocky, but a real
+            # mesh for rendering/STL/export, so a sampled cut is no longer a
+            # dead end at the display seam.
+            return shape.tessellate(deflection)
         from forgekernel.trimshell import TrimmedShell as _TShell
         if isinstance(shape, _TShell):
             # the trim boundary is only known as a certified cell enclosure,
@@ -3251,7 +3292,30 @@ class RefKernel:
             self._reflecting = False
         return self.mirror(out, "xy")
 
+    @staticmethod
+    def _check_edge_indices(op, edges):
+        """Edge selections are integer indices into `entities(s,"edge")`.
+
+        Passing the entity DICTS that `entities()` returns — the obvious thing —
+        used to crash with a raw `TypeError: '>=' not supported between
+        instances of 'dict' and 'int'` deep in the selection code. That is a
+        bare exception through the seam, a defect by the charter. Fail as clean
+        BadInput at the door instead, and say how to get the indices.
+        """
+        if not edges:
+            return
+        bad = [e for e in edges if not isinstance(e, int) or isinstance(e, bool)]
+        if bad:
+            raise KernelError(
+                f"{op}: edge selections must be integer indices, got "
+                f"{type(bad[0]).__name__} — use the 'index' field of "
+                f"entities(shape, 'edge'), e.g. [e['index'] for e in kept]",
+                FailureSignature(op=op, diagnostic="BadInput", kernel="ref"),
+                stage="input", predicate="edges_are_indices",
+                remedy="pass integer indices from entities(shape,'edge')['index']")
+
     def fillet(self, shape, edges, radius):
+        self._check_edge_indices("fillet", edges)
         try:
             return self._fillet_direct(shape, edges, radius)
         except KernelError:
@@ -4397,6 +4461,7 @@ class RefKernel:
         return _audited(RevolveSolid(out, cx, cy), "chamfer(lathe profile)")
 
     def chamfer(self, shape, edges, distance):
+        self._check_edge_indices("chamfer", edges)
         from forgekernel.kernel import chamfer as fk_chamfer
 
         if not edges:
@@ -4438,7 +4503,14 @@ class RefKernel:
                     return lathe
             try:
                 return fk_chamfer(shape, distance)
-            except (ValueError, AttributeError) as exc:
+            except ValueError as exc:
+                # ValueError is a real, worded refusal (non-convex host,
+                # profile-edge-shorter-than-2r, …). An AttributeError, by
+                # contrast, is a raw representation mismatch ('FilletedPrism'
+                # object has no attribute 'polys') — DON'T catch it here, or its
+                # bare message leaks as the refusal with no stage/remedy. Let it
+                # reach the seam guard, which names the op + representation and
+                # gives it a K3.7 stage like every other honest refusal.
                 raise KernelError(str(exc), FailureSignature(
                     op="chamfer", diagnostic="NotYetImplemented", kernel="ref"))
 
