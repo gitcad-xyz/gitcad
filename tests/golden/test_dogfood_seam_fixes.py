@@ -83,3 +83,19 @@ def test_sampled_interference_answers_a_shaft_in_a_bore(k):
             "shaft": (k.cylinder(9, 20), (0, 0, 0), 0)},
         sampled=True, tol_mm3=1.0)
     assert not clash.ok and clash.checks["overlaps_mm3"]
+
+
+def test_edge_indices_reject_negative_and_out_of_range(k):
+    # negative would Python-WRAP to a real edge and blend the wrong one silently;
+    # out-of-range leaked a raw IndexError through chamfer. Both must be BadInput.
+    b = k.box(10, 10, 10)
+    n = len(k.entities(b, "edge"))
+    for edges in ([-1], [n], [n + 5]):
+        with pytest.raises(KernelError) as ei:
+            k.chamfer(b, edges, 1.0)
+        assert ei.value.signature.diagnostic == "BadInput", (edges, str(ei.value))
+        with pytest.raises(KernelError) as ej:
+            k.fillet(b, [-1], 1.0)
+        assert ej.value.signature.diagnostic == "BadInput"
+    # a valid selection still works
+    assert k.chamfer(b, [0, 1], 1.0) is not None
